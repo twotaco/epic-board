@@ -89,7 +89,7 @@ def build_brief(card, epic_file, branch, taken=()):
             f"Write requirements.md, design.md and tasks.md in .kiro/specs/{folder}/, in the project's usual spec format.",
         ]
         if epic_file:
-            steps.append(f"Change the story's line in the epic page to link to .kiro/specs/{folder}/. Keep its status.")
+            steps.append(f"Change the story's line in the epic page to link to .kiro/specs/{folder}/. Set its status to in progress.")
         steps.append(f"Commit, push the branch, and open one pull request into {branch}.")
         lines = opening + [f"Main branch: {branch}", "Your job: write this story's spec. It has none yet.", ""] + _numbered(steps)
     else:
@@ -102,8 +102,11 @@ def build_brief(card, epic_file, branch, taken=()):
             f"Create a branch named story/{spec}-g<N> from origin/{branch}, where <N> is the number of that group. "
             "If the project names branches another way, follow the project.",
             "Tick each task you finish in tasks.md, in the same branch. Run the checks the project names and fix what fails.",
-            f"Commit, push the branch, and open one pull request into {branch}.",
         ]
+        if epic_file:
+            steps.append("If your group ticks the last task in tasks.md, set the story's line in the epic page to done, "
+                         "in the same pull request.")
+        steps.append(f"Commit, push the branch, and open one pull request into {branch}.")
         lines = opening + [f"Spec: .kiro/specs/{spec}/", f"Main branch: {branch}",
                            "Your job: build the next task group of this story's spec.", ""] + _numbered(steps)
     return "\n".join(lines + [""] + _rules(branch))

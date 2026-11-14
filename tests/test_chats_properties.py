@@ -48,6 +48,11 @@ class BriefProperty(unittest.TestCase):
             no_spec = "Your job: write this story's spec. It has none yet." in text
             with_spec = "Your job: build the next task group of this story's spec." in text
             self.assertEqual((no_spec, with_spec), (card["spec"] is None, card["spec"] is not None), where)
+            # the status words follow the variant and the epic: the line is set to in progress when a spec is
+            # written, and to done when the last task is ticked, and neither when there is no epic page
+            self.assertEqual("Set its status to in progress." in text, no_spec and bool(epic_file), where)
+            self.assertEqual("set the story's line in the epic page to done" in text, with_spec and bool(epic_file), where)
+            self.assertNotIn("Keep its status", text, where)
             self.assertRegex(text, r"(?m)^- Never merge a pull request, never push to [^\n]*, never turn on auto-merge\. "
                                    r"The person reviews and merges\.$", where)
             self.assertIn("- Open exactly one pull request. When it is open, write its address in this chat and stop.", text, where)

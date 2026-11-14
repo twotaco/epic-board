@@ -57,11 +57,32 @@ test('a resume is resuming, then failed with its reason, then forgotten', () => 
   assert.deepEqual(state.resumes, {})
 })
 
+test('the brief of a started chat is sending, then failed with its reason, then forgotten, and only for its own chat', () => {
+  let state = uiReduce(initialUi, { kind: 'brief-sending', key: 'k1' })
+  assert.deepEqual(state.briefs.k1, { kind: 'sending' })
+  state = uiReduce(state, { kind: 'brief-failed', key: 'k1', reason: 'boom' })
+  assert.deepEqual(state.briefs.k1, { kind: 'failed', reason: 'boom' })
+  state = uiReduce(state, { kind: 'brief-sending', key: 'k2' })
+  assert.deepEqual(Object.keys(state.briefs).sort(), ['k1', 'k2'])
+  state = uiReduce(state, { kind: 'brief-sent', key: 'k1' })
+  assert.deepEqual(Object.keys(state.briefs), ['k2'])
+  assert.deepEqual(initialUi.briefs, {})
+})
+
+test('a start that saves the chat clears the question and keeps the brief note', () => {
+  let state = uiReduce(initialUi, { kind: 'ask', cardId: A })
+  state = uiReduce(state, { kind: 'step', cardId: A, step: 'save' })
+  state = uiReduce(state, { kind: 'started', cardId: A })
+  state = uiReduce(state, { kind: 'brief-sending', key: 'k1' })
+  assert.deepEqual([state.asking, state.flows, state.briefs.k1], [null, {}, { kind: 'sending' }])
+})
+
 test('uiReduce never changes a state in place, and an unknown action changes nothing', () => {
   const before = uiReduce(uiReduce(initialUi, { kind: 'ask', cardId: A }), { kind: 'step', cardId: A, step: 'create' })
   const snapshot = JSON.stringify(before)
   for (const action of [{ kind: 'ask', cardId: B }, { kind: 'cancel', cardId: A }, { kind: 'failed', cardId: A, step: 'x', reason: 'y' },
-    { kind: 'started', cardId: A }, { kind: 'resuming', key: 'k' }, { kind: 'resumed', key: 'k' }]) {
+    { kind: 'started', cardId: A }, { kind: 'resuming', key: 'k' }, { kind: 'resumed', key: 'k' },
+    { kind: 'brief-sending', key: 'k' }, { kind: 'brief-failed', key: 'k', reason: 'r' }, { kind: 'brief-sent', key: 'k' }]) {
     uiReduce(before, action)
   }
   assert.equal(JSON.stringify(before), snapshot)

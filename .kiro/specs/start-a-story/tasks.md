@@ -2,11 +2,11 @@
 
 ## Overview
 
-The work is four task groups. Each group is one pull request on its own branch, named `story/start-a-story-g1` to `story/start-a-story-g4`, cut from the latest main after the previous group's pull request is merged. Each group lands green on its own and leaves the app working. Every group ends with a sub-task that runs the tests and reports the counts run, passed and skipped. Tick each task in this file in the same branch, and tick nothing in the earlier specs (`.kiro/specs/read-the-plan-from-main/`, `.kiro/specs/show-the-board/`). The backend adds no dependency, and neither does the page.
+The work is five task groups. Each group is one pull request on its own branch, named `story/start-a-story-g1` to `story/start-a-story-g5` (group 5 is `story/start-a-story-send-after-save`), cut from the latest main after the previous group's pull request is merged. Each group lands green on its own and leaves the app working. Every group ends with a sub-task that runs the tests and reports the counts run, passed and skipped. Tick each task in this file in the same branch, and tick nothing in the earlier specs (`.kiro/specs/read-the-plan-from-main/`, `.kiro/specs/show-the-board/`). The backend adds no dependency, and neither does the page.
 
 Start this story after the "Show the board" story has landed on main, because group 3 changes files and tests that story created (`ui/index.mjs`, `tests/ui/render.test.mjs`, `tests/ui/board.test.mjs`, `tests/test_ui.py`).
 
-Group 1 is all backend and changes nothing the page uses except an added `id` on each card. Group 2 is the page's logic, with no change to what the page draws. Group 3 draws the controls, wires the second poller and adds the permissions to `app.json`. Group 4 checks the whole on throwaway data and on the host.
+Group 1 is all backend and changes nothing the page uses except an added `id` on each card. Group 2 is the page's logic, with no change to what the page draws. Group 3 draws the controls, wires the second poller and adds the permissions to `app.json`. Group 4 checks the whole on throwaway data and on the host. Group 5 was added after the first try on the host: it changes the order of a start so that the chat is saved before its brief is sent, and it supersedes the order that tasks 2.8, 2.9 and 3.3 describe (those tasks stay ticked as the record of what was built first). Task 4.2 is run again after group 5.
 
 ## Tasks
 
@@ -139,13 +139,51 @@ Group 1 is all backend and changes nothing the page uses except an added `id` on
     - Install the app on a throwaway project with its own git remote, set `EPIC_BOARD_REPOSITORY`, and set the Crew folder id (`EPIC_BOARD_FOLDER` or `folder_id` in `config.json`) to a Crew folder whose project is that checkout (the ids come from `GET /api/chat/folders`)
     - **Check that the board receives every chat's row and keeps only the keys in `chats.json`, and never shows another chat's preview.** In the page's network log, open the answer of `GET /api/chat/slots`: it holds a row for every chat you have open, not only the ones the board started. Confirm that the board's cards show only the chats listed in `chats.json`, that no other chat's preview or title appears anywhere on the page, and that the page sends no request about any chat whose key is not in `chats.json`
     - **Check that `/chat?sid=` opens our chat.** Click a started card and a Done card's chat, and confirm each opens the right chat in the host; try the keyboard (Tab to the link, Enter) and the browser's back button
-    - Check Start end to end on a planned card with no spec and on a card with a spec: the question appears on the card and Cancel and Escape close it; "Start" opens one chat in the project's folder, its first message is the brief and it is sent once; the card shows its link at once and its state after the next read; the conductor opens a pull request, and the board merges nothing and changes nothing in the repository
+    - Check Start end to end on a planned card with no spec and on a card with a spec: the question appears on the card and Cancel and Escape close it; "Start" opens one chat in the project's folder, its first message is the brief and it is sent once; the card shows its link as soon as the chat is saved, before the brief is sent, and its state after the next read; the conductor opens a pull request, and the board merges nothing and changes nothing in the repository
+    - Check a start whose conductor waits for a tool approval: `POST /api/chat` does not answer until the turn ends, so the card must not stay on "Starting…". Confirm that the card has its link and a state as soon as the chat exists, that it shows Needs you while the request is still open, that "Sending the brief…" goes away after about 10 seconds, and that navigating away and back finds the chat in `chats.json` and on the board. Then make a send fail (for example stop Crew just after the chat is created) and confirm that the card keeps its link, says "The brief was not sent" with the reason, and that "Send the brief again" sends it once when the chat holds no message and sends nothing when it holds one
     - Check the four states on a real conductor: Working while it runs; Needs you when a tool call waits for an approval or it asks a question (confirm that `running` is true at the same time, which decides the order Needs you before Working), and that the board offers no approve or answer control; Interrupted after you stop Crew in the middle of a turn and start it again, and for a chat whose last row is an error; Idle when it has replied
     - Check that a click on a card with a started chat never shows the question, and that a Done card with no chat is inert
     - Restart the Crew gateway with a started chat: the card shows "Restoring chat…" and then its state again; stop a chat so that it stays closed and confirm "This chat is not open." appears after about 60 seconds and "Resume chat" brings it back, and that "Start again" removes only the board's record
     - Check the host details the design still leaves open: the backend receives `KIROCREW_PROXY_SECRET` and a valid v1 `X-KiroCrew-Proxy` on the page's `chats` requests (starting works); the data folder is writable by the backend (the record survives a backend restart)
     - Check light and dark themes, the focus ring on every new control, and that the plan keeps updating while a chat read fails (stop the gateway's chat routes or block them) and the other way round
-    - _Requirements: 1.3, 1.4, 2.1, 2.2, 2.3, 4.1, 4.3, 4.4, 4.5, 5.3, 5.7, 6.1, 6.2, 6.4, 6.6, 7.1, 7.2, 8.1, 8.2, 8.3, 8.4, 8.5, 9.1, 9.3, 9.6_
+    - _Requirements: 1.3, 1.4, 2.1, 2.2, 2.3, 4.1, 4.3, 4.4, 4.5, 4.7, 4.9, 5.3, 5.7, 6.1, 6.2, 6.4, 6.6, 7.1, 7.2, 8.1, 8.2, 8.3, 8.4, 8.5, 9.1, 9.3, 9.6_
+
+- [x] 5. Save the chat before its brief is sent
+  - [x] 5.1 Change the order of `startStory` in `ui/index.mjs` and add `sendBrief` and `retryBrief`
+    - `startStory({cardId, backend, gateway, onStep, onSaved, setTimer, clearTimer})`: reserve, create, save the key (the record becomes `started`), call `onSaved({cardId, name, key, brief})`, then send the brief unless the create answer's `messages` is greater than 0; the steps are named `reserve`, `create`, `save` and `send`
+    - `sendBrief({gateway, key, brief, setTimer, clearTimer})` ends when the request answers, when it fails with an error that only says Crew accepted the request, or `SEND_WAIT_MS` (10,000) after it was sent with no error; it does not abort the request, and ignores whatever the request later answers; any other error before then rejects
+    - A failure of the send throws a StartError for the step `send` that carries `saved`; a failure before the save carries nothing
+    - `retryBrief({gateway, key, brief, setTimer, clearTimer})` reads `GET /api/chat/slots` and sends only when the list has a row for the chat whose `messages` is 0; with `messages` greater than 0 it sends nothing and answers `{sent: false}`; with no row, a list that is not a list or no number of messages it sends nothing and throws a `send` failure with that reason
+    - _Requirements: 4.3, 4.4, 4.5, 4.6, 4.7, 4.9_
+  - [x] 5.2 Draw the brief of a started chat
+    - `cardViewOf` gives a chat the `brief` of `ui.briefs[key]`; `initialUi` and `uiReduce` gain `briefs` and the actions `brief-sending`, `brief-failed` and `brief-sent`
+    - A started card keeps its link and its state, and shows "Sending the brief…" (role `status`) while the brief is sent, or "The brief was not sent" (role `status`), the reason and a "Send the brief again" button (inside the controls layer above the stretched link) after a failed send; `renderBoard` actions gain `sendBrief(key)`
+    - _Requirements: 4.9, 9.1, 9.2, 9.3, 9.4_
+  - [x] 5.3 Wire it in `createBoard`
+    - `start` passes `onSaved`, which adds the record, closes the question, sets the brief to sending, keeps the brief text in memory by key, and reads the chats at once; a send that ends well forgets the text and the note; a failure of the send sets the brief to failed and keeps the link; a failure before the save shows the step and offers the question again, as before
+    - A `sendBrief(key)` action runs `retryBrief` from the text held in memory, ignores a second press while it runs, forgets the text and the note when the brief is sent or the chat already holds a message, and shows the failure again otherwise
+    - The send timers are made through the component's `setTimeout` and cleared on unmount
+    - _Requirements: 4.4, 4.5, 4.6, 4.7, 4.9_
+  - [x] 5.4 Check the sequence in `tests/ui/start.test.mjs`
+    - The order of the requests (reserve, create, save, `onSaved`, send) in one shared log; `onSaved` before the send; a chat that already holds a message is saved and not sent the brief; a **send that never answers** (the start ends 10,000 ms after the request with no error and not before, the chat is saved while the request is open, a later error is ignored, the request is not aborted, the timer is cleared); a send that answers early ends the wait; a send that fails before 10 seconds throws a `send` failure that carries `saved`; the `accepted the request` case; a failure of any step before the save sends nothing
+    - `sendBrief` and `retryBrief` on their own: the cases above, a retry that sends only when `messages` is 0, one that sends nothing for `messages` greater than 0, a list that cannot be read, a missing row, no message count
+    - _Requirements: 4.4, 4.5, 4.6, 4.7, 4.9_
+  - [x] 5.5 Write property test for the new order in `tests/ui/start.test.mjs`
+    - **Property 7: A chat is saved before its brief is sent, and the brief is never sent twice**
+    - A fake backend and a fake Crew with failures before and after each call and sends that answer, fail before Crew has the message, fail after it, say Crew accepted it or never answer, over repeated starts and retries, at least 100 iterations with the seed printed on failure; check that no brief is sent while the record is `reserved`, that no brief is sent to a chat that holds a message, that at most one message and one chat exist, and that a start whose reservation, creation and saving succeed ends with the record `started` whatever the send does; and, apart, that the saving never waits for the send
+    - **Validates: Requirements 4.3, 4.4, 4.5, 4.6, 4.7, 4.9**
+  - [x] 5.6 Check the card, the controls state and the wiring
+    - `tests/ui/chats.test.mjs` (`cardViewOf` carries the brief note only for a chat), `tests/ui/controls.test.mjs` (`uiReduce` for the three new actions), `tests/ui/render.test.mjs` (the note, the reason and the button, the controls layer, literal text, structure and roles), `tests/ui/board.test.mjs` (the link shows when the chat is saved and before the brief is sent; a conductor whose turn waits for an approval leaves the card with its link and Needs you, and the note goes after 10 seconds; a failed send keeps the link and a retry sends once only when the chat holds no message; a retry that cannot read the list sends nothing; a second press does nothing; unmounting clears the send timer)
+    - Update the tests that described the old order: `board.test.mjs` ("a start: …") and `chats.test.mjs` (the shape of a chat view)
+    - _Requirements: 4.7, 4.9, 9.1, 9.2, 9.3, 9.4_
+  - [x] 5.7 Change the status words of the briefs in `backend/chats.py`
+    - With no spec, the step that links the story's line in the epic page ends "Set its status to in progress." and no longer "Keep its status."
+    - With a spec and an epic, a step before the commit says "If your group ticks the last task in tasks.md, set the story's line in the epic page to done, in the same pull request."; with no epic the step is left out and the steps are numbered again
+    - `tests/test_chats.py` checks both sentences, the position of the new step, the numbering and that "Keep its status" is gone; `tests/test_chats_properties.py` (Property 4) checks that each sentence appears exactly for its variant and an epic, and that the brief stays at most 6,000 characters
+    - _Requirements: 3.2, 3.3, 3.4_
+  - [x] 5.8 Run the tests
+    - Run `python3 -m unittest discover -s tests -t .` and `node --test tests/ui/*.test.mjs` and report the counts run, passed and skipped for each
+    - _Requirements: 3.2, 3.3, 4.3, 4.4, 4.5, 4.6, 4.7, 4.9_
 
 ## Notes
 
@@ -153,6 +191,7 @@ Group 1 is all backend and changes nothing the page uses except an added `id` on
 - Group 3 is the one that brings the board story's checks in line with the edited criteria 1.2 and 1.3 of that spec; no file of the earlier specs is ticked, and their requirements were edited in place before this story's tasks (see "Edits to earlier specs and checks" in the design)
 - No task is optional: every task checks a requirement of this spec
 - The open questions in the design are for the owner; the host-dependent ones are checked in 4.2
+- Group 5 comes from using the board: `POST /api/chat` answers only when the conductor's turn ends, so a turn waiting for a tool approval left the card on "Starting…" with no link. Requirement 4 (criteria 4 to 7 and the new 9), the design's start sequence and Property 7 changed with it; Requirement 1.3 of the board spec now names Requirement 4 as one of the places card controls are defined. The briefs of Requirement 3 changed in the same group: a new spec's story is set to in progress, and a story whose last task is ticked is set to done in the same pull request (5.7)
 
 ## Task Dependency Graph
 
@@ -173,7 +212,13 @@ Group 1 is all backend and changes nothing the page uses except an added `id` on
     { "id": 11, "tasks": ["3.5"] },
     { "id": 12, "tasks": ["3.6"] },
     { "id": 13, "tasks": ["4.1"] },
-    { "id": 14, "tasks": ["4.2"] }
+    { "id": 14, "tasks": ["5.1"] },
+    { "id": 15, "tasks": ["5.2"] },
+    { "id": 16, "tasks": ["5.3"] },
+    { "id": 17, "tasks": ["5.4", "5.5", "5.6"] },
+    { "id": 18, "tasks": ["5.7"] },
+    { "id": 19, "tasks": ["5.8"] },
+    { "id": 20, "tasks": ["4.2"] }
   ]
 }
 ```

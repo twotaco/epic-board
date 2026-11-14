@@ -469,6 +469,7 @@ export function chatsReduce(state, result) {
 //   asking   the card id that has the question open, or null
 //   flows    {cardId: {kind: 'starting', step} | {kind: 'failed', step, reason}}
 //   resumes  {key: {kind: 'resuming'} | {kind: 'failed', reason}}
+//   briefs   {key: {kind: 'sending'} | {kind: 'failed', reason}}   the brief of a started chat
 // The result's `mode` is one of: plain, startable, question, starting, blocked, chat, restoring,
 // not-open, resuming, resume-failed.
 export function cardViewOf(card, chats, ui = {}, nowMs = chats.at) {
@@ -488,6 +489,7 @@ export function cardViewOf(card, chats, ui = {}, nowMs = chats.at) {
       mode: 'chat', key, name: record.name, href: chatHref(key),
       state: entry ? entry.state : null,
       stateWord: entry ? STATE_WORDS[entry.state] : null,
+      brief: ui.briefs?.[key] ?? null,
     }
   }
   if (card.status === 'done') return { mode: 'plain' }
@@ -518,14 +520,58 @@ function failAt(step, error) {
   return new StartError(step, reason, error?.error?.code ?? null)
 }
 
+// How long the page waits for Crew to refuse a brief before it counts it as sent. `POST /api/chat` does not
+// answer until the conductor's turn ends, and a turn that waits for a tool approval or an answer does not
+// end on its own, so the page cannot wait for the answer.
+export const SEND_WAIT_MS = 10000
+
+const defaultSetTimer = (fn, ms) => setTimeout(fn, ms)
+const defaultClearTimer = (handle) => clearTimeout(handle)
+
+// Sends the brief to a chat and ends when Crew has accepted it, which is not when the turn ends:
+//   - the request answers (the turn ended), or fails with an error that says Crew accepted the request:
+//     sent;
+//   - 10 seconds pass with no error: sent. The request is left running and whatever it later answers,
+//     an error too, is ignored. It is not aborted: a request Crew has accepted must not be cut off;
+//   - any other error before that: rejects with it.
+export function sendBrief({ gateway, key, brief, setTimer = defaultSetTimer, clearTimer = defaultClearTimer }) {
+  return new Promise((resolve, reject) => {
+    let ended = false
+    let timer = null
+    const end = (how, value) => {
+      if (ended) return
+      ended = true
+      if (timer !== null) clearTimer(timer)
+      how(value)
+    }
+    timer = setTimer(() => end(resolve), SEND_WAIT_MS)
+    let request
+    try {
+      request = Promise.resolve(gateway.post('/api/chat', { slot: key, message: brief }))
+    } catch (error) {
+      request = Promise.reject(error)
+    }
+    request.then(
+      () => end(resolve),
+      (error) => (/accepted the request/.test(errorMessage(error)) ? end(resolve) : end(reject, error)),
+    )
+  })
+}
+
 // The whole start of a story from its card, in four steps, each named to `onStep` before it runs:
 //   reserve  ask the backend for a name, the brief and the folder id
 //   create   open the chat in Crew (a name the board already created answers with the same chat)
-//   send     send the brief, unless the chat already holds a message
 //   save     tell the backend the chat has started, with the key Crew gave it
-// A failure at any step throws a StartError and leaves the backend's record `reserved`, so a repeat is safe.
-export async function startStory({ cardId, backend, gateway, onStep = () => {} }) {
+//   send     send the brief, unless the chat already holds a message, without waiting for the turn
+// `onSaved({cardId, name, key, brief})` is called as soon as the chat is saved, before the send, so the card
+// can show its link and the chat's state while the brief is on its way. A failure before the save throws a
+// StartError and leaves the backend's record `reserved`, so a repeat is safe. A failure of the send throws a
+// StartError for the step `send` that carries `saved`: the chat exists and is saved, only the brief is missing.
+export async function startStory({
+  cardId, backend, gateway, onStep = () => {}, onSaved = () => {}, setTimer = defaultSetTimer, clearTimer = defaultClearTimer,
+}) {
   let step = 'reserve'
+  let saved = null
   try {
     onStep(step)
     const reservation = await backend.post('/chats', { card_id: cardId })
@@ -537,22 +583,38 @@ export async function startStory({ cardId, backend, gateway, onStep = () => {} }
     const row = await gateway.post('/api/chat/slots', { name: reservation.name, agent: AGENT, folder_id: reservation.folder_id })
     const key = row?.key
     if (typeof key !== 'string' || key === '') throw new StartError(step, 'Crew answered without a chat key.')
-    step = 'send'
-    onStep(step)
-    if (!(row.messages > 0)) {
-      try {
-        await gateway.post('/api/chat', { slot: key, message: reservation.brief })
-      } catch (error) {
-        // Crew accepts the message and may answer with no JSON, which the host's client reports as an error.
-        if (!/accepted the request/.test(errorMessage(error))) throw error
-      }
-    }
     step = 'save'
     onStep(step)
     await backend.post(`/chats/${encodeURIComponent(reservation.name)}/started`, { key })
-    return { cardId, name: reservation.name, key }
+    saved = { cardId, name: reservation.name, key, brief: reservation.brief }
+    onSaved(saved)
+    step = 'send'
+    onStep(step)
+    if (!(row.messages > 0)) await sendBrief({ gateway, key, brief: reservation.brief, setTimer, clearTimer })
+    return saved
   } catch (error) {
-    throw failAt(step, error)
+    const failure = failAt(step, error)
+    if (saved !== null && step === 'send') failure.saved = saved
+    throw failure
+  }
+}
+
+// Sends the brief again after a failed send, and only when the chat holds no message: it reads Crew's
+// chat list, and sends only when the list has a row for the chat whose `messages` is 0. Resolves
+// {sent: true} when it sent it and {sent: false} when the chat already holds a message (then the brief
+// counts as sent). Nothing is sent when the list cannot be read or has no row for the chat.
+export async function retryBrief({ gateway, key, brief, setTimer = defaultSetTimer, clearTimer = defaultClearTimer }) {
+  try {
+    const list = await gateway.get('/api/chat/slots')
+    if (!Array.isArray(list)) throw new StartError('send', 'The chat list could not be read.')
+    const row = list.find((candidate) => isObject(candidate) && candidate.key === key)
+    if (!row) throw new StartError('send', 'Crew does not have this chat open.')
+    if (typeof row.messages !== 'number') throw new StartError('send', 'Crew did not say how many messages the chat holds.')
+    if (row.messages > 0) return { sent: false }
+    await sendBrief({ gateway, key, brief, setTimer, clearTimer })
+    return { sent: true }
+  } catch (error) {
+    throw failAt('send', error)
   }
 }
 
@@ -646,18 +708,29 @@ const STEP_TEXT = {
 }
 
 const NO_ACTIONS = Object.freeze({
-  ask() {}, cancel() {}, start() {}, close() {}, resume() {}, startAgain() {},
+  ask() {}, cancel() {}, start() {}, close() {}, sendBrief() {}, resume() {}, startAgain() {},
 })
 
 // The part of a card below its progress that belongs to the chat: the state word, the question,
 // or the text and controls of a chat that is restoring or not open. Every text is a literal child.
 function renderChatPart(h, card, view, actions) {
   switch (view.mode) {
-    case 'chat':
-      return view.state
-        ? h('div', { className: 'eb-chat-line', key: 'chat' },
-          h('span', { className: 'eb-chat-state', 'data-state': view.state }, view.stateWord))
-        : null
+    case 'chat': {
+      const parts = []
+      if (view.state) {
+        parts.push(h('div', { className: 'eb-chat-line', key: 'state' },
+          h('span', { className: 'eb-chat-state', 'data-state': view.state }, view.stateWord)))
+      }
+      if (view.brief?.kind === 'sending') {
+        parts.push(h('p', { className: 'eb-chat-note', role: 'status', key: 'brief' }, 'Sending the brief…'))
+      } else if (view.brief?.kind === 'failed') {
+        parts.push(h('div', { className: 'eb-chat-controls', key: 'brief' },
+          h('p', { className: 'eb-chat-note', role: 'status' }, 'The brief was not sent'),
+          view.brief.reason ? h('p', { className: 'eb-chat-note' }, view.brief.reason) : null,
+          h('button', { type: 'button', onClick: () => actions.sendBrief(view.key) }, 'Send the brief again')))
+      }
+      return parts.length > 0 ? parts : null
+    }
     case 'restoring':
       return h('p', { className: 'eb-chat-note', role: 'status', key: 'chat' }, 'Restoring chat…')
     case 'not-open':
@@ -801,8 +874,8 @@ function renderBody(h, view, actions) {
 // Builds the page for a view (what `viewOf` returns) with h = createElement.
 // Pure: no React, no hooks, no `window`. Every plan text is passed as a child.
 // A plan view that also carries `chats` (the chats state) and `ui` draws the card controls; `actions`
-// are what they call: ask(cardId), cancel(cardId), start(cardId), close(cardId), resume(key) and
-// startAgain(name, cardId). Each defaults to doing nothing.
+// are what they call: ask(cardId), cancel(cardId), start(cardId), close(cardId), sendBrief(key), resume(key)
+// and startAgain(name, cardId). Each defaults to doing nothing.
 export function renderBoard(h, view, actions = {}) {
   return h('div', { className: 'eb-root' },
     h('style', null, STYLE),
@@ -821,7 +894,10 @@ const BACKEND_BASE = '/apps/epic-board/api'
 //   {kind: 'failed', cardId, step, reason}      a start failed; the question stays open with the failure
 //   {kind: 'started', cardId}                   a start worked
 //   {kind: 'resuming', key} | {kind: 'resume-failed', key, reason} | {kind: 'resumed', key}
-export const initialUi = Object.freeze({ asking: null, flows: Object.freeze({}), resumes: Object.freeze({}), focus: null })
+//   {kind: 'brief-sending', key} | {kind: 'brief-failed', key, reason} | {kind: 'brief-sent', key}
+export const initialUi = Object.freeze({
+  asking: null, flows: Object.freeze({}), resumes: Object.freeze({}), briefs: Object.freeze({}), focus: null,
+})
 
 function without(object, key) {
   const { [key]: _gone, ...rest } = object
@@ -861,6 +937,12 @@ export function uiReduce(state, action) {
       return { ...state, resumes: { ...state.resumes, [action.key]: { kind: 'failed', reason: action.reason } } }
     case 'resumed':
       return { ...state, resumes: without(state.resumes, action.key) }
+    case 'brief-sending':
+      return { ...state, briefs: { ...state.briefs, [action.key]: { kind: 'sending' } } }
+    case 'brief-failed':
+      return { ...state, briefs: { ...state.briefs, [action.key]: { kind: 'failed', reason: action.reason } } }
+    case 'brief-sent':
+      return { ...state, briefs: without(state.briefs, action.key) }
     default:
       return state
   }
@@ -916,7 +998,11 @@ export function createBoard(React, env = {}) {
 
     // What the handlers and the chat poller read. Refs, so they always see the latest render.
     const latest = useRef(null)
-    if (latest.current === null) latest.current = { starts: new Set(), poller: null, alive: true }
+    if (latest.current === null) {
+      // `briefs` holds the text of a brief that was saved but not sent, by chat key, for "Send the brief again";
+      // `sending` the keys whose brief is on its way; `timers` the send timers, to clear them on unmount.
+      latest.current = { starts: new Set(), briefs: new Map(), sending: new Set(), timers: new Set(), poller: null, alive: true }
+    }
     latest.current.chats = chats
     latest.current.api = api
 
@@ -971,6 +1057,15 @@ export function createBoard(React, env = {}) {
       }
       latest.current.backend = backend
       latest.current.gateway = gateway
+      latest.current.setTimer = (fn, ms) => {
+        const handle = setTimer(() => { latest.current.timers.delete(handle); fn() }, ms)
+        latest.current.timers.add(handle)
+        return handle
+      }
+      latest.current.clearTimer = (handle) => {
+        latest.current.timers.delete(handle)
+        clearTimer(handle)
+      }
 
       const poller = createPoller({
         request: async (signal) => ({
@@ -997,6 +1092,8 @@ export function createBoard(React, env = {}) {
       return () => {
         latest.current.alive = false
         latest.current.poller = null
+        for (const handle of latest.current.timers) clearTimer(handle)
+        latest.current.timers.clear()
         poller.stop()
         doc.removeEventListener('visibilitychange', onVisibility)
       }
@@ -1025,15 +1122,49 @@ export function createBoard(React, env = {}) {
         starts.add(cardId)
         ownUi({ kind: 'step', cardId, step: 'reserve' })
         try {
-          const result = await startStory({ cardId, backend, gateway, onStep: (step) => ownUi({ kind: 'step', cardId, step }) })
-          ownChats({ kind: 'started', record: { card_id: cardId, name: result.name, key: result.key } })
-          ownUi({ kind: 'started', cardId })
-          refresh()
+          const result = await startStory({
+            cardId, backend, gateway,
+            setTimer: latest.current.setTimer, clearTimer: latest.current.clearTimer,
+            onStep: (step) => { if (step !== 'send') ownUi({ kind: 'step', cardId, step }) },
+            // The chat is saved: its link and its state appear now, while the brief is on its way.
+            onSaved: (saved) => {
+              latest.current.briefs.set(saved.key, saved.brief)
+              ownChats({ kind: 'started', record: { card_id: cardId, name: saved.name, key: saved.key } })
+              ownUi({ kind: 'started', cardId })
+              ownUi({ kind: 'brief-sending', key: saved.key })
+              refresh()
+            },
+          })
+          // The brief is sent (Crew accepted it, or 10 seconds passed with no error): forget its text.
+          latest.current.briefs.delete(result.key)
+          ownUi({ kind: 'brief-sent', key: result.key })
         } catch (error) {
-          ownUi({ kind: 'failed', cardId, step: error.step ?? 'reserve', reason: error.reason ?? String(error?.message ?? error) })
-          if (error.code === 'chat_exists') refresh() // another page started it: read the records again
+          if (error.saved) {
+            // The chat exists and is saved; only the brief was not sent. The card keeps its link.
+            ownUi({ kind: 'brief-failed', key: error.saved.key, reason: error.reason ?? String(error?.message ?? error) })
+          } else {
+            ownUi({ kind: 'failed', cardId, step: error.step ?? 'reserve', reason: error.reason ?? String(error?.message ?? error) })
+            if (error.code === 'chat_exists') refresh() // another page started it: read the records again
+          }
         } finally {
           starts.delete(cardId)
+        }
+      },
+      async sendBrief(key) {
+        const { briefs, sending, gateway } = latest.current
+        const brief = briefs.get(key)
+        if (brief === undefined || sending.has(key)) return // nothing to send, or a send is already running
+        sending.add(key)
+        ownUi({ kind: 'brief-sending', key })
+        try {
+          await retryBrief({ gateway, key, brief, setTimer: latest.current.setTimer, clearTimer: latest.current.clearTimer })
+          briefs.delete(key)
+          ownUi({ kind: 'brief-sent', key })
+          refresh()
+        } catch (error) {
+          ownUi({ kind: 'brief-failed', key, reason: error.reason ?? String(error?.message ?? error) })
+        } finally {
+          sending.delete(key)
         }
       },
       async resume(key) {

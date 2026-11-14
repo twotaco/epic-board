@@ -26,7 +26,7 @@ Four criteria of the earlier spec were edited in place because this story change
 
 1. WHEN the page is opened at the app's route THEN the page SHALL show the board in place of the placeholder, and `app.json` SHALL keep its route and backend declarations.
 2. THE page SHALL make no request other than reads of the backend's `plan` route and the requests that `start-a-story` Requirements 4, 5, 6 and 8 describe, and SHALL use the host's React with no added dependency or build step.
-3. THE page SHALL have no interactive element other than the unreadable-files disclosure (Requirement 9) and the card controls that `start-a-story` Requirements 2, 7 and 8 describe. An interactive element is any link, button, input or other control that responds to click or keyboard activation.
+3. THE page SHALL have no interactive element other than the unreadable-files disclosure (Requirement 9) and the card controls that `start-a-story` Requirements 2, 4, 7 and 8 describe. An interactive element is any link, button, input or other control that responds to click or keyboard activation.
 4. THE page SHALL show every text it takes from the plan, such as names, descriptions, folder names, messages, settings and problems, as literal text and not as HTML or Markdown.
 
 ### Requirement 2: Columns and grouping
