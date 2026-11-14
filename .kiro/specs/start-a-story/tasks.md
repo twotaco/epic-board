@@ -129,7 +129,7 @@ Group 1 is all backend and changes nothing the page uses except an added `id` on
     - _Requirements: 1.3, 2.1, 2.2, 2.3, 2.4, 4.6, 6.7, 6.8, 7.1, 8.4, 9.1, 9.2, 9.3, 9.4, 9.5, 9.6_
 
 - [ ] 4. Check it works end to end
-  - [ ] 4.1 Run the backend on throwaway data
+  - [x] 4.1 Run the backend on throwaway data
     - Start `backend/server.py` with `PORT`, `EPIC_BOARD_REPOSITORY` set to a throwaway clone, `EPIC_BOARD_FOLDER` set to a made-up id, `KIROCREW_HOME` set to a temporary folder and `KIROCREW_PROXY_SECRET` set to a test value; sign each request with the documented rule using a few lines of Python
     - Check: `GET /chats` is empty and the folder is reported; `POST /chats` for a planned card with no spec returns the no-spec brief, and for a card with a spec returns the with-spec brief; the file `chats.json` appears in `<KIROCREW_HOME>/apps/epic-board/data/` as `reserved`; `started` makes it `started`; a second `POST /chats` for that card is 409 `chat_exists`; a Done card is 409 `card_done`; an unknown id is 409 `card_not_found`; `DELETE` removes the record; stopping and starting the backend keeps the records
     - Check the refusals: no signature, a stale signature and a wrong signature answer 401; no secret answers 503; an unreadable `chats.json` answers 500 `chats_unreadable` and the file is unchanged; `plan` and `health` still answer unsigned
