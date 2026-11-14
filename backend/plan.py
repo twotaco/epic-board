@@ -19,8 +19,9 @@ def spec_status(counts):
     return "planned"
 
 
-def card(name, status, spec, tasks, epic):
-    return {"name": name, "status": status, "spec": spec, "tasks": tasks, "epic": epic}
+def card(name, status, spec, tasks, epic, description):
+    return {"name": name, "status": status, "spec": spec, "tasks": tasks, "epic": epic,
+            "description": description}
 
 
 def read_specs(source, files, problems):
@@ -48,8 +49,8 @@ def story_card(story, specs, epic_name):
         status, tasks = specs[folder]
         if story.status == "done":
             status = "done"
-        return folder, card(story.name, status, folder, tasks, epic_name)
-    return None, card(story.name, story.status or "planned", None, None, epic_name)
+        return folder, card(story.name, status, folder, tasks, epic_name, story.description)
+    return None, card(story.name, story.status or "planned", None, None, epic_name, story.description)
 
 
 def read_text(source, path, problems):
@@ -97,7 +98,7 @@ def build_plan(source):
     for folder in specs:
         if folder not in used:
             status, tasks = specs[folder]
-            loose.append(card(folder, status, folder, tasks, None))
+            loose.append(card(folder, status, folder, tasks, None, ""))
     if loose:
         loose.sort(key=lambda c: c["name"].casefold())
         groups.append({"epic": None, "cards": loose})
