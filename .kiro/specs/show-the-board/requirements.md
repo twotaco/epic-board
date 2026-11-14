@@ -47,7 +47,7 @@ Four criteria of the earlier spec were edited in place because this story change
 
 #### Acceptance Criteria
 
-1. THE page SHALL show each card's name and, when the description is not empty, the description below the name. WHEN text is longer than the card is wide THEN the text SHALL wrap inside the card.
+1. THE page SHALL show each card's name and, when the description is not empty, the description below the name, cut to three lines (`board-design`, Requirement 3, criterion 4). WHEN text is longer than the card is wide THEN the text SHALL wrap inside the card.
 2. WHEN a card has a spec THEN the card SHALL show the spec folder name as plain text, for example `show-the-board`, and not the path `.kiro/specs/<folder>`.
 3. WHEN a card has no spec THEN the card SHALL show "No spec yet", with no progress line and no bar.
 4. WHEN a card has a spec and its task total is greater than 0 THEN the card SHALL show "`<done>` of `<total>` tasks" ("1 of 1 task" when the total is 1) and a bar filled to done divided by total. The bar SHALL be hidden from assistive technology, because the progress text carries the numbers.
@@ -107,7 +107,7 @@ Four criteria of the earlier spec were edited in place because this story change
 
 1. WHEN a plan is shown THEN the page SHALL show, above the columns, the main branch name, the first 7 characters of the commit and the plan age.
 2. THE page SHALL word the plan age as "Updated less than a minute ago" under 60 seconds, "Updated N minutes ago" from 60 seconds to under 1 hour, "Updated N hours ago" from 1 hour to under 24 hours, and "Updated N days ago" from 24 hours on, where N is the age in that unit rounded down, with "minute", "hour" or "day" in the singular when N is 1. WHEN the plan age is none THEN the page SHALL show "Not yet updated from origin".
-3. WHILE `refreshing` is true THEN the page SHALL show "Checking for updates…" next to the plan age, and SHALL reserve the space for that text at all times so that the columns do not move when it appears or disappears.
+3. WHILE `refreshing` is true THEN the page SHALL show "Checking for updates…" in the header with the plan age (`board-design`, Requirement 4, criterion 1), and SHALL reserve the space for that text at all times so that the columns do not move when it appears or disappears.
 
 ### Requirement 9: States and unreadable files
 
@@ -128,7 +128,7 @@ Four criteria of the earlier spec were edited in place because this story change
 
 #### Acceptance Criteria
 
-1. THE page SHALL take its text and background colours from the host's theme, with no opaque colour (alpha 1, in any colour syntax, including a named colour) as a text colour or element background, SHALL draw borders, bar tracks, bar fills and tints in `currentColor` or a colour with an alpha greater than 0 and less than 1, and SHALL tell states apart by words and not by colour alone.
+1. THE page SHALL take its colours from the host's theme. Its own style sheet SHALL hold no colour literal except in the rules of the fallbacks for Crew's components (`board-design`, Requirement 5), SHALL draw borders, bar tracks, bar fills and tints in `currentColor` or a theme token, and SHALL tell states apart by words and not by colour alone. A fallback SHALL set no opaque colour (alpha 1, in any colour syntax, including a named colour) as a text colour or element background, and SHALL draw its borders, bar tracks, bar fills and tints in `currentColor` or a colour with an alpha greater than 0 and less than 1.
 2. THE page SHALL give its title, the column headings and the group headings heading elements, with the column headings one level below the title, the group headings one level below the column headings and no level skipped in any state, and SHALL present the cards of each group as one list in the order of Requirement 2, criterion 2.
 3. THE page SHALL give "Loading…", the failed-fetch notice and the unreachable-backend notice a `status` role, SHALL give the backend error and the "Could not reach the backend." error state an `alert` role, and SHALL give no other text an `alert` role.
 4. THE disclosure summary SHALL be reachable by keyboard focus, SHALL show the browser's focus indicator, and SHALL toggle the disclosure on Enter or Space.

@@ -91,7 +91,7 @@ onClick: (event) => {
 
 The `a`'s stretched `::after` makes every click on the card reach it, and Enter on the link produces a click with `button` 0 and no modifier. A chat that is restoring or not open has no link (the start design), so it cannot be opened.
 
-An Open_Card's chat line gains `span.eb-chat-open` with the text "Chat open", its `li` gets `data-open="true"`, and its link gets `aria-current="true"`. The border rule is `.eb-card[data-open='true'] { border: 2px solid currentColor }`, and the card's padding is reduced by 1px in the same rule so the card does not grow.
+An Open_Card's chat line gains `span.eb-chat-open` with the text "Chat open", its `li` gets `data-open="true"`, and its link gets `aria-current="true"`. The mark is `border-color: currentColor` and a one-pixel ring, `box-shadow: 0 0 0 1px currentColor`, on the element that carries `data-open`, and changes no padding (`board-design`, Requirement 3, criterion 9).
 
 Two new pure functions draw the rest, and `createBoard` composes them:
 
@@ -118,9 +118,9 @@ All new rules use `currentColor` or no colour, and none removes an outline.
 .eb-panel { display: flex; flex-direction: column; min-width: 0; min-height: 0; height: 100%; }
 .eb-panel-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 12px; border-bottom: 1px solid currentColor; }
 .eb-panel-title { font-weight: 600; overflow-wrap: anywhere; }
-.eb-panel-head button { font: inherit; cursor: pointer; }
+.eb-panel-head .eb-fb { font: inherit; cursor: pointer; }   /* the "Close" is a Crew Btn when the page has one (board-design) */
 .eb-panel-body { flex: 1 1 0; min-height: 0; }
-.eb-card[data-open='true'] { border: 2px solid currentColor; padding: 7px 11px; }
+.eb-card[data-open='true'] { border-color: currentColor; box-shadow: 0 0 0 1px currentColor; }
 .eb-chat-open { margin-left: 8px; font-size: 0.85em; font-weight: 600; }
 
 /* Narrow: the panel covers the board. The board keeps its box, so its scroll position survives. */

@@ -1,0 +1,117 @@
+# Implementation Plan
+
+## Overview
+
+The work is four task groups. Each group is one pull request on its own branch, named `story/board-design-g1` to `story/board-design-g4`, cut from the latest main after the previous group's pull request is merged. Each group lands green on its own and leaves the app working. Every group ends with a sub-task that runs the tests and reports the counts run, passed and skipped. Tick each task in this file in the same branch, and tick nothing in the earlier specs. The page adds no dependency, and the backend does not change.
+
+Start this story after "Work in the chat" (`.kiro/specs/work-in-the-chat/`) has been built and has landed on main, because both change the card's markup and the panel's button and mark, and this story's tasks are written against the code that story leaves.
+
+Group 1 is the kit lookup and the fallback marker, with no change to what the page draws. Group 2 draws the header, the column headers and the empty and error states. Group 3 draws the cards, the badges and the buttons. Group 4 checks the whole on a Crew host, which is the only place the look, the tokens and the themes can be confirmed.
+
+## Tasks
+
+- [ ] 1. Page: the kit, the fallback marker and the style sheet
+  - [ ] 1.1 Add the lookup to `ui/index.mjs`
+    - `isComponent(value)`, `pickKit(module)` and `hostKit()` as the design gives them; make `isChatPanel` of the chat story call `isComponent`, so there is one test
+    - `renderBoard(h, view, actions, kit = {})` takes the kit and passes it down to the functions that draw a part; with an empty kit the tree is what it is today
+    - `createBoard` reads `env.kit ?? hostKit()` on every render and passes it to `renderBoard`; it also looks up `window.__kirocrew_modules['lucide-react']?.Kanban` and passes the icon in the view
+    - Nothing else in the file changes
+    - _Requirements: 1.1, 1.2, 1.3, 1.5_
+  - [ ] 1.2 Mark the fallbacks and rewrite `STYLE`
+    - Give every element the fallback draws the class `eb-fb`, and move every `rgba(128, 128, 128, a)` rule under `.eb-fb`
+    - Rewrite the rest of `STYLE` as the design's table says, with `currentColor` or `var(--token, currentColor)` for colours, the sizes of the table and no others, `.eb-card` `position: relative`, `margin-bottom: 0` on a card in the list, the description's three-line cut, and the body's gutter
+    - Keep the `@container (min-width: 720px)` rule and the `@supports not` copy, and the panel rules of the chat story, with the two changes of "Edits"
+    - _Requirements: 1.3, 2.1, 2.2, 2.3, 2.5, 3.3, 3.4, 3.8, 3.9, 5.1, 5.2, 5.3, 5.4, 5.5_
+  - [ ] 1.3 Check them in `tests/ui/kit.test.mjs` and the existing files
+    - `isComponent` for a function, a memo-like object, `null`, a string, a number and a plain object; `pickKit` for each kind of module value and for a throwing getter; `hostKit` with no `window`
+    - Update the `STYLE` scans in `tests/ui/render.test.mjs` as "Edits" says: no colour literal outside `.eb-fb` rules, `var(--token, currentColor)` allowed, no `outline: none`
+    - Check that every existing page test still passes with no kit
+    - _Requirements: 1.1, 1.2, 5.1, 5.2, 5.5_
+  - [ ] 1.4 Write property test for the lookup in `tests/ui/kit.test.mjs`
+    - **Property 2: A kit lookup never throws and keeps only components**
+    - Seeded module values of every kind; at least 100 iterations with the seed printed on failure
+    - **Validates: Requirements 1.1, 1.2**
+  - [ ] 1.5 Run the tests
+    - Run `python3 -m unittest discover -s tests -t .` and `node --test tests/ui/*.test.mjs` and report the counts run, passed and skipped for each
+    - _Requirements: 1.1, 1.2, 1.3, 1.5, 5.1, 5.2, 5.5_
+
+- [ ] 2. Page: the header, the column headers and the empty and error states
+  - [ ] 2.1 Draw them in `ui/index.mjs`
+    - The header with `PageHeader` as the design's table gives it (the `h1` inside the title, the one-line subtitle, the always-present "Checking for updates…" in the actions), and the fallback header as it is
+    - The column box, the header bar, `span.eb-dot` with `aria-hidden`, the name and the count, with the dot's colour by column key (`planned`, `in-progress`, `done` as `columnsOf` names them); the heading element and level stay; the group heading's look
+    - The empty plan with `EmptyState` and the icon; the backend error and the unreachable state with `ErrorNotice` (message, and a footer with the code and the `settings` entries as `code` text), with no `askAgent`
+    - The notices with the role `status`, "Loading…" and the disclosure keep their markup
+    - _Requirements: 1.3, 2.1, 2.2, 2.3, 2.4, 2.5, 4.1, 4.2, 4.3, 4.4, 4.5, 4.6_
+  - [ ] 2.2 Check the markup in `tests/ui/render.test.mjs`
+    - With a fake kit and without: the header's props and subtitle text, the `visibility` slot, the column header's order and `aria-hidden`, the capitals by style and not by text, the heading levels in every view, the empty and error trees, the roles (`alert` only on the two errors, `status` on the rest), and that no component gets a prop the design does not name
+    - Add the cases for a kit that has only some of the components
+    - _Requirements: 1.2, 1.3, 1.4, 2.1, 2.2, 2.3, 2.4, 2.5, 4.1, 4.2, 4.3, 4.4, 4.5, 4.6_
+  - [ ] 2.3 Run the tests
+    - Run `python3 -m unittest discover -s tests -t .` and `node --test tests/ui/*.test.mjs` and report the counts run, passed and skipped for each
+    - _Requirements: 1.2, 1.3, 2.1, 2.2, 2.3, 2.4, 2.5, 4.1, 4.2, 4.3, 4.4, 4.5, 4.6_
+
+- [ ] 3. Page: the cards, the badges and the buttons
+  - [ ] 3.1 Draw them in `ui/index.mjs`
+    - `li.eb-item` with a `Card` (class, `data-mode`, `data-open`), or the fallback `li.eb-card.eb-fb` with the same attributes; the name in a `CardTitle` with `role="presentation"`, or `div.eb-card-name`
+    - The meta lines, the description, the progress in a `Badge` (variant `muted`, or `ok` when every task is ticked) with the bar, and the state word in a `Badge` (Needs you `warn`, Working `ok`, Interrupted `err`, Idle `muted`) with its `data-state`
+    - Every button of the earlier specs as a `Btn` (`primary` for "Start" only) or the fallback button, with the same text, handler and keyboard behaviour; the panel's "Close" the same
+    - The open card's mark as the design gives it (a ring, no padding change) and the edits of "Edits" to the chat design's two paragraphs
+    - _Requirements: 1.3, 1.4, 3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 3.7, 3.8, 3.9_
+  - [ ] 3.2 Check the markup in `tests/ui/render.test.mjs`
+    - The card with and without `Card`, the name's `role="presentation"` and the absence of a card heading, the meta and description classes and the three-line rule, the progress and state badges and their variants, each button as a `Btn` and as a fallback, and that the stretched link, the controls above it and `data-card-id` are where the start spec puts them
+    - Update the tests that find a card by `li.eb-card`
+    - _Requirements: 3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 3.7, 3.8, 3.9_
+  - [ ] 3.3 Check the wiring in `tests/ui/board.test.mjs`
+    - `createBoard` with a fake kit through `env.kit`: it is read on every render and a component that arrives later is picked up; a card's click, keyboard and focus behaviour is the same with and without the kit; "Start" is `primary` and the others are plain; "Close" is a `Btn`; a start, a resume and a retry of the brief behave as before
+    - _Requirements: 1.1, 1.2, 3.1, 3.7_
+  - [ ] 3.4 Write property test for the kit's effect in `tests/ui/kit.test.mjs`
+    - **Property 1: The kit changes the look, never the words or the structure**
+    - Seeded subsets of the seven components as fakes, and seeded views and `ui` covering every card mode, column and state, with and without a panel; at least 100 iterations with the seed printed on failure
+    - **Validates: Requirements 1.2, 1.3, 1.6, 2.4, 3.1, 3.2, 3.7, 4.1, 4.4, 4.5**
+  - [ ] 3.5 Bring the earlier specs' text in line
+    - Edit the colour sentences of the board design's "Layout and theme" and of the start design's description of `STYLE` to say that the greys are the fallbacks'; tick nothing in those specs
+    - _Requirements: 5.1, 5.2_
+  - [ ] 3.6 Run the tests
+    - Run `python3 -m unittest discover -s tests -t .` and `node --test tests/ui/*.test.mjs` and report the counts run, passed and skipped for each
+    - _Requirements: 1.1, 1.2, 1.3, 1.4, 1.6, 3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 3.7, 3.8, 3.9_
+
+- [ ] 4. Check it on a Crew host
+  - [ ] 4.1 Install the app in Kiro Crew and check the look (done by you in the app)
+    - Use Crew 0.12.2 or later and the throwaway project of the start spec's task 4.2, with a plan that has cards in all three columns, a long description, a story with a chat in each of the four states, an empty column and a story with no spec
+    - Check the components: the header, the cards, the badges, the buttons and the empty and error states look like Crew's own; open the browser's inspector and confirm they are Crew's elements (`card-glow`, `animate-rise` and the like) and not the page's fallbacks
+    - Check the column headers beside Crew's Sessions board: dot, capitals, count, bar, box and radius match; the dot colours read well in both themes (design, Open Question 3)
+    - Check the card: the title is bold, the meta lines are quieter, a long description stops at three lines with no control to show more, and a screen reader reads all of it; the card's inset in a column (design, Open Question 1) and a card against the column's background (Open Question 7)
+    - Check the header's left edge lines up with the columns at the window widths of 700, 800 and 1,200 pixels (Open Question 6), and the columns do not move when "Checking for updates…" appears
+    - Check the badges: the four states, the progress badge and the open card's mark are told apart by their words and read well in both themes (Open Question 4)
+    - Check the heading structure in the browser's accessibility tree: one `h1`, three `h2`, `h3` for the groups, and no heading for a card (Open Question 2); check that no `alert` appears except for the two errors
+    - Check the themes: light and dark, and one other Crew palette, with no clash and no unreadable text, and the focus ring on the card's control, "Start", "Cancel" and "Close"
+    - Check the fallbacks: in the console, delete one component from `window.__kirocrew_modules['@kirocrew/ui']` before the page loads (each in turn, and the whole module), and confirm that part is drawn as it was and the rest of the page still works
+    - Check the open questions of the design that only the host can answer, and write the owner's answers into the design
+    - _Requirements: 1.1, 1.2, 1.3, 2.1, 2.2, 2.3, 2.5, 3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 3.9, 4.1, 4.2, 4.3, 4.4, 5.1, 5.3, 5.5_
+
+## Notes
+
+- Each group is one pull request and is merged by the owner; start the next group from the updated main
+- This story edits rules that other specs own, in place, as "Edits to earlier specs and checks" in the design lists: the board spec's Requirement 3 (criterion 1), Requirement 8 (criterion 3) and Requirement 10 (criterion 1), and the chat design's panel button and mark. Their ticked tasks are not reopened
+- No task is optional: every task checks a requirement of this spec
+- The open questions in the design are for the owner; the host-dependent ones are checked in 4.1
+
+## Task Dependency Graph
+
+```json
+{
+  "waves": [
+    { "id": 0, "tasks": ["1.1"] },
+    { "id": 1, "tasks": ["1.2"] },
+    { "id": 2, "tasks": ["1.3", "1.4"] },
+    { "id": 3, "tasks": ["1.5"] },
+    { "id": 4, "tasks": ["2.1"] },
+    { "id": 5, "tasks": ["2.2"] },
+    { "id": 6, "tasks": ["2.3"] },
+    { "id": 7, "tasks": ["3.1"] },
+    { "id": 8, "tasks": ["3.2", "3.3", "3.4", "3.5"] },
+    { "id": 9, "tasks": ["3.6"] },
+    { "id": 10, "tasks": ["4.1"] }
+  ]
+}
+```
