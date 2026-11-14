@@ -512,7 +512,7 @@ async function ready(options = {}, chats = []) {
 async function missingRead(page) {
   page.chatFetch.answer(page.chatFetch.calls.length - 1, 200, chatsAnswer([RECORD]))
   await flush()
-  page.gateway.answer('/api/chat/slots', [])
+  page.gateway.answer('/api/chat/slots?crew=all', [])
   await flush()
   page.gateway.fail(detailPath(NAME), httpError(404))
   await flush()
@@ -537,25 +537,55 @@ test('the chats route is read on open, and the list in Crew only when there are 
 
 test('a started chat is read from the list: only its row counts, its state word shows, and the next read is 5 s away while it works', async () => {
   const page = await ready({}, [RECORD])
-  assert.deepEqual(page.gateway.paths(), ['/api/chat/slots'])
+  assert.deepEqual(page.gateway.paths(), ['/api/chat/slots?crew=all'])
   const init = page.gateway.calls[0][2]
   assert.equal(typeof init.signal.aborted, 'boolean')
-  page.gateway.answer('/api/chat/slots', [row(NAME, { running: true }), row('someone-elses', { pending_approval: true })])
+  page.gateway.answer('/api/chat/slots?crew=all', [row(NAME, { running: true }), row('someone-elses', { pending_approval: true })])
   await flush()
   const text = page.text()
   assert.match(text, /Working/)
   assert.doesNotMatch(text, /Needs you|someone-elses/)
   assert.equal(anchors(page)[0].props.href, `/chat?sid=${NAME}`)
-  assert.deepEqual(page.gateway.paths(), ['/api/chat/slots'], 'a working chat needs no read of its rows')
+  assert.deepEqual(page.gateway.paths(), ['/api/chat/slots?crew=all'], 'a working chat needs no read of its rows')
   page.clock.advance(4999)
   assert.equal(page.chatFetch.calls.length, 1)
   page.clock.advance(1)
   assert.equal(page.chatFetch.calls.length, 2)
 })
 
+const SECRET_WORKER_TEXT = 'WORKER-SECRET-TEXT-9f2c'
+
+test('a worker of the conductor decides the state, and no text or preview of its row ever reaches the page', async () => {
+  const page = await ready({}, [RECORD])
+  const worker = row('worker-1', {
+    crew_root: NAME, running: true, pending_approval: true,
+    title: SECRET_WORKER_TEXT, last_message: SECRET_WORKER_TEXT, preview: SECRET_WORKER_TEXT, welcome_message: SECRET_WORKER_TEXT,
+    source_links: [{ kind: 'change', number: 99, url: `https://example.com/${SECRET_WORKER_TEXT}`, state: 'open', label: SECRET_WORKER_TEXT }],
+  })
+  page.gateway.answer('/api/chat/slots?crew=all', [row(NAME), worker, row('other', { title: SECRET_WORKER_TEXT, running: true })])
+  await flush()
+  assert.match(page.text(), /Needs you/)
+  const shown = JSON.stringify(page.tree(), (key, value) => (typeof value === 'function' ? undefined : value))
+  assert.doesNotMatch(page.text() + shown, new RegExp(SECRET_WORKER_TEXT))
+  assert.doesNotMatch(page.text() + shown, /worker-1|#99/)
+  assert.deepEqual(page.gateway.paths(), ['/api/chat/slots?crew=all'], 'a worker needing you needs no read of the conductor\'s rows')
+})
+
+test('a conductor with an open pull request shows Review #N linked to it, and Checks failed #N when its checks failed', async () => {
+  const page = await ready({}, [RECORD])
+  const pr = { kind: 'change', number: 12, url: 'https://github.com/o/r/pull/12', state: 'open', ci: 'failed' }
+  page.gateway.answer('/api/chat/slots?crew=all', [row(NAME, { source_links: [pr] })])
+  await flush()
+  page.gateway.answer(detailPath(NAME), { messages: [{ role: 'assistant' }] })
+  await flush()
+  assert.match(page.text(), /Checks failed #12/)
+  assert.ok(anchors(page).some((a) => a.props.href === 'https://github.com/o/r/pull/12'))
+  assert.doesNotMatch(page.text(), /Your turn/)
+})
+
 test('an idle chat has its newest row read once, and the next read is 15 s away', async () => {
   const page = await ready({}, [RECORD])
-  page.gateway.answer('/api/chat/slots', [row(NAME)])
+  page.gateway.answer('/api/chat/slots?crew=all', [row(NAME)])
   await flush()
   page.gateway.answer(detailPath(NAME), { messages: [{ role: 'user' }, { role: 'error' }] })
   await flush()
@@ -566,7 +596,7 @@ test('an idle chat has its newest row read once, and the next read is 15 s away'
   assert.equal(page.chatFetch.calls.length, 2)
   page.chatFetch.answer(1, 200, chatsAnswer([RECORD]))
   await flush()
-  page.gateway.answer('/api/chat/slots', [row(NAME)])
+  page.gateway.answer('/api/chat/slots?crew=all', [row(NAME)])
   await flush()
   assert.equal(page.gateway.paths().filter((path) => path === detailPath(NAME)).length, 1, 'unchanged last_ts and messages: no second read')
   assert.match(page.text(), /Interrupted/)
@@ -642,7 +672,7 @@ test('a conductor whose turn waits for an approval: the send never answers, and 
   // The chat read that follows the save shows the state.
   page.chatFetch.answer(3, 200, chatsAnswer([RECORD]))
   await flush()
-  page.gateway.answer('/api/chat/slots', [row(NAME, { running: true, pending_approval: true })])
+  page.gateway.answer('/api/chat/slots?crew=all', [row(NAME, { running: true, pending_approval: true })])
   await flush()
   assert.match(page.text(), /Needs you/)
   assert.match(page.text(), /Sending the brief…/)
@@ -847,7 +877,7 @@ test('the question is open on one card at a time, and a Done card with no chat h
 
 test('a chat that Crew does not have is restoring, then not open after a minute, then resumes', async () => {
   const page = await ready({}, [RECORD])
-  page.gateway.answer('/api/chat/slots', [])
+  page.gateway.answer('/api/chat/slots?crew=all', [])
   await flush()
   page.gateway.fail(detailPath(NAME), httpError(404))
   await flush()
@@ -871,7 +901,7 @@ test('a chat that Crew does not have is restoring, then not open after a minute,
 
 test('a failed resume shows the reason, and Start again removes only the board\'s record and shows the question', async () => {
   const page = await ready({}, [RECORD])
-  page.gateway.answer('/api/chat/slots', [])
+  page.gateway.answer('/api/chat/slots?crew=all', [])
   await flush()
   page.gateway.fail(detailPath(NAME), httpError(404))
   await flush()
@@ -897,7 +927,7 @@ test('a failed resume shows the reason, and Start again removes only the board\'
 
 test('a failed chat read keeps the shown states and adds the notice; a good read removes it; the plan is untouched', async () => {
   const page = await ready({}, [RECORD])
-  page.gateway.answer('/api/chat/slots', [row(NAME, { running: true })])
+  page.gateway.answer('/api/chat/slots?crew=all', [row(NAME, { running: true })])
   await flush()
   assert.match(page.text(), /Working/)
   page.clock.advance(5000)
@@ -912,14 +942,14 @@ test('a failed chat read keeps the shown states and adds the notice; a good read
   page.clock.advance(15000)
   page.chatFetch.answer(2, 200, chatsAnswer([RECORD]))
   await flush()
-  page.gateway.answer('/api/chat/slots', [row(NAME, { running: true })])
+  page.gateway.answer('/api/chat/slots?crew=all', [row(NAME, { running: true })])
   await flush()
   assert.equal(page.text().includes(NOTICE), false)
 })
 
 test('a failing list in Crew is a failed read too', async () => {
   const page = await ready({}, [RECORD])
-  page.gateway.fail('/api/chat/slots', httpError(500, null))
+  page.gateway.fail('/api/chat/slots?crew=all', httpError(500, null))
   await flush()
   assert.equal(page.text().includes(NOTICE), true)
   assert.match(page.text(), /Card Alpha/)
@@ -933,13 +963,13 @@ test('a failing list in Crew is a failed read too', async () => {
 async function chatCycle(page, rows) {
   page.chatFetch.answer(page.chatFetch.calls.length - 1, 200, chatsAnswer([RECORD]))
   await flush()
-  page.gateway.answer('/api/chat/slots', rows)
+  page.gateway.answer('/api/chat/slots?crew=all', rows)
   await flush()
 }
 test('a failed plan request keeps the chat states and shows only the plan notice', async () => {
   const page = await ready({}, [RECORD])
   const rows = [row(NAME, { pending_approval: true, running: true })]
-  page.gateway.answer('/api/chat/slots', rows)
+  page.gateway.answer('/api/chat/slots?crew=all', rows)
   await flush()
   for (let second = 5; second <= 10; second += 5) {
     page.clock.advance(5000)
@@ -1240,7 +1270,7 @@ async function readyChats(Chat, records = [RECORD, RECORD_B], rows = records.map
   page.chatFetch.answer(0, 200, chatsAnswer(records))
   await flush()
   if (records.length > 0) {
-    page.gateway.answer('/api/chat/slots', rows)
+    page.gateway.answer('/api/chat/slots?crew=all', rows)
     await flush()
   }
   return page
@@ -1400,7 +1430,7 @@ test('panel: Start again closes the Panel without moving focus; a failed read an
   page.clock.advance(5000)
   page.chatFetch.answer(page.chatFetch.calls.length - 1, 200, chatsAnswer([RECORD]))
   await flush()
-  page.gateway.fail('/api/chat/slots', httpError(500))
+  page.gateway.fail('/api/chat/slots?crew=all', httpError(500))
   await flush()
   assert.match(page.text(), /Could not read chat status/)
   assert.equal(chatsOf(page, Chat).length, 1)

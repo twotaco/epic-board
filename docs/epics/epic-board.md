@@ -12,7 +12,7 @@ It matters now because the plan already lives in files on main, and nothing show
 
 - Several projects or repositories on one board. A board shows one repository, set in the app's config.
 - Editing the plan from the board: moving cards, changing statuses or writing epic files.
-- The board following a conductor's work for the person. The board shows one of four states for the chat and embeds Crew's own chat for the person to use. The board's own code does not read the chat's messages, and does not approve or answer anything for the conductor.
+- The board following a conductor's work for the person. The board shows one of six states for the story's chat and its workers and embeds Crew's own chat for the person to use. The board's own code does not read the chat's messages, and does not approve or answer anything for the conductor.
 - Merging. The conductor opens pull requests and the person reviews and merges them.
 
 ## Stories

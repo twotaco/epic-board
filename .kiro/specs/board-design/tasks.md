@@ -53,7 +53,7 @@ Group 1 is the kit lookup and the fallback marker, with no change to what the pa
 - [ ] 3. Page: the cards, the badges and the buttons
   - [ ] 3.1 Draw them in `ui/index.mjs`
     - `li.eb-item` with a `Card` (class, `data-mode`, `data-open`), or the fallback `li.eb-card.eb-fb` with the same attributes; the name in a `CardTitle` with `role="presentation"`, or `div.eb-card-name`
-    - The meta lines, the description, the progress in a `Badge` (variant `muted`, or `ok` when every task is ticked) with the bar, and the state word in a `Badge` (Needs you `warn`, Working `ok`, Interrupted `err`, Idle `muted`) with its `data-state`
+    - The meta lines, the description, the progress in a `Badge` (variant `muted`, or `ok` when every task is ticked) with the bar, and the state word in a `Badge` (Needs you `warn`, Interrupted `err`, Working `ok`, Stalled `warn`, Review `muted` or `err` for Checks failed, Your turn `muted`) with its `data-state`
     - Every button of the earlier specs as a `Btn` (`primary` for "Start" only) or the fallback button, with the same text, handler and keyboard behaviour; the panel's "Close" the same
     - The open card's mark as the design gives it (a ring, no padding change) and the edits of "Edits" to the chat design's two paragraphs
     - _Requirements: 1.3, 1.4, 3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 3.7, 3.8, 3.9_
@@ -82,7 +82,7 @@ Group 1 is the kit lookup and the fallback marker, with no change to what the pa
     - Check the column headers beside Crew's Sessions board: dot, capitals, count, bar, box and radius match; the dot colours read well in both themes (design, Open Question 3)
     - Check the card: the title is bold, the meta lines are quieter, a long description stops at three lines with no control to show more, and a screen reader reads all of it; the card's inset in a column (design, Open Question 1) and a card against the column's background (Open Question 7)
     - Check the header's left edge lines up with the columns at the window widths of 700, 800 and 1,200 pixels (Open Question 6), and the columns do not move when "Checking for updates…" appears
-    - Check the badges: the four states, the progress badge and the open card's mark are told apart by their words and read well in both themes (Open Question 4)
+    - Check the badges: the six states, the progress badge and the open card's mark are told apart by their words and read well in both themes (Open Question 4)
     - Check the heading structure in the browser's accessibility tree: one `h1`, three `h2`, `h3` for the groups, and no heading for a card (Open Question 2); check that no `alert` appears except for the two errors
     - Check the themes: light and dark, and one other Crew palette, with no clash and no unreadable text, and the focus ring on the card's control, "Start", "Cancel" and "Close"
     - Check the fallbacks: in the console, delete one component from `window.__kirocrew_modules['@kirocrew/ui']` before the page loads (each in turn, and the whole module), and confirm that part is drawn as it was and the rest of the page still works

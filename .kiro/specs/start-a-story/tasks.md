@@ -185,6 +185,29 @@ Group 1 is all backend and changes nothing the page uses except an added `id` on
     - Run `python3 -m unittest discover -s tests -t .` and `node --test tests/ui/*.test.mjs` and report the counts run, passed and skipped for each
     - _Requirements: 3.2, 3.3, 4.3, 4.4, 4.5, 4.6, 4.7, 4.9_
 
+- [x] 6. The state of a card is the story's state
+  - [x] 6.1 Change the state rule in `ui/index.mjs`
+    - `STATE_WORDS` becomes Needs you, Interrupted, Working, Stalled, Review and Your turn; `stateOf(row, lastRole, workers, now)` follows the design; add `workersOf`, `hasStalled`, `reviewOf` and `reviewWord`
+    - `readChats` asks `GET /api/chat/slots?crew=all`, finds each conductor's workers, reads the conductor's last row only as Requirement 6, criterion 3 says, and keeps `review` ({number, url, failed}) on a Review entry
+    - `cardViewOf` gives `stateWord` ("Review #N" or "Checks failed #N" for Review) and `stateHref` (the pull request, or null); the card draws the Review word as a link with `target="_blank"` and `rel="noopener noreferrer"`
+    - A chat that is not in the list is still read on its own and ends as Working, Interrupted or Your turn (Requirement 8.1)
+    - _Requirements: 6.1, 6.2, 6.3, 6.4, 6.5, 8.1_
+  - [x] 6.2 Bring the tests in line and add the new ones
+    - Changed because the expected states changed: the `stateOf` tests (Interrupted now comes before Working, Idle is Your turn), the state words, the fake gateway's list path in `tests/ui/chats.test.mjs`, `board.test.mjs` and `controls.test.mjs`, and the fixtures that named the `idle` state. The brief's own list read (`sendBrief`) is unchanged
+    - New: workers by `crew_root` and `created_by`, the Stalled rule, Review and Checks failed, the order of the six states (Property 1 now covers workers), a Review entry keeping only the pull request, the Review link in `render.test.mjs`, and a page test that no text, title, preview or link of a worker's row reaches the page
+    - _Requirements: 6.1, 6.2, 6.3, 6.4, 6.5_
+  - [x] 6.3 Edit the other specs that name the state words
+    - `.kiro/specs/board-design/` (Requirement 6.6 criterion 6, design decision 4, the task that draws the badge) and the epic page's "one of four states"
+    - _Requirements: 6.4_
+  - [x] 6.4 Run the tests
+    - Run `python3 -m unittest discover -s tests -t .` and `node --test tests/ui/*.test.mjs` and report the counts run, passed and skipped for each
+    - _Requirements: 6.1, 6.2, 6.3, 6.4, 6.5, 8.1_
+  - [ ] 6.5 Check the six states on a real conductor (done by you in the app)
+    - With workers running: Working, though the conductor's own chat is idle; a worker waiting for an approval: Needs you on the card; a stalled ledger item: Stalled; an open pull request: "Review #N" linking to it, and "Checks failed #N" when its checks failed; none of these: Your turn
+    - Confirm in the network log that the list read is `GET /api/chat/slots?crew=all`, that it holds the workers' rows, and that no worker's text appears on the page
+    - Confirm that `source_links` carries `state` (and `ci`) for the app's token on a private repository. When it does not, the card shows Your turn where it should show Review
+    - _Requirements: 6.1, 6.2, 6.4_
+
 ## Notes
 
 - Each group is one pull request and is merged by the owner; start the next group from the updated main
@@ -193,6 +216,7 @@ Group 1 is all backend and changes nothing the page uses except an added `id` on
 - The open questions in the design are for the owner; the host-dependent ones are checked in 4.2
 - Requirement 7 (criteria 1, 5 and 6) and Requirement 6, criterion 6 were changed by `work-in-the-chat`, whose tasks build them. The ticked tasks of groups 3 and 5 describe the link as it was, and are not reopened
 - Group 5 comes from using the board: `POST /api/chat` answers only when the conductor's turn ends, so a turn waiting for a tool approval left the card on "Starting…" with no link. Requirement 4 (criteria 4 to 7 and the new 9), the design's start sequence and Property 7 changed with it; Requirement 1.3 of the board spec now names Requirement 4 as one of the places card controls are defined. The briefs of Requirement 3 changed in the same group: a new spec's story is set to in progress, and a story whose last task is ticked is set to done in the same pull request (5.7)
+- Group 6 comes from using the board: a conductor's chat is idle while its workers build, so "Idle" misled. Requirement 6 (criteria 1 to 5), the glossary, Requirement 8.1 and the design's state rule and Property 1 changed with it. The ticked tasks 2.2, 2.3 and 3.x describe the four states as they were, and are not reopened
 
 ## Task Dependency Graph
 
@@ -219,7 +243,11 @@ Group 1 is all backend and changes nothing the page uses except an added `id` on
     { "id": 17, "tasks": ["5.4", "5.5", "5.6"] },
     { "id": 18, "tasks": ["5.7"] },
     { "id": 19, "tasks": ["5.8"] },
-    { "id": 20, "tasks": ["4.2"] }
+    { "id": 20, "tasks": ["4.2"] },
+    { "id": 21, "tasks": ["6.1"] },
+    { "id": 22, "tasks": ["6.2", "6.3"] },
+    { "id": 23, "tasks": ["6.4"] },
+    { "id": 24, "tasks": ["6.5"] }
   ]
 }
 ```

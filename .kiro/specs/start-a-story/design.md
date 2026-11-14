@@ -203,7 +203,11 @@ Bodies are `{"error": {"code", "message"}}`. A message never contains the reposi
 New pure exports, each tested under Node with no `window` and no React:
 
 ```js
-export function stateOf(row, lastRole)             // 'needs-you' | 'working' | 'interrupted' | 'idle'
+export function stateOf(row, lastRole, workers, now) // 'needs-you' | 'interrupted' | 'working' | 'stalled' | 'review' | 'your-turn'
+export function workersOf(list, key)              // the rows whose crew_root or created_by is key
+export function hasStalled(facts, rows, now)       // crewWorkCounts's rule for a stalled item
+export function reviewOf(row)                      // {number, url, failed} of an open or draft pull request, or null
+export function reviewWord(review)                 // 'Review #N' | 'Checks failed #N'
 export const STATE_WORDS                           // {'needs-you': 'Needs you', ...}
 export function chatHref(key)                      // '/chat?sid=' + encodeURIComponent(key)
 export function classifyChats(status, body)        // {kind: 'chats', read} | {kind: 'failure'}
@@ -221,17 +225,30 @@ export function renderBoard(h, view, actions)      // gains actions, defaults to
 #### State of one chat (Requirement 6)
 
 ```js
-function stateOf(row, lastRole) {
-  if (row.pending_approval === true || row.needs_input === true) return 'needs-you'
-  if (row.running === true || row.admission_queued === true) return 'working'
-  if (row.interrupted === true || lastRole === 'error') return 'interrupted'
-  return 'idle'
+function stateOf(row, lastRole, workers = [], now = 0) {
+  const team = [row, ...workers]
+  if (team.some(flagged)) return 'needs-you'          // pending_approval or needs_input
+  if (row.interrupted === true || (lastRole === 'error' && !busy(row))) return 'interrupted'
+  if (team.some(busy)) return 'working'               // running or admission_queued
+  if (hasStalled(row.crew_work, team, now)) return 'stalled'
+  if (reviewOf(row)) return 'review'
+  return 'your-turn'
 }
 ```
 
-Needs you comes before Working because a turn that waits for an approval or an answer is still in flight, so `running` is true then. This is an inference from `slot_projection.py`, which sets `running` from the turn being in flight and `pending_approval` from an unresolved approval future; the manual check confirms it on a real conductor. `interrupted` is only ever true when no turn is in flight (`not turn_in_flight and is_turn_interrupted(rows)`), so it cannot overlap Working.
+The story's work is done by the conductor's workers, so the conductor's own row says little: a conductor waits between checks while a worker builds. The state is worked out from the conductor's row and its workers' rows. A worker is a row whose `crew_root` (the root's key on every row a Crew Mode root dispatched, directly or through another worker) or `created_by` (the key of the session that opened it) is the conductor's key. `workersOf(list, key)` takes them from the list.
 
-The chat list row has no field for the last row's role. Its `last_message` is a redacted text preview, and the page must not read or show it (Requirement 6, criterion 6). The role comes from the slot detail, `GET /api/chat/slots/<key>?limit=1`, whose `messages` hold the newest rows with their `role`. A row with role `error` is the error card Crew writes when a turn dies after streaming (`is_turn_interrupted` documents that shape). The page reads it only for a chat that is not Needs you or Working and not `interrupted`, and reuses the earlier answer while the row's `last_ts` and `messages` are the same, so a quiet chat costs one request, not one per poll.
+Fields, read from `crew_mode.py`, `slot_projection.py`, `state_parts/source_links.py` and `website/src/lib/crewWork.ts` of Crew 0.12.2:
+
+- `crew_root` and `created_by` are on every row of the list. `GET /api/chat/slots` leaves rows with a `crew_root` out of a person's list unless the request has `crew=all` (`crew_mode.list_view`), so the page asks for `/api/chat/slots?crew=all`. Without it the workers would never arrive.
+- `crew_work` is on the conductor's row: `{open, person, items: [{worker, stale_at_ms}], conductor_looping}`. `hasStalled` is `crewWorkCounts`'s test, item by item: not stale when `conductor_looping` is true, when `item.worker` is the key of a row with `running` true, or when `stale_at_ms` is not above 0; stale when `now >= stale_at_ms`. The running set is taken from every row of the Story_Chats.
+- `source_links` is `{provider, number, url, state, ci, kind, ...}`. `state` and `ci` are sent only to the owner, or for a public repository, and never to an app token; a link with no `state` is not counted, so the card shows Your turn rather than guess.
+
+Needs you comes before Interrupted and Working. A turn that waits for an approval or an answer is still in flight, so `running` is true then (an inference from `slot_projection.py`, confirmed by the manual check). Interrupted comes before Working because `interrupted` is only true when the conductor's own turn is not in flight (`not turn_in_flight and is_turn_interrupted(rows)`) while a worker may still run. The `lastRole === 'error'` test is skipped while the conductor's own turn runs, so an old error row does not hide a running turn.
+
+The chat list row has no field for the last row's role. Its `last_message` is a redacted text preview, and the page must not read or show it (Requirement 6, criterion 6). The role comes from the slot detail, `GET /api/chat/slots/<key>?limit=1`, whose `messages` hold the newest rows with their `role`. A row with role `error` is the error card Crew writes when a turn dies after streaming (`is_turn_interrupted` documents that shape). The page reads it only for the conductor, only when nothing in the Story_Chats needs the person, its `interrupted` is false and its turn is not running, and reuses the earlier answer while the row's `last_ts` and `messages` are the same, so a quiet chat costs one request, not one per poll. A worker's detail is never read.
+
+What is kept from the rows: the state, the conductor's `last_ts`, `messages` and last role, and for Review the pull request's `number`, `url` and whether `ci` failed. Nothing else of any row, and nothing at all of a worker's row except its flags, reaches the page's state. A Review word is a link (`target="_blank"`, `rel="noopener noreferrer"`) to an https address only, so another scheme in a link is not offered.
 
 #### The read cycle (Requirements 6 and 8)
 
@@ -239,8 +256,8 @@ The chat list row has no field for the last row's role. Its `last_message` is a 
 
 1. `backend.get('/chats')`. An error body with `chats_unreadable` returns `{recordsError}` and ends the cycle with no gateway request. Any other failure rejects, and the poller counts it as a failure.
 2. With no `chats`, return the folder and an empty read. No gateway request.
-3. `gateway.get('/api/chat/slots', {signal})` must be an array, else the read rejects. Keep only rows whose `key` is a record's key (Requirement 6.1).
-4. For each record: a row gives its state (reading the last role when due, as above). No row: `gateway.get('/api/chat/slots/<key>?limit=1', {signal})`. A rejection with `status === 404` is `missing`. A chat answer gives the state of Requirement 8.1 (`running` or `admission_queued` for Working, a last row with role `error` for Interrupted, else Idle). Any other rejection rejects the whole read.
+3. `gateway.get('/api/chat/slots?crew=all', {signal})` must be an array, else the read rejects. A record's row is the row with its key; its workers are the rows `workersOf` finds. Every other row is ignored (Requirement 6.1).
+4. For each record: a row and its workers give its state (reading the conductor's last role when due, as above, and passing `now()` for the Stalled test). No row: `gateway.get('/api/chat/slots/<key>?limit=1', {signal})`. A rejection with `status === 404` is `missing`. A chat answer gives the state of Requirement 8.1 (`running` or `admission_queued` for Working, a last row with role `error` for Interrupted, else Your turn). Such a chat has no row in the list, so it has no workers to count. Any other rejection rejects the whole read.
 5. Return `{folder, chats, byKey: {key: {state | 'missing', lastTs, messages, role}}, at: now()}`.
 
 The whole read shares one `AbortSignal`, which the poller aborts after 10 seconds, so the limit covers however many requests the cycle makes. At most one request per chat is made, and none when the list holds the chat and its `last_ts` is unchanged.
@@ -360,7 +377,7 @@ As in the board design, these are checked with seeded generators written in the 
 
 ### Property 1: One state, by precedence
 
-*For any* chat row and last role, `stateOf` returns exactly one of the four states, Needs you when `pending_approval` or `needs_input`, else Working when `running` or `admission_queued`, else Interrupted when `interrupted` or the last role is `error`, else Idle, and a missing field counts as false.
+*For any* conductor row, its workers' rows and last role, `stateOf` returns exactly one of the six states: Needs you when any of them has `pending_approval` or `needs_input`, else Interrupted when the conductor's `interrupted` is true or its last role is `error` while its turn is not running, else Working when any has `running` or `admission_queued`, else Stalled when `hasStalled`, else Review when the conductor has an open or draft pull request, else Your turn, and a missing field counts as false.
 
 **Validates: Requirements 6.2**
 
@@ -430,7 +447,7 @@ Edited in place, as the board spec did, because the behaviour moved:
 | Board spec, requirement 1.3 | The page may also have the card controls of `start-a-story` Requirements 2, 4, 7 and 8 (4 for "Send the brief again") |
 | Board spec, introduction | The next story is described as it now is |
 | This spec, requirement 7 (criteria 1, 5 and 6), requirement 6 (criterion 6) and the introduction | Edited by `work-in-the-chat`, which owns the panel: a click opens the chat in Crew's chat panel when the host has one and follows the link otherwise, and the board's own code, not the person, never approves or answers |
-| Epic page | The "Started" mark became the four states; "Live tracking" in "Not in this epic" became "Following a conductor's work inside its chat" |
+| Epic page | The "Started" mark became the states; "Live tracking" in "Not in this epic" became "Following a conductor's work inside its chat" |
 
 Checks that the board story wrote and that stop being true (the tasks bring them in line):
 
@@ -465,13 +482,13 @@ The backend and pure page functions are tested with the tools the project has. P
 ## Decisions
 
 - **Card identity.** The `id` is the epic file and the card's name, not the spec folder, so a story's chat stays with its card when the conductor's pull request is merged and the card gains a spec. The cost is that renaming a story in its epic page, or moving it to another epic, loses its chat link. The record stays in the file, and "Start again" does not apply because the card no longer matches; this is accepted.
-- **Needs you before Working.** The four states are given as fields. Their order matters because a turn waiting for an approval is also running. The order is Needs you, Working, Interrupted, Idle.
+- **The state is the story's, not the conductor's chat.** A conductor spends most of its time waiting for its workers, so its own chat says "idle" while the story's work goes on. The six states are given as fields of the conductor's row and its workers' rows, in the order Needs you, Interrupted, Working, Stalled, Review, Your turn. "Idle" is now "Your turn": it describes the conductor's chat waiting for the person, not the story's work. Needs you comes before Working because a turn waiting for an approval is also running; Interrupted comes before Working because a worker may run on after the conductor's turn died.
 - **The brief is built by the backend.** It is plain text built from the plan on main, so the same code can be tested in Python and the page holds no prompt text.
 - **The chat is saved before the brief is sent.** Found in use: `POST /api/chat` answers when the conductor's turn ends, so a turn waiting for an approval kept the card on "Starting…", the record `reserved` and the link missing. The send is now the last step and the page does not wait for the turn. The 10 seconds is a judgement: long enough for a refusal that comes back at once to be seen, short enough that a turn that is waiting for the person is not mistaken for a hang. A request that has been waiting that long has reached Crew.
 - **No new dependency.** The signature check, the store and the page's flows use the standard library and the host's React. The page's server calls use `fetch` as the plan poller does.
 - **The folder is a setting, as the repository is.** The person puts a Crew folder id in `EPIC_BOARD_FOLDER` or `config.json`. A folder picker would need `GET /api/chat/folders` and a place to keep the choice, and can be added later without changing the records.
 - **The link is a URL.** `/chat?sid=<key>` is the shape the host's own links use (`session_deep_link`). The SDK's `useChatLauncher().openChat({slotKey})` is the other way and would keep the person inside the app's frame; the requirement asks for a link, and the manual check confirms it opens the chat.
-- **Polling the list.** `GET /api/chat/slots` returns every chat Crew has open, and an RFC in Crew's repository (`docs/request-for-change/rfc-python-rust-hybrid-backend.md`) reports loop stalls inside that endpoint on a large list. The page reads it every 15 seconds, and every 5 seconds only while a chat is working, needs the person or is restoring, and never while hidden or while there are no started chats.
+- **Polling the list.** `GET /api/chat/slots?crew=all` returns every chat Crew has open, workers included, and an RFC in Crew's repository (`docs/request-for-change/rfc-python-rust-hybrid-backend.md`) reports loop stalls inside that endpoint on a large list. The page reads it every 15 seconds, and every 5 seconds only while a chat is working, needs the person or is restoring, and never while hidden or while there are no started chats.
 - **Signatures on `/chats`.** The backend listens on loopback with no login, and the new routes write. Checking the host's signature keeps another local process or a web page from reserving or removing records. The cost is that the backend needs `KIROCREW_PROXY_SECRET`; without it the routes answer 503 and starting is unavailable, which the manual check confirms is not the case on the host.
 
 ## Open Questions
@@ -483,4 +500,4 @@ The backend and pure page functions are tested with the tools the project has. P
 5. **Does uninstalling the app reset its chats?** Closed by a probe on Crew 0.12.1. Uninstalling does not delete chats: the chats and their messages stay. Chats the page creates can be resumed.
 6. **Does the host pass the signature and the secret?** Closed by a probe on Crew 0.12.1. A separate-process backend receives `KIROCREW_PROXY_SECRET`, and proxied requests carry a v1 `X-KiroCrew-Proxy` header that verifies.
 7. **What if the brief's `agent` is unavailable?** The spike created chats with `kirocrew-conductor`; a Crew without that agent would fail at the create step with the reason shown.
-8. **A brief that was not sent, after the page is gone.** The page keeps the brief in memory, so after a reload a chat whose brief was never sent shows its link and an Idle state and no note, and the person would have to type the brief themselves. Should the backend rebuild the brief for a started chat (a route such as `GET /chats/<name>/brief`, refused when the chat holds a message), so that "Send the brief again" survives a reload?
+8. **A brief that was not sent, after the page is gone.** The page keeps the brief in memory, so after a reload a chat whose brief was never sent shows its link and a Your turn state and no note, and the person would have to type the brief themselves. Should the backend rebuild the brief for a started chat (a route such as `GET /chats/<name>/brief`, refused when the chat holds a message), so that "Send the brief again" survives a reload?

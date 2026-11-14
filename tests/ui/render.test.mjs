@@ -847,7 +847,7 @@ function chatsView({ card: cardOver = {}, chats = {}, ui = {}, failed = false, e
     ui,
   }
 }
-const withChat = (key = 'k1', entry = { state: 'idle' }, over = {}) => ({
+const withChat = (key = 'k1', entry = { state: 'your-turn' }, over = {}) => ({
   records: [{ card_id: CARD_ID, name: key, key, created: 't' }], byKey: { [key]: entry }, ...over,
 })
 const missing = (at, since = 0, key = 'k1') => withChat(key, { state: 'missing' }, { missingSince: { [key]: since }, at })
@@ -967,7 +967,7 @@ test('a card with a started chat is a link with the chat address, in every colum
 })
 
 test('the state word is shown for each state, with the state in an attribute, and not before it has been read', () => {
-  const words = { 'needs-you': 'Needs you', working: 'Working', interrupted: 'Interrupted', idle: 'Idle' }
+  const words = { 'needs-you': 'Needs you', working: 'Working', interrupted: 'Interrupted', 'your-turn': 'Your turn', stalled: 'Stalled' }
   for (const [state, word] of Object.entries(words)) {
     const li = theCard(renderWith(chatsView({ chats: withChat('k1', { state }) })))
     const marks = findAll(li, (n) => n.props.className === 'eb-chat-state')
@@ -978,6 +978,18 @@ test('the state word is shown for each state, with the state in an attribute, an
   const unread = theCard(renderWith(chatsView({ chats: withChat('k1', undefined, { byKey: {} }) })))
   assert.equal(findAll(unread, (n) => n.props.className === 'eb-chat-state').length, 0)
   assert.equal(links(unread).length, 1, 'the link shows before the state is known')
+})
+
+test('a Review state word is a link to its pull request that opens safely, and the other words are plain text', () => {
+  const review = { number: 7, url: 'https://github.com/o/r/pull/7', failed: true }
+  const li = theCard(renderWith(chatsView({ chats: withChat('k1', { state: 'review', review }) })))
+  const [mark] = findAll(li, (n) => n.props.className === 'eb-chat-state')
+  assert.equal(textOf(mark), 'Checks failed #7')
+  assert.equal(mark.props['data-state'], 'review')
+  const inside = findAll(mark, (n) => n.type === 'a')
+  assert.deepEqual(inside.map((a) => [a.props.href, a.props.target, a.props.rel]), [[review.url, '_blank', 'noopener noreferrer']])
+  const plain = theCard(renderWith(chatsView({ chats: withChat('k1', { state: 'your-turn' }) })))
+  assert.equal(findAll(plain, (n) => n.props.className === 'eb-chat-state').flatMap((m) => findAll(m, (n) => n.type === 'a')).length, 0)
 })
 
 test('the link is built only from the percent-encoded key', () => {
@@ -1294,7 +1306,7 @@ test('host: hostSelect gives null when the module has no Select or the lookup th
 const FakeChat = () => null
 const panelOf = (tree) => findAll(tree, (n) => n.type === 'aside')
 const openView = (over = {}) => chatsView({
-  chats: withChat('k1', { state: 'idle' }), ui: { open: { cardId: CARD_ID, key: 'k1' } }, ...over,
+  chats: withChat('k1', { state: 'your-turn' }), ui: { open: { cardId: CARD_ID, key: 'k1' } }, ...over,
 })
 const withPanel = (view) => ({ ...view, panelAvailable: true })
 const clickEvent = (over = {}) => {
@@ -1336,9 +1348,9 @@ test('the shell wraps the board in eb-shell > eb-split, in the same place with o
 
 test('the Open_Card, and only it, shows "Chat open", aria-current and data-open', () => {
   const other = { id: 'e.md#Other', name: 'Other', status: 'planned', spec: null, tasks: null, epic: 'E', description: '' }
-  const chats = withChat('k1', { state: 'idle' }, { records: [
+  const chats = withChat('k1', { state: 'your-turn' }, { records: [
     { card_id: CARD_ID, name: 'k1', key: 'k1', created: 't' }, { card_id: other.id, name: 'k2', key: 'k2', created: 't' },
-  ], byKey: { k1: { state: 'idle' }, k2: { state: 'idle' } } })
+  ], byKey: { k1: { state: 'your-turn' }, k2: { state: 'your-turn' } } })
   const tree = renderWith(withPanel(chatsView({ chats, extraCards: [other], ui: { open: { cardId: CARD_ID, key: 'k1' } } })))
   const [first, second] = findAll(tree, (n) => n.type === 'li' && n.props.className === 'eb-card')
   assert.equal(first.props['data-open'], 'true')
