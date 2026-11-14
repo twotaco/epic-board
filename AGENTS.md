@@ -22,4 +22,4 @@ Run the tests and report how many ran and passed:
 
 The page tests need Node. They run through `tests/test_ui.py`, which runs `node --test tests/ui/` and is reported as skipped when Node is missing. A skipped test is not a pass; report it as skipped.
 
-Skip them only when you changed nothing but Markdown, and say so.
+Skip the tests only when you changed nothing but Markdown, and say so.

@@ -11,7 +11,8 @@ from urllib.parse import urlparse
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from gitsource import SourceError, open_snapshot  # noqa: E402
+from gitsource import open_snapshot, read_snapshot  # noqa: E402
+from held import Holder  # noqa: E402
 from plan import build_plan  # noqa: E402
 
 APP_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -54,26 +55,26 @@ def error_body(code, message, config_path=None):
     return {"error": body}
 
 
-def plan_response(repository, error, config_path):
-    """Return (http status, body). Never reads anything from the request."""
+def plan_response(holder, error, config_path):
+    """Return (http status, body). Answers from the holder, never runs git, never reads the request."""
     if error:
         return STATUS[error["code"]], {"error": error}
     try:
-        snapshot = open_snapshot(repository)
-        groups, problems = build_plan(snapshot)
-    except SourceError as failure:
-        if failure.code == "not_a_checkout":
-            message = f"{failure.message.rstrip('.')}. Check {ENV_NAME} or the repository value in {config_path}."
-            return 409, error_body("repository_not_a_checkout", message, config_path)
-        return STATUS[failure.code], error_body(failure.code, failure.message)
+        kind, value = holder.request()
+        if kind == "pending":
+            return 202, {"pending": True}
+        if kind == "error":
+            code, message = value["code"], value["message"]
+            if code == "repository_not_a_checkout":
+                message = f"{message.rstrip('.')}. Check {ENV_NAME} or the repository value in {config_path}."
+                return STATUS[code], error_body(code, message, config_path)
+            return STATUS[code], error_body(code, message)
+        return 200, value
     except Exception:
         return 500, error_body("internal", "The plan could not be built.")
-    fetch = {"ok": True} if not snapshot.fetch_error else {"ok": False, "reason": snapshot.fetch_error}
-    return 200, {"repository": repository, "branch": snapshot.branch, "ref": snapshot.ref,
-                 "commit": snapshot.commit, "fetch": fetch, "groups": groups, "problems": problems}
 
 
-def make_handler(repository, error, config_path):
+def make_handler(holder, error, config_path):
     class Handler(BaseHTTPRequestHandler):
         def _send(self, code, body):
             data = json.dumps(body).encode()
@@ -88,7 +89,7 @@ def make_handler(repository, error, config_path):
             if path.endswith("/health"):
                 return self._send(200, {"ok": True})
             if path.endswith("/plan"):
-                return self._send(*plan_response(repository, error, config_path))
+                return self._send(*plan_response(holder, error, config_path))
             return self._send(404, {"error": {"code": "not_found", "message": "Not found."}})
 
         def log_message(self, *args):
@@ -97,10 +98,16 @@ def make_handler(repository, error, config_path):
     return Handler
 
 
-def make_server(port, repository, error, config_path):
-    return ThreadingHTTPServer(("127.0.0.1", port), make_handler(repository, error, config_path))
+def make_server(port, holder, error, config_path):
+    """Bind the port. Starts no thread and runs no git."""
+    return ThreadingHTTPServer(("127.0.0.1", port), make_handler(holder, error, config_path))
 
 
 if __name__ == "__main__":
     repo, problem = load_repository()
-    make_server(int(os.environ["PORT"]), repo, problem, os.path.join(APP_DIR, "config.json")).serve_forever()
+    # The Holder does nothing until start(), so the port is bound before any git runs.
+    held = None if problem else Holder(repo, read_snapshot, open_snapshot, build_plan)
+    server = make_server(int(os.environ["PORT"]), held, problem, os.path.join(APP_DIR, "config.json"))
+    if held:
+        held.start()
+    server.serve_forever()

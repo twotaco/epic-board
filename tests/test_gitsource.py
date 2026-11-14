@@ -5,7 +5,7 @@ import tempfile
 import unittest
 
 import gitsource
-from gitsource import SourceError, open_snapshot, run_git
+from gitsource import SourceError, open_snapshot, read_snapshot, run_git
 
 
 def git(cwd, *args):
@@ -42,6 +42,7 @@ class OpenSnapshotTests(Repos):
     def test_reads_main_when_origin_head_set(self):
         snap = open_snapshot(self.checkout)
         self.assertEqual((snap.branch, snap.ref, snap.fetch_error), ("main", "origin/main", None))
+        self.assertIs(snap.fetched, True)
         self.assertEqual(len(snap.commit), 40)
 
     def test_origin_head_names_another_branch(self):
@@ -66,6 +67,7 @@ class OpenSnapshotTests(Repos):
         os.rename(self.origin, self.origin + ".gone")
         snap = open_snapshot(self.checkout)
         self.assertEqual(snap.commit, first.commit)
+        self.assertIs(snap.fetched, False)
         self.assertTrue(snap.fetch_error)
 
     def test_failed_fetch_without_earlier_copy(self):
@@ -83,6 +85,44 @@ class OpenSnapshotTests(Repos):
             with self.assertRaises(SourceError) as caught:
                 open_snapshot(path)
             self.assertEqual(caught.exception.code, "not_a_checkout")
+
+
+class ReadSnapshotTests(Repos):
+    def test_reads_local_copy_without_fetching(self):
+        first = read_snapshot(self.checkout)
+        self.commit_file("x.txt", "x")
+        git(self.seed, "push", "-q", "origin", "main")
+        snap = read_snapshot(self.checkout)
+        self.assertEqual(snap.commit, first.commit)
+        self.assertEqual((snap.branch, snap.ref), ("main", "origin/main"))
+        self.assertIsNone(snap.fetched)
+        self.assertIsNone(snap.fetch_error)
+
+    def test_first_read_follows_origin_head_and_falls_back_to_main(self):
+        git(self.seed, "checkout", "-q", "-b", "trunk")
+        git(self.seed, "push", "-q", "origin", "trunk")
+        git(self.checkout, "fetch", "-q", "origin")
+        git(self.checkout, "remote", "set-head", "origin", "trunk")
+        self.assertEqual((read_snapshot(self.checkout).branch, read_snapshot(self.checkout).ref),
+                         ("trunk", "origin/trunk"))
+        git(self.checkout, "remote", "set-head", "origin", "-d")
+        self.assertEqual(read_snapshot(self.checkout).branch, "main")
+
+    def test_no_remote_branch_is_ref_unreadable_without_fetch_reason(self):
+        bare = os.path.join(self.root, "lonely")
+        subprocess.run(["git", "init", "-q", bare], check=True)
+        git(bare, "remote", "add", "origin", os.path.join(self.root, "missing.git"))
+        with self.assertRaises(SourceError) as caught:
+            read_snapshot(bare)
+        self.assertEqual(caught.exception.code, "ref_unreadable")
+        self.assertEqual(caught.exception.message, "Could not read origin/main")
+
+    def test_plain_directory_is_not_a_checkout(self):
+        plain = os.path.join(self.root, "plain")
+        os.mkdir(plain)
+        with self.assertRaises(SourceError) as caught:
+            read_snapshot(plain)
+        self.assertEqual(caught.exception.code, "not_a_checkout")
 
 
 class FileAccessTests(Repos):

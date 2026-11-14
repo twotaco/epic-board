@@ -27,19 +27,19 @@ The placeholder page (`ui/index.mjs`) stays in place until group 4 replaces it. 
     - Run `python3 -m unittest discover -s tests -t .` and report the counts run, passed and skipped
     - _Requirements: 4.1, 4.2, 4.3_
 
-- [ ] 2. Bring the first story in line, and add the held plan
-  - [ ] 2.1 Add `read_snapshot` and `Snapshot.fetched` to `backend/gitsource.py`
+- [x] 2. Bring the first story in line, and add the held plan
+  - [x] 2.1 Add `read_snapshot` and `Snapshot.fetched` to `backend/gitsource.py`
     - Split `open_snapshot` into `_open(repository, fetch)` and two entry points: `read_snapshot(repository)` (no fetch) and `open_snapshot(repository)` (fetch, then read, as before)
     - Add `Snapshot.fetched`: `True` when the fetch succeeded, `False` when it failed, `None` when none was tried; `fetch_error` stays set only when `fetched` is `False`
     - With `fetch=False`, skip the fetch step and the fetch lock; a ref that does not resolve raises `ref_unreadable` with no fetch reason; a path that is not a directory or not a checkout raises `not_a_checkout` in both
     - Keep the 30-second limit, `origin/HEAD` handling and file access unchanged
     - _Requirements: 5.4, 5.5_
-  - [ ] 2.2 Check the git access in `tests/test_gitsource.py`
+  - [x] 2.2 Check the git access in `tests/test_gitsource.py`
     - Add `ReadSnapshotTests(Repos)`: after the origin gains a commit, `read_snapshot` still returns the old commit (no fetch); `fetched` is `None` and `fetch_error` is `None`; a checkout with no `origin/<branch>` raises `ref_unreadable` without a fetch reason; a plain directory raises `not_a_checkout`
     - Add an assertion on `fetched` to `OpenSnapshotTests.test_reads_main_when_origin_head_set` (`True`) and to `OpenSnapshotTests.test_failed_fetch_with_earlier_copy` (`False`)
     - Leave `FileAccessTests` and `RunnerTests` unchanged
     - _Requirements: 5.4, 5.5_
-  - [ ] 2.3 Write `backend/held.py`
+  - [x] 2.3 Write `backend/held.py`
     - `Holder(repository, read_snapshot, open_snapshot, build_plan, clock=time.monotonic, spawn=spawn_thread, interval=60)` with `start()`, `first_read()`, `request()` and `run_refresh()`; `spawn_thread(fn)` starts a daemon thread; import only `SourceError` from git code
     - Keep one immutable `State` (`plan`, `error`, `fetched_at`, `refreshing`, `last_refresh_ended`, `first_read_ended`), replaced as a whole under a lock that is never held across git or a plan build; a stored plan dict is never changed (a failed-fetch update stores a copy with a new `fetch`)
     - `first_read()`: no fetch; success holds the plan with `fetch` `{"ok": null}` and no `fetched_at`; `not_a_checkout` holds `repository_not_a_checkout`; any other failure holds nothing; always sets `first_read_ended`; then `start()` claims the first refresh in the same thread
@@ -47,25 +47,25 @@ The placeholder page (`ui/index.mjs`) stays in place until group 4 replaces it. 
     - `run_refresh()`: apply each row of the design's transition table (fetch succeeded, fetch failed with an earlier copy, build failure with a plan held, build failure with none held); stamp `fetched_at` with `clock()` when `open_snapshot` returns; hold `not_a_checkout` as `repository_not_a_checkout` and any other exception as `internal` with the message "The plan could not be built." and the traceback on stderr; clear `refreshing` and set `last_refresh_ended` in a `finally`
     - The plan body holds `repository`, `branch`, `ref`, `commit`, `fetch`, `groups` and `problems`
     - _Requirements: 5.1, 5.2, 5.3, 5.4, 5.5, 6.1, 6.2, 6.3, 6.4, 6.5_
-  - [ ] 2.4 Check the holder against the transition table in `tests/test_held.py`
+  - [x] 2.4 Check the holder against the transition table in `tests/test_held.py`
     - Drive `Holder` with a fake clock, fake `read_snapshot`, `open_snapshot` and `build_plan`, and a `spawn` that queues jobs; no sleeping, no git
     - One test per row of the design's transition table: first read succeeds, first read fails not a checkout, first read fails for another reason, first refresh claimed, fetch succeeded, fetch failed with an earlier copy, build failure with a plan held, build failure with none held
     - Nothing held answers pending; a request answered while a refresh is blocked on a `threading.Event` returns at once; a request between the end of the first read and the startup claim claims the refresh and the startup thread then does nothing; an unexpected exception gives `internal` and does not leave `refreshing` set
     - A request 59 seconds after a refresh ended starts none, and 60 seconds starts one
     - _Requirements: 5.1, 5.2, 5.3, 5.4, 5.5, 6.1, 6.2, 6.3, 6.4, 6.5_
-  - [ ] 2.5 Write property test for the holder state
+  - [x] 2.5 Write property test for the holder state
     - **Property 1: The holder never holds a plan and an error, and never loses a plan**
     - Seeded `random.Random` sequences of first-read results, requests, clock advances and refresh outcomes, at least 100 iterations, printing the seed on failure
     - **Validates: Requirements 5.5, 6.3, 6.4, 6.5**
-  - [ ] 2.6 Write property test for the refresh rule
+  - [x] 2.6 Write property test for the refresh rule
     - **Property 2: At most one refresh, started only when due**
     - Same generator style; check that at most one refresh is claimed and unfinished, that `refreshing` is true exactly then, and that a refresh is claimed only when due
     - **Validates: Requirements 5.4, 6.1, 6.2**
-  - [ ] 2.7 Write property test for the plan age
+  - [x] 2.7 Write property test for the plan age
     - **Property 3: Age follows the last successful fetch**
     - Check that `age_seconds` is none exactly when no refresh fetch has succeeded, equals the whole seconds since the latest successful fetch, and is not changed by the first-read plan or a failed fetch
     - **Validates: Requirements 5.2, 5.4, 6.3, 6.4, 6.5**
-  - [ ] 2.8 Rewrite `backend/server.py` so `/plan` answers from the holder
+  - [x] 2.8 Rewrite `backend/server.py` so `/plan` answers from the holder
     - `plan_response(holder, error, config_path)`: a configuration error answers its status with `{"error": error}`; otherwise call `holder.request()` and answer 202 with `{"pending": true}`, the held error with the status from `STATUS`, or 200 with the plan including `age_seconds` and `refreshing`
     - Give a held `repository_not_a_checkout` the "Check EPIC_BOARD_REPOSITORY or the repository value in `<config.json>`" ending and `settings` at answer time, as the code does today
     - An exception in `plan_response` answers 500 `internal` with no repository path in the message
@@ -73,24 +73,24 @@ The placeholder page (`ui/index.mjs`) stays in place until group 4 replaces it. 
     - In `__main__`, load the repository, build the server and bind the port, then build `Holder(repo, read_snapshot, open_snapshot, build_plan)`, call `start()` and then `serve_forever()`, so `/health` answers before the first read ends; with a configuration error build no holder, start no thread and run no git
     - Keep `load_repository`, `config_error`, `error_body`, `STATUS`, the route matching, the 404 and the ignoring of the query and body
     - _Requirements: 5.1, 5.2, 5.3, 5.5, 5.6_
-  - [ ] 2.9 Update `tests/test_server.py` as the design's table says
+  - [x] 2.9 Update `tests/test_server.py` as the design's table says
     - `ServeTests.get()` takes a holder or none and calls the new `make_server` signature; keep the real origin and checkout built in `setUp`; leave `LoadRepositoryTests` unchanged
     - Replace `test_plan_ignores_repo_in_query` with two tests on the same real checkout: after `first_read()` the body has `fetch` `{"ok": null}`, `age_seconds` null, `refreshing`, a `description` on the card and the repository unchanged by the `?repo=` and `repository=` query; after one queued refresh runs, `fetch` is `{"ok": true}` and `age_seconds` is 0
     - Update `test_not_a_checkout_is_409` to call `first_read()` first, with the 409 body and both setting names unchanged
     - Update `test_not_configured_is_409_with_both_names`, `test_health_works_without_configuration` and `test_unknown_path_is_404` for the signature only; the first also asserts that no git command ran and no holder exists
     - Add tests: 202 with `{"pending": true}` before the first read; a held `ref_unreadable` answers 502; a held `internal` answers 500 with no repository path in the message; the 200 answer has `age_seconds` and `refreshing`
     - _Requirements: 5.1, 5.2, 5.3, 5.5, 5.6_
-  - [ ] 2.10 Keep the placeholder page working with the new answers in `ui/index.mjs`
+  - [x] 2.10 Keep the placeholder page working with the new answers in `ui/index.mjs`
     - Make the smallest change: when the answer is 202 with `{"pending": true}`, show "Loading…" and ask again after 2 seconds; show `fetch failed` only when `plan.fetch.ok === false`, so `null` is not read as a failure
     - Change nothing else in the placeholder; group 4 replaces it
     - _Requirements: 1.1_
-  - [ ] 2.11 Re-read the four edited criteria of the earlier spec and confirm each now holds
+  - [x] 2.11 Re-read the four edited criteria of the earlier spec and confirm each now holds
     - Re-read earlier spec criteria 2.1, 2.2, 2.5 and 8.4 (`.kiro/specs/read-the-plan-from-main/requirements.md`) without editing the file or ticking its tasks
     - For each, confirm by a named test or by running the backend, and list the evidence (test name, or the command and the answer seen) in the pull request description: 2.1 (main branch from `origin/HEAD`, else `main`, on both the first read and a refresh); 2.2 (a refresh fetches and reads `origin/<branch>`, the first plan is read before any fetch: origin advances and the first-read commit stays old); 2.5 (a failed fetch with no `origin/<branch>` and no plan held answers `ref_unreadable` 502 with no plan, and with a plan held keeps the plan); 8.4 (a card has name, status, spec, tasks, description and epic, and `tasks` is none only for a card with no spec or an unreadable `tasks.md`)
     - Also confirm that the earlier spec's criteria 1.3 and 1.4 still hold (query ignored, configuration errors with no plan)
     - If a criterion does not hold, fix the code in this group and say so; if the spec text looks wrong, say so instead of changing it
     - _Requirements: 5.4, 5.5, 5.6, 6.3, 6.4, 6.5_
-  - [ ] 2.12 Run the tests
+  - [x] 2.12 Run the tests
     - Run `python3 -m unittest discover -s tests -t .` and report the counts run, passed and skipped
     - _Requirements: 5.1, 5.2, 5.3, 5.4, 5.5, 5.6, 6.1, 6.2, 6.3, 6.4, 6.5_
 

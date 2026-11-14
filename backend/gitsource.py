@@ -45,12 +45,16 @@ def run_git(repository, *args):
 
 
 class Snapshot:
-    def __init__(self, repository, branch, commit, fetch_error=None):
+    """fetched: True when the fetch succeeded, False when it failed, None when none was tried.
+    fetch_error is set only when fetched is False."""
+
+    def __init__(self, repository, branch, commit, fetched=None, fetch_error=None):
         self.repository = repository
         self.branch = branch
         self.ref = f"origin/{branch}"
         self.commit = commit
-        self.fetch_error = fetch_error
+        self.fetched = fetched
+        self.fetch_error = fetch_error if fetched is False else None
 
     def list_files(self, *prefixes):
         ok, out, error = run_git(self.repository, "ls-tree", "-r", "-z", "--name-only", self.commit, "--", *prefixes)
@@ -71,18 +75,30 @@ def main_branch(repository):
     return name[len("origin/"):] if name.startswith("origin/") and len(name) > len("origin/") else "main"
 
 
-def open_snapshot(repository):
+def _open(repository, fetch):
     if not os.path.isdir(repository):
         raise SourceError("not_a_checkout", f"{repository} is not a directory")
     ok, _, error = run_git(repository, "rev-parse", "--git-dir")
     if not ok:
         raise SourceError("not_a_checkout", f"{repository} is not a git checkout: {error}")
     branch = main_branch(repository)
-    with _fetch_lock:
-        fetched, _, fetch_error = run_git(
-            repository, "fetch", "--quiet", "origin", f"+refs/heads/{branch}:refs/remotes/origin/{branch}")
+    fetched, fetch_error = None, None
+    if fetch:
+        with _fetch_lock:
+            fetched, _, fetch_error = run_git(
+                repository, "fetch", "--quiet", "origin", f"+refs/heads/{branch}:refs/remotes/origin/{branch}")
     ok, out, _ = run_git(repository, "rev-parse", "--verify", "--quiet", f"refs/remotes/origin/{branch}^{{commit}}")
     if not ok:
-        reason = "" if fetched else f": {fetch_error}"
+        reason = f": {fetch_error}" if fetched is False else ""
         raise SourceError("ref_unreadable", f"Could not read origin/{branch}{reason}")
-    return Snapshot(repository, branch, out.decode().strip(), None if fetched else fetch_error)
+    return Snapshot(repository, branch, out.decode().strip(), fetched, None if fetched is not False else fetch_error)
+
+
+def read_snapshot(repository):
+    """Read the local origin/<main branch> without fetching."""
+    return _open(repository, fetch=False)
+
+
+def open_snapshot(repository):
+    """Fetch the main branch, then read it."""
+    return _open(repository, fetch=True)

@@ -89,6 +89,25 @@ class PlanTests(unittest.TestCase):
         self.assertEqual(groups[0]["cards"][0]["tasks"], None)
         self.assertEqual(groups[0]["cards"][0]["status"], "planned")
 
+    def test_every_card_has_the_six_fields_and_tasks_is_none_only_without_a_readable_tasks_file(self):
+        groups, _ = build_plan(Memory({
+            ".kiro/specs/ok/tasks.md": "- [x] 1\n",
+            ".kiro/specs/none/design.md": "x",
+            ".kiro/specs/bad/tasks.md": OSError("boom"),
+            "docs/epics/e.md": "# E\n## Stories\n- [Ok](../../.kiro/specs/ok/) — planned. Words.\n"
+                               "- [Bad](../../.kiro/specs/bad/) — planned\n- Ghost — planned\n",
+        }))
+        cards = {c["name"]: c for g in groups for c in g["cards"]}
+        self.assertEqual(len(cards), 4)
+        for found in cards.values():
+            self.assertEqual(set(found), {"name", "status", "spec", "tasks", "description", "epic"})
+        self.assertEqual(cards["Ok"]["tasks"], {"done": 1, "total": 1})
+        self.assertEqual(cards["none"]["tasks"], {"done": 0, "total": 0})
+        self.assertIsNone(cards["none"]["epic"])
+        self.assertIsNone(cards["Bad"]["tasks"])
+        self.assertIsNone(cards["Ghost"]["tasks"])
+        self.assertEqual((cards["Ok"]["spec"], cards["Ok"]["epic"], cards["Ok"]["description"]), ("ok", "E", "Words."))
+
     def test_epic_without_stories_is_kept(self):
         groups, _ = build_plan(Memory({"docs/epics/e.md": "# Empty\n"}))
         self.assertEqual(groups, [{"epic": {"name": "Empty", "file": "e.md"}, "cards": []}])
