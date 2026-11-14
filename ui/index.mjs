@@ -8,13 +8,27 @@ export default function EpicBoard() {
   const [error, setError] = useState('')
 
   useEffect(() => {
-    fetch('/apps/epic-board/api/plan', { credentials: 'same-origin' })
-      .then(async (response) => {
-        const body = await response.json().catch(() => null)
-        if (!response.ok) throw new Error(body?.error?.message ?? `Request failed with status ${response.status}`)
-        setPlan(body)
-      })
-      .catch((failure) => setError(String(failure?.message ?? failure)))
+    let timer = null
+    let stopped = false
+    const load = () => {
+      fetch('/apps/epic-board/api/plan', { credentials: 'same-origin' })
+        .then(async (response) => {
+          const body = await response.json().catch(() => null)
+          if (stopped) return
+          if (response.status === 202 && body?.pending === true) {
+            timer = setTimeout(load, 2000)
+            return
+          }
+          if (!response.ok) throw new Error(body?.error?.message ?? `Request failed with status ${response.status}`)
+          setPlan(body)
+        })
+        .catch((failure) => { if (!stopped) setError(String(failure?.message ?? failure)) })
+    }
+    load()
+    return () => {
+      stopped = true
+      if (timer !== null) clearTimeout(timer)
+    }
   }, [])
 
   return h('div', { style: { padding: 24, overflowY: 'auto', height: '100%' } },
@@ -25,7 +39,7 @@ export default function EpicBoard() {
         `repository: ${plan.repository}`,
         `branch: ${plan.branch} (${plan.ref})`,
         `commit: ${plan.commit}`,
-        plan.fetch.ok ? 'fetch: ok' : `fetch failed, showing an earlier copy: ${plan.fetch.reason}`,
+        plan.fetch.ok !== false ? 'fetch: ok' : `fetch failed, showing an earlier copy: ${plan.fetch.reason}`,
         ...plan.groups.map((group) => `${group.epic ? group.epic.name : 'No epic'}: ${group.cards.length} cards`),
         `problems: ${plan.problems.length ? JSON.stringify(plan.problems) : 'none'}`,
       ].join('\n')))
