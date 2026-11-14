@@ -186,8 +186,10 @@ function assertStructure(tree, label, { cardControls = false } = {}) {
       || ['button', 'link', 'checkbox', 'menuitem', 'tab', 'switch'].includes(node.props.role)
   })
   const insideCards = new Set(findAll(tree, (node) => node.type === 'li' && node.props.className === 'eb-card').flatMap((li) => elements(li)))
-  assert.deepEqual(interactive.filter((node) => !insideCards.has(node)), [], `${label}: interactive element outside a card`)
-  if (!cardControls) assert.deepEqual(interactive, [], `${label}: a view with no chats has no control`)
+  // The epic dropdown (epic filter, Requirement 1.1) is the one control outside a card.
+  const insideFilter = new Set(findAll(tree, (node) => node.props.className === 'eb-filter').flatMap((box) => elements(box)))
+  assert.deepEqual(interactive.filter((node) => !insideCards.has(node) && !insideFilter.has(node)), [], `${label}: interactive element outside a card`)
+  if (!cardControls) assert.deepEqual(interactive.filter((node) => !insideFilter.has(node)), [], `${label}: a view with no chats has no control`)
   const details = findAll(tree, (node) => node.type === 'details')
   const summaries = findAll(tree, (node) => node.type === 'summary')
   assert.ok(details.length <= 1, `${label}: more than one details`)
@@ -1178,5 +1180,106 @@ test('the brief states keep the board\'s structure: one title, no heading added,
     assertStructure(tree, `brief ${brief.kind}`, { cardControls: true })
     assert.deepEqual(headingLevels(tree), headingLevels(renderBoard(h, { ...view, chats: undefined, ui: undefined })))
     for (const role of rolesOf(tree)) assert.ok(['status', 'group'].includes(role), role)
+  }
+})
+
+// ---- The epic dropdown ----
+
+const FakeSelect = () => null
+const filterBox = (tree) => findAll(tree, (n) => n.props.className === 'eb-filter')
+const labelled = (tree) => findAll(tree, (n) => n.props['aria-label'] === 'Epic')
+const FILTER_LABELS = ['All epics', 'Epic Board', 'Hardening', 'No epic']
+
+test('render: host Select used when present', () => {
+  const calls = []
+  const tree = renderBoard(h, planView(planBody(), {}), { filter: (key) => calls.push(key) }, { Select: FakeSelect })
+  const [select] = findAll(tree, (n) => n.type === FakeSelect)
+  assert.ok(select)
+  assert.equal(select.props.value, 'all')
+  assert.deepEqual(select.props.options.map((o) => o.label), FILTER_LABELS)
+  assert.deepEqual(select.props.options.map((o) => o.value), ['all', 'epic-board.md', 'hardening.md', 'no-epic'])
+  select.props.onChange('hardening.md')
+  select.props.onChange({ target: { value: 'no-epic' } })
+  assert.deepEqual(calls, ['hardening.md', 'no-epic'])
+  assert.equal(findAll(tree, (n) => n.type === 'select').length, 0)
+})
+
+test('render: native select when the ui module is missing', () => {
+  const tree = renderBoard(h, planView(planBody()), {})
+  assert.equal(findAll(tree, (n) => n.type === 'select').length, 1)
+})
+
+test('render: native select when Select is missing from the module', () => {
+  const tree = renderBoard(h, planView(planBody()), {}, { Select: null })
+  assert.equal(findAll(tree, (n) => n.type === 'select').length, 1)
+})
+
+test('render: aria-label Epic on the host Select', () => {
+  const tree = renderBoard(h, planView(planBody()), {}, { Select: FakeSelect })
+  assert.equal(labelled(tree).length, 1)
+  assert.equal(labelled(tree)[0].type, FakeSelect)
+})
+
+test('render: aria-label Epic on the native select, with its value, options and onChange', () => {
+  const calls = []
+  const tree = renderBoard(h, planView(planBody()), { filter: (key) => calls.push(key) })
+  const [select] = labelled(tree)
+  assert.equal(select.type, 'select')
+  assert.equal(select.props.value, 'all')
+  assert.deepEqual(select.children.map((o) => textOf(o)), FILTER_LABELS)
+  select.props.onChange({ target: { value: 'epic-board.md' } })
+  assert.deepEqual(calls, ['epic-board.md'])
+})
+
+test('render: the dropdown sits after the header and before the columns, and follows the view key', () => {
+  const view = viewOf(reduce(initialState, classify(200, planBody())), 'hardening.md')
+  const tree = renderBoard(h, view, {})
+  const classes = []
+  for (const node of tree.children) if (node && node.props) classes.push(node.props.className)
+  assert.ok(classes.indexOf('eb-header') < classes.indexOf('eb-filter'))
+  assert.ok(classes.indexOf('eb-filter') < classes.indexOf('eb-columns'))
+  assert.equal(labelled(tree)[0].props.value, 'hardening.md')
+})
+
+test('render: no dropdown while loading, on an error, unreachable, or on the empty board', () => {
+  for (const view of [loadingView(), unreachableView(), errorView(), planView(planBody({ groups: [] }))]) {
+    assert.equal(filterBox(renderBoard(h, view, {})).length, 0)
+  }
+})
+
+test('render: notices and problems stay under a filter', () => {
+  const body = planBody({ problems: problemsOf(2), fetch: { ok: false, reason: 'offline' } })
+  const view = viewOf(reduce(reduce(initialState, classify(200, body)), classify(200, null)), 'hardening.md')
+  const text = textOf(renderBoard(h, view, {}))
+  assert.match(text, /Could not fetch from origin/)
+  assert.match(text, /Could not reach the backend\. Showing the plan/)
+  assert.match(text, /spec-1\/tasks\.md/)
+  assert.doesNotMatch(text, /Read the plan from main/)
+})
+
+test('host: hostSelect finds Select', async () => {
+  globalThis.window = { __kirocrew_modules: { '@kirocrew/ui': { Select: FakeSelect } } }
+  try {
+    const { hostSelect } = await import('../../ui/index.mjs')
+    assert.equal(hostSelect(), FakeSelect)
+  } finally {
+    delete globalThis.window
+  }
+})
+
+test('host: hostSelect gives null with no window', async () => {
+  const { hostSelect } = await import('../../ui/index.mjs')
+  assert.equal(hostSelect(), null)
+})
+
+test('host: hostSelect gives null when the module has no Select or the lookup throws', async () => {
+  const { hostSelect } = await import('../../ui/index.mjs')
+  globalThis.window = { __kirocrew_modules: { '@kirocrew/ui': {} } }
+  try {
+    assert.equal(hostSelect(), null)
+    globalThis.window = { get __kirocrew_modules() { throw new Error('no') } }
+    assert.equal(hostSelect(), null)
+  } finally {
+    delete globalThis.window
   }
 })
