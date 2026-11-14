@@ -14,7 +14,7 @@
     - `parse_epic(text, file)` returns the name from the first level-one heading, or the file name
     - `parse_stories(text, whole_file)` reads the `## Stories` section, or the whole file when asked, taking only list items at the first column in whole-file mode
     - Match `- [Name](link) — status` and `- Name — status`; skip lines that do not fit without reporting them
-    - Normalize the status (trim, lowercase, drop one trailing full stop) and keep it only if it is `planned`, `in progress` or `done`
+    - Normalize the status (take the text before the first full stop, trim, lowercase; keep the rest as the description) and keep it only if it is `planned`, `in progress` or `done`
     - Pull the spec folder name from a link with the `.kiro/specs/<folder>` pattern
     - _Requirements: 5.2, 5.3, 5.4, 5.9, 7.3_
   - [x] 2.3 Check the parsers with example text
@@ -72,12 +72,12 @@
     - Answer errors as in the design's table (`repository_not_configured` and `repository_not_a_checkout` with 409, `ref_unreadable` and `read_failed` with 502, `internal` with 500 and no repository path in the message)
     - _Requirements: 1.1, 1.3, 1.4, 2.4, 2.6, 7.4_
 
-- [ ] 6. Add the placeholder page
+- [x] 6. Add the placeholder page
   - Create `ui/index.mjs` using the host's React as the spike's page did; it fetches `/apps/epic-board/api/plan` and prints the repository, branch, commit, the number of cards per group, any problems, and any error
   - _Requirements: 1.1_
 
 - [ ] 7. Check it works end to end
-  - [ ] 7.1 Run the backend on this repository
+  - [x] 7.1 Run the backend on this repository
     - Start `backend/server.py` with a `PORT` and `EPIC_BOARD_REPOSITORY` set, request `/health` and `/plan`, and compare the answer with the epic and spec files on the main branch
     - Try the error cases: no setting, a path that is not a checkout, a `config.json` with a bad value, and a query string carrying another `repo` path
     - _Requirements: 1.1, 1.2, 1.3, 1.4, 2.6_

@@ -114,7 +114,7 @@ class Story:  name: str; link: str | None; status: str | None   # status is alre
 
 **Epics.** The name is the first line matching `^# (.+)$`, or the file name. Stories are read from the `## Stories` section, which ends at the next line starting with `# ` or `## `. In `standalone.md`, when there is no `## Stories` heading, the whole file is read, and only list items that start at the first column count, so notes nested under an item are not mistaken for stories (Requirement 5.9).
 
-**A story line** is a list item `- ` or `* ` followed by either `[Name](link)` or a plain name, then a space, an em dash (`—`), and the status text. For a plain name the split happens at the first ` — `. A line that does not fit is skipped without a problem (Requirement 7.3). The status text is trimmed, lowercased, and loses one trailing full stop. Only `planned`, `in progress` and `done` survive; anything else, including empty text, becomes `None` (Requirement 5.4).
+**A story line** is a list item `- ` or `* ` followed by either `[Name](link)` or a plain name, then a space, an em dash (`—`), and the status text. For a plain name the split happens at the first ` — `. A line that does not fit is skipped without a problem (Requirement 7.3). The text after the dash is split at its first full stop: what comes before is the status text and what comes after, trimmed, is the story's description. The status text is trimmed and lowercased. Only `planned`, `in progress` and `done` survive; anything else, including empty text, becomes `None` (Requirement 5.4).
 
 **Link to spec folder.** The spec folder is the first match of `\.kiro/specs/([^/)#?\s]+)` in the link, as in the spike. The link is not resolved relative to the epic file.
 

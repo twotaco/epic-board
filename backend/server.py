@@ -63,7 +63,7 @@ def plan_response(repository, error, config_path):
         groups, problems = build_plan(snapshot)
     except SourceError as failure:
         if failure.code == "not_a_checkout":
-            message = f"{failure.message}. Check {ENV_NAME} or the repository value in {config_path}."
+            message = f"{failure.message.rstrip('.')}. Check {ENV_NAME} or the repository value in {config_path}."
             return 409, error_body("repository_not_a_checkout", message, config_path)
         return STATUS[failure.code], error_body(failure.code, failure.message)
     except Exception:
