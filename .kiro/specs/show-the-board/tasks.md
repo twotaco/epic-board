@@ -23,7 +23,7 @@ The placeholder page (`ui/index.mjs`) stays in place until group 4 replaces it. 
     - A spec listed twice in `standalone.md` gives its one "No epic" card the first line's description; a `standalone.md` line for a spec an epic uses produces no card
     - Check that the existing tests in `tests/test_plan.py` still pass unchanged
     - _Requirements: 4.1, 4.2, 4.3_
-  - [~] 1.3 Run the tests
+  - [x] 1.3 Run the tests
     - Run `python3 -m unittest discover -s tests -t .` and report the counts run, passed and skipped
     - _Requirements: 4.1, 4.2, 4.3_
 
