@@ -102,6 +102,12 @@ function makeDocument(hidden) {
       assert.equal(selector, '[data-card-id]')
       return this.nodes
     },
+    // The Panel's container, which a test registers in `panel`.
+    panel: null,
+    querySelector(selector) {
+      assert.equal(selector, '[data-eb-panel]')
+      return this.panel
+    },
   }
 }
 // Crew's client (what useAppApi returns): every call stays pending until the test answers or fails it.
@@ -143,7 +149,7 @@ const httpError = (status, error = null) => Object.assign(new Error(`API ${statu
 // dependencies changed; unmount runs every cleanup. `fetch` is routed by URL: the plan route to
 // `page.fetch` (what the plan tests use), the backend's chats routes to `page.chatFetch`. Crew's client
 // is `page.gateway`, or none with `api: null`.
-function mount({ hidden = false, api, storage } = {}) {
+function mount({ hidden = false, api, storage, ChatPanel } = {}) {
   const clock = makeClock()
   const planFetch = makeFetch()
   const chatFetch = makeFetch()
@@ -203,9 +209,14 @@ function mount({ hidden = false, api, storage } = {}) {
       const changed = !slot.ran || deps === undefined || deps.some((dep, i) => !Object.is(dep, slot.deps?.[i]))
       if (changed) pending.push({ slot, fn, deps })
     },
+    // Enough of React.Component for the Panel's boundary; the tests below render a boundary by hand.
+    Component: class Component {
+      constructor(props) { this.props = props }
+    },
     createElement: h,
   }
   const Board = createBoard(React, {
+    ChatPanel,
     fetch,
     document,
     setTimeout: clock.setTimeout,
@@ -1202,4 +1213,279 @@ test('the page source has no innerHTML, script injection, other network paths or
   assert.deepEqual(dels, ['backend.del('], 'only the backend client deletes')
   assert.equal(/\.(del|delete|put|patch)\(\s*['"`]\/api\//.test(source), false, 'no write but post to Crew')
   assert.equal(/slots\/\$\{[^}]*\}\/(?!resume)/.test(source), false, 'the only per-chat route built in a template is resume')
+})
+
+// ---- The chat panel (work-in-the-chat, Requirements 1, 2, 4, 5 and 6.5) ----
+// Validates: Requirements 1.2, 1.3, 1.4, 1.5, 1.6, 1.8, 2.1, 2.2, 2.3, 2.6, 2.7, 3.3, 3.4, 4.1, 4.2, 4.3, 5.1, 5.2, 5.3, 5.4, 6.5
+const BETA = 'one.md#Card Beta'
+const NAME_B = 'epic-board-bbbb2222'
+const RECORD_B = { card_id: BETA, name: NAME_B, key: NAME_B, created: 't' }
+// A fake ChatPanel: one function, so one element type. The fake React draws no components, so the tests read its props from the tree.
+function makeChat() {
+  return () => null
+}
+const asideOf = (page) => findAll(page.tree(), (node) => node.type === 'aside')[0]
+const chatsOf = (page, Chat) => findAll(page.tree(), (node) => node.type === Chat)
+const linkNamed = (page, name) => anchors(page).find((node) => textOf(node) === name)
+const clickEvent = (over = {}) => ({ button: 0, prevented: 0, preventDefault() { this.prevented += 1 }, ...over })
+const openByClick = (page, name) => {
+  const event = clickEvent()
+  linkNamed(page, name).props.onClick(event)
+  return event
+}
+// The page with both cards started and working, and the fake ChatPanel mounted by the host.
+async function readyChats(Chat, records = [RECORD, RECORD_B], rows = records.map((record) => row(record.key, { running: true }))) {
+  const page = mount({ ChatPanel: Chat })
+  page.fetch.answer(0, 200, plan())
+  page.chatFetch.answer(0, 200, chatsAnswer(records))
+  await flush()
+  if (records.length > 0) {
+    page.gateway.answer('/api/chat/slots', rows)
+    await flush()
+  }
+  return page
+}
+// Registers the Panel's container and the cards' links as nodes that record focus.
+function watchFocus(page) {
+  const focused = []
+  const node = (id) => ({ getAttribute: (name) => (name === 'data-card-id' ? id : null), focus: () => focused.push(id) })
+  page.document.nodes.push(node(ALPHA), node(BETA))
+  page.document.panel = { focus: () => focused.push('panel') }
+  return focused
+}
+
+test('panel: a plain click on a started card opens the Panel with exactly slotKey and conversationOnly', async () => {
+  const Chat = makeChat()
+  const page = await readyChats(Chat)
+  assert.equal(asideOf(page), undefined, 'closed at first')
+  assert.equal(page.tree().props.className, 'eb-shell')
+  assert.equal(page.tree().children[0].props.className, 'eb-split')
+  assert.equal(page.tree().children[0].children[0].props.className, 'eb-root')
+  const event = openByClick(page, 'Card Alpha')
+  assert.equal(event.prevented, 1)
+  assert.equal(asideOf(page).props['aria-label'], 'Chat: Card Alpha')
+  assert.equal(page.tree().props['data-panel'], 'open')
+  const [element] = chatsOf(page, Chat)
+  assert.deepEqual(element.props, { slotKey: NAME, conversationOnly: true })
+  assert.equal(element.props.key, undefined)
+  assert.match(page.text(), /Chat open/)
+})
+
+test('panel: a second started card switches the same instance, and the Open_Card again changes nothing', async () => {
+  const Chat = makeChat()
+  const page = await readyChats(Chat)
+  const focused = watchFocus(page)
+  openByClick(page, 'Card Alpha')
+  const body = () => findAll(asideOf(page), (node) => node.props.className === 'eb-panel-body')[0]
+  const first = body().children[0]
+  assert.equal(chatsOf(page, Chat)[0].props.slotKey, NAME)
+  openByClick(page, 'Card Beta')
+  const second = body().children[0]
+  // One element of one type at the same place with no React key: React keeps one instance and gives it a new slotKey.
+  assert.equal(second.type, first.type)
+  assert.equal(second.props.key, undefined)
+  assert.equal(chatsOf(page, Chat).length, 1, 'never two mounted')
+  assert.deepEqual(chatsOf(page, Chat)[0].props, { slotKey: NAME_B, conversationOnly: true })
+  assert.equal(findAll(page.tree(), (node) => node.props['data-open'] === 'true').length, 1, 'one card is marked')
+  assert.equal(findAll(page.tree(), (node) => node.props['data-open'] === 'true')[0].children[0].children[0].children[0], 'Card Beta')
+  // The same card again: nothing changes, and focus is not moved again.
+  const focusedBefore = focused.length
+  openByClick(page, 'Card Beta')
+  assert.equal(chatsOf(page, Chat)[0].props.slotKey, NAME_B)
+  assert.equal(focused.length, focusedBefore)
+})
+
+test('panel: a modifier click, a secondary click and a host with no ChatPanel leave the click to the browser', async () => {
+  const Chat = makeChat()
+  const page = await readyChats(Chat)
+  for (const over of [{ ctrlKey: true }, { metaKey: true }, { shiftKey: true }, { altKey: true }, { button: 1 }, { button: 2 }]) {
+    const event = clickEvent(over)
+    linkNamed(page, 'Card Alpha').props.onClick(event)
+    assert.equal(event.prevented, 0, JSON.stringify(over))
+  }
+  assert.equal(asideOf(page), undefined)
+
+  for (const ChatPanel of [undefined, null, 'ChatPanel', {}]) {
+    const bare = await readyChats(ChatPanel)
+    const event = openByClick(bare, 'Card Alpha')
+    assert.equal(event.prevented, 0, 'the link is followed')
+    assert.equal(asideOf(bare), undefined)
+    assert.equal(findAll(bare.tree(), (node) => node.props['data-open'] === 'true').length, 0)
+    assert.equal(linkNamed(bare, 'Card Alpha').props.href, `/chat?sid=${NAME}`)
+  }
+})
+
+test('panel: openChat opens only a key the page holds a record for', async () => {
+  const Chat = makeChat()
+  const page = await readyChats(Chat)
+  const stale = linkNamed(page, 'Card Alpha').props.onClick // the handler of a card whose record is about to go
+  page.clock.advance(5000)
+  page.chatFetch.answer(page.chatFetch.calls.length - 1, 200, chatsAnswer([RECORD_B]))
+  await flush()
+  stale(clickEvent())
+  assert.equal(asideOf(page), undefined)
+  assert.equal(chatsOf(page, Chat).length, 0)
+})
+
+test('panel: a start opens the Panel when the chat is saved, while the send is still open, and replaces another chat', async () => {
+  const Chat = makeChat()
+  const page = await readyChats(Chat, [RECORD_B])
+  openByClick(page, 'Card Beta')
+  assert.equal(chatsOf(page, Chat)[0].props.slotKey, NAME_B)
+  click(page, 'Card Alpha')
+  click(page, 'Start')
+  page.chatFetch.answer(1, 200, { card_id: ALPHA, name: NAME, brief: 'THE BRIEF', folder_id: 'f_1' })
+  await flush()
+  page.gateway.answer('/api/chat/slots', { key: NAME, messages: 0 })
+  await flush()
+  assert.equal(chatsOf(page, Chat)[0].props.slotKey, NAME_B, 'not before the chat is saved')
+  page.chatFetch.answer(2, 200, { card_id: ALPHA, name: NAME, key: NAME })
+  await flush()
+  assert.equal(page.gateway.pending(), 1, 'the send never answered')
+  assert.deepEqual(chatsOf(page, Chat).map((element) => element.props), [{ slotKey: NAME, conversationOnly: true }])
+  assert.match(page.text(), /Sending the brief…/, 'the card keeps its note')
+  assert.equal(asideOf(page).props['aria-label'], 'Chat: Card Alpha')
+})
+
+test('panel: a start that fails before the save leaves the Panel as it was', async () => {
+  const Chat = makeChat()
+  const page = await readyChats(Chat, [RECORD_B])
+  openByClick(page, 'Card Beta')
+  click(page, 'Card Alpha')
+  click(page, 'Start')
+  page.chatFetch.answer(1, 500, { error: { code: 'x', message: 'no' } })
+  await flush()
+  assert.match(page.text(), /Could not reserve the chat/)
+  assert.deepEqual(chatsOf(page, Chat).map((element) => element.props.slotKey), [NAME_B])
+})
+
+test('panel: with no ChatPanel a start ends with the link and no Panel', async () => {
+  const page = await readyChats(undefined, [])
+  click(page, 'Card Alpha')
+  click(page, 'Start')
+  page.chatFetch.answer(1, 200, { card_id: ALPHA, name: NAME, brief: 'THE BRIEF', folder_id: 'f_1' })
+  await flush()
+  page.gateway.answer('/api/chat/slots', { key: NAME, messages: 0 })
+  await flush()
+  page.chatFetch.answer(2, 200, { card_id: ALPHA, name: NAME, key: NAME })
+  await flush()
+  assert.equal(asideOf(page), undefined)
+  assert.equal(linkNamed(page, 'Card Alpha').props.href, `/chat?sid=${NAME}`)
+})
+
+test('panel: opening focuses the Panel, Close focuses the card\'s link, and the Open_Card again moves nothing', async () => {
+  const Chat = makeChat()
+  const page = await readyChats(Chat)
+  const focused = watchFocus(page)
+  openByClick(page, 'Card Alpha')
+  assert.deepEqual(focused, ['panel'])
+  openByClick(page, 'Card Alpha')
+  assert.deepEqual(focused, ['panel'])
+  openByClick(page, 'Card Beta')
+  assert.deepEqual(focused, ['panel', 'panel'], 'a new chat in the Panel takes focus too')
+  click(page, 'Close')
+  assert.equal(asideOf(page), undefined)
+  assert.equal(page.tree().props['data-panel'], 'closed')
+  assert.equal(findAll(page.tree(), (node) => node.props['data-open'] === 'true').length, 0)
+  assert.deepEqual(focused, ['panel', 'panel', BETA])
+})
+
+test('panel: Start again closes the Panel without moving focus; a failed read and a missing chat do not close it', async () => {
+  const Chat = makeChat()
+  const page = await readyChats(Chat, [RECORD])
+  const focused = watchFocus(page)
+  openByClick(page, 'Card Alpha')
+  assert.deepEqual(focused, ['panel'])
+  // A failed list in Crew is a failed read: the Panel stays.
+  page.clock.advance(5000)
+  page.chatFetch.answer(page.chatFetch.calls.length - 1, 200, chatsAnswer([RECORD]))
+  await flush()
+  page.gateway.fail('/api/chat/slots', httpError(500))
+  await flush()
+  assert.match(page.text(), /Could not read chat status/)
+  assert.equal(chatsOf(page, Chat).length, 1)
+  // The chat goes missing for over a minute: the card says so, and the Panel stays.
+  for (let step = 0; step < 13; step += 1) {
+    page.clock.advance(step === 0 ? 15000 : 5000) // a failed read waits 15 s; a chat that is restoring, 5 s
+    await missingRead(page)
+  }
+  assert.match(page.text(), /This chat is not open\./)
+  assert.equal(chatsOf(page, Chat).length, 1)
+  click(page, 'Resume chat')
+  page.gateway.fail(`/api/chat/slots/${NAME}/resume`, httpError(404, null))
+  await flush()
+  assert.equal(chatsOf(page, Chat).length, 1)
+  click(page, 'Start again')
+  await flush()
+  page.chatFetch.answer(page.chatFetch.calls.length - 1, 200, { removed: true })
+  await flush()
+  assert.equal(asideOf(page), undefined)
+  assert.deepEqual(focused, ['panel'], 'no focus moved')
+})
+
+test('panel: the boundary shows the text and the link when the ChatPanel throws, and tries again for another chat', async () => {
+  const Chat = (props) => { if (props.slotKey === NAME) throw new Error('boom'); return null }
+  const page = await readyChats(Chat)
+  openByClick(page, 'Card Alpha')
+  const wrapper = findAll(asideOf(page), (node) => node.props.className === 'eb-panel-body')[0].children[0]
+  const Boundary = wrapper.type
+  assert.equal(typeof Boundary, 'function')
+  assert.equal(wrapper.props.slotKey, NAME)
+  // Draw the way React does: the child throws, the boundary takes the error into its state and draws its own text.
+  const instance = new Boundary(wrapper.props)
+  instance.setState = (next) => { instance.state = { ...instance.state, ...next } }
+  assert.deepEqual(instance.render(), wrapper.props.children, 'no failure: the children')
+  try {
+    for (const child of wrapper.children) child.type(child.props)
+    assert.fail('the ChatPanel should have thrown')
+  } catch (error) {
+    assert.equal(error.message, 'boom')
+    instance.state = { ...instance.state, ...Boundary.getDerivedStateFromError(error) }
+  }
+  const shown = h('div', null, instance.render())
+  assert.equal(findAll(shown, (node) => node.type === 'p' && node.props.role === 'status').map(textOf).join(), 'The chat could not be shown here.')
+  assert.equal(findAll(shown, (node) => node.type === 'a')[0].props.href, `/chat?sid=${NAME}`)
+  assert.equal(findAll(shown, (node) => node.props.role === 'alert').length, 0)
+  // The Panel's header and Close stay outside the boundary and work.
+  assert.ok(buttonNamed(page, 'Close'))
+  // Another chat clears the failure; the same key does not.
+  const previous = instance.props
+  instance.componentDidUpdate(previous)
+  assert.equal(instance.state.failed, true)
+  instance.props = { slotKey: NAME_B }
+  instance.componentDidUpdate(previous)
+  assert.equal(instance.state.failed, false)
+})
+
+test('panel: unmounting with the Panel open leaves no listener or timer', async () => {
+  const Chat = makeChat()
+  const page = await readyChats(Chat)
+  openByClick(page, 'Card Alpha')
+  page.unmount()
+  assert.equal(page.document.listenerCount(), 0)
+  assert.equal(page.clock.pending(), 0)
+})
+
+test('panel: opening and closing the Panel sends no request', async () => {
+  const Chat = makeChat()
+  const page = await readyChats(Chat)
+  const counts = () => [page.fetch.calls.length, page.chatFetch.calls.length, page.gateway.paths().join()]
+  const before = counts()
+  openByClick(page, 'Card Alpha')
+  openByClick(page, 'Card Beta')
+  click(page, 'Close')
+  await flush()
+  assert.deepEqual(counts(), before)
+})
+
+test('panel: a read of the records that does not list the chat does not close the Panel', async () => {
+  const Chat = makeChat()
+  const page = await readyChats(Chat, [RECORD])
+  openByClick(page, 'Card Alpha')
+  page.clock.advance(5000)
+  page.chatFetch.answer(page.chatFetch.calls.length - 1, 200, chatsAnswer([]))
+  await flush()
+  assert.equal(anchors(page).length, 0, 'the card has no chat now')
+  assert.deepEqual(chatsOf(page, Chat).map((element) => element.props.slotKey), [NAME])
+  assert.equal(asideOf(page).props['aria-label'], 'Chat: Card Alpha')
 })

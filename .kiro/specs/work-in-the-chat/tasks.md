@@ -29,45 +29,45 @@ Group 1 is the page's pure logic. Group 2 draws the panel and its styles. Group 
     - Run `python3 -m unittest discover -s tests -t .` and `node --test tests/ui/*.test.mjs` and report the counts run, passed and skipped for each
     - _Requirements: 1.1, 1.3, 1.4, 2.1, 2.2, 2.3, 2.6_
 
-- [ ] 2. Page: the panel, the mark and the layout
-  - [ ] 2.1 Draw them in `ui/index.mjs`
+- [x] 2. Page: the panel, the mark and the layout
+  - [x] 2.1 Draw them in `ui/index.mjs`
     - `renderPanel` and `renderShell` as the design gives them; `renderBoard` is not changed except that the card's `a` gets the `onClick` of the design, `view.panelAvailable` and an `openChat` action defaulting to a no-op, and an Open_Card gets `data-open`, `aria-current` on its link and `span.eb-chat-open` "Chat open"
     - Add the rules of the design to `STYLE`: the container, the panel, the mark, the narrow rules, the wide rules in a container query named `eb-shell` at 1,000 pixels, and the same wide rules in a media query under `@supports not (container-type: inline-size)`; only `currentColor` and greys with an alpha between 0 and 1, no `outline: none`
     - The failure text is `p[role=status]` and the failure link is built only from `chatHref`; no heading is added; every text from the plan is a child or a text attribute
     - _Requirements: 2.4, 2.5, 3.1, 3.2, 3.3, 3.5, 4.1, 6.1, 6.2, 6.3, 6.4_
-  - [ ] 2.2 Check the markup in `tests/ui/render.test.mjs`
+  - [x] 2.2 Check the markup in `tests/ui/render.test.mjs`
     - The panel's `aside`, `aria-label`, `tabindex`, `data-eb-panel`, title and "Close" button; the mark on the Open_Card and on no other; no panel, no mark and an unchanged link when the host has none; the click handler (plain click calls `preventDefault` and `openChat` with the card id and key; a modifier click, a secondary button, a handled event and a missing host panel do neither); no heading added and the same heading levels; literal text for a name with markup in the title and the label; `STYLE` scans for colour and outline and for the narrow and wide rules in both forms
     - Update the interactive-element check: the only interactive elements are the `summary`, the controls of the start spec's Requirements 2, 4, 7 and 8, the Panel's "Close" button and the failure link, and no element drawn inside the panel's body by a fake component
     - Update the root checks: the page's first element is `eb-shell`, then `eb-split`, then `eb-root`
     - _Requirements: 1.5, 1.6, 2.4, 2.5, 3.1, 3.2, 3.3, 3.5, 4.1, 6.1, 6.2, 6.3, 6.4_
-  - [ ] 2.3 Write property test for the agreement of the mark and the panel in `tests/ui/panel.test.mjs`
+  - [x] 2.3 Write property test for the agreement of the mark and the panel in `tests/ui/panel.test.mjs`
     - **Property 2: The mark, the Panel and the chat agree**
     - Seeded views, chats states and `ui` with and without a host panel; at least 100 iterations with the seed printed on failure
     - **Validates: Requirements 1.2, 1.5, 2.4, 2.5, 3.5**
-  - [ ] 2.4 Run the tests
+  - [x] 2.4 Run the tests
     - Run `python3 -m unittest discover -s tests -t .` and `node --test tests/ui/*.test.mjs` and report the counts run, passed and skipped for each
     - _Requirements: 1.2, 1.5, 1.6, 2.4, 2.5, 3.1, 3.2, 3.3, 3.5, 4.1, 6.1, 6.2, 6.3, 6.4_
 
-- [ ] 3. Page: mount `ChatPanel` and wire it
-  - [ ] 3.1 Wire it in `createBoard`
+- [x] 3. Page: mount `ChatPanel` and wire it
+  - [x] 3.1 Wire it in `createBoard`
     - Read `env.ChatPanel ?? hostChatPanel()` in the component on every render (`window.__kirocrew_modules?.['@kirocrew/app-sdk']?.ChatPanel`, no `window` needed at import) and set `hasPanel` with `isChatPanel`
     - Mount `h(ChatPanel, {slotKey, conversationOnly: true})` and nothing else, with no React `key`, so that one instance gets a new `slotKey`; wrap it in `PanelBoundary`, a class made from `React.Component` that shows the failure text and link and clears when the `slotKey` changes
     - `actions.openChat` checks that the chats state holds a record with that key and card id, and dispatches `open-chat`; `actions.closeChat` dispatches `close-chat` with `focus: true`; a start's `onSaved` dispatches `open-chat` after it adds the record when `hasPanel` is true; `actions.startAgain` dispatches `close-chat` with the removed record's key after it removes the record
     - An effect keyed on the open key focuses `[data-eb-panel]`; the existing focus effect handles Close; compose the page with `renderShell`
     - Nothing in the file calls a path containing `approve`, `question` or `approvals`
     - _Requirements: 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.8, 2.1, 2.2, 2.3, 2.6, 2.7, 3.3, 3.4, 4.1, 4.2, 4.3, 5.1, 5.2, 5.3, 5.4, 6.5_
-  - [ ] 3.2 Check the wiring in `tests/ui/board.test.mjs`
+  - [x] 3.2 Check the wiring in `tests/ui/board.test.mjs`
     - With a fake `ChatPanel` that records its props and counts its mounts: a plain click opens the Panel with exactly `{slotKey, conversationOnly: true}`; a click on a second started card switches the same instance (one mount, two `slotKey` values, never two mounted); the Open_Card again changes nothing; a modifier click and a secondary click are not taken; with no fake `ChatPanel` the click is left to the browser; `openChat` for a key with no record does nothing
     - A start with the fake opens the Panel when the chat is saved, while a send that never answers is still open, and replaces a chat open on another card; a start that fails before the save leaves the Panel as it was; the brief's notes are unchanged
     - Close puts focus on the card's link; opening puts focus on the Panel's container, and the Open_Card again does not; "Start again" closes the Panel without moving focus; a read of the records that does not list the chat, a failed read and a missing chat do not close it
     - The boundary shows its text and link when the fake throws, keeps "Close", and tries again after another open; unmounting leaves no listener or timer; the page's requests are the same with the Panel open as with it closed
     - Update the tests that assume the old root or that a click follows the link
     - _Requirements: 1.2, 1.3, 1.4, 1.5, 1.6, 1.8, 2.1, 2.2, 2.3, 2.6, 2.7, 3.3, 3.4, 4.1, 4.2, 4.3, 5.1, 5.2, 5.3, 5.4, 6.5_
-  - [ ] 3.3 Check the permissions and the scan
+  - [x] 3.3 Check the permissions and the scan
     - `tests/test_ui.py`: `permissions.api` is exactly `/api/chat` and `/api/chat/slots` and `app.json` declares none of `sessionApproval`, `chatSlots`, `spawn`, `agentTurns`, `network` or `storage`; add the number of this story to the assertion's comment
     - The source scan of `ui/index.mjs` of the start spec's task 3.5 still finds no `approve`, `question` or `approvals` path, no `innerHTML` and no `dangerouslySetInnerHTML`
     - _Requirements: 1.7, 1.8, 6.6_
-  - [ ] 3.4 Run the tests
+  - [x] 3.4 Run the tests
     - Run `python3 -m unittest discover -s tests -t .` and `node --test tests/ui/*.test.mjs` and report the counts run, passed and skipped for each
     - _Requirements: 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 2.1, 2.2, 2.3, 2.6, 2.7, 3.3, 3.4, 4.1, 4.2, 4.3, 5.1, 5.2, 5.3, 5.4, 6.5, 6.6_
 

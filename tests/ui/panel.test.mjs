@@ -1,12 +1,17 @@
 // Property 1: At most one chat is open, and it is always one the page started.
 // Validates: Requirements 1.3, 1.4, 2.1, 2.2, 2.3, 2.6
 //
+// Property 2: The mark, the Panel and the chat agree.
+// Validates: Requirements 1.2, 1.5, 2.4, 2.5, 3.5
+//
 // Also covers isChatPanel, isPlainClick, panelViewOf and the open-chat and close-chat actions.
 import test from 'node:test'
 import assert from 'node:assert/strict'
 
-import { cardViewOf, initialChats, initialUi, isChatPanel, isPlainClick, panelViewOf, uiReduce } from '../../ui/index.mjs'
-import { forSeeds } from './support.mjs'
+import {
+  cardViewOf, initialChats, initialUi, isChatPanel, isPlainClick, panelViewOf, renderBoard, renderPanel, renderShell, uiReduce, viewOf,
+} from '../../ui/index.mjs'
+import { findAll, forSeeds, h, textOf } from './support.mjs'
 
 const view = { columns: [{ key: 'planned', groups: [{ key: 'e.md', cards: [{ id: 'e.md#A', name: 'Story A' }] }] }] }
 
@@ -88,5 +93,36 @@ test('Property 1: at most one chat is open, and it is the last one opened and st
       if (marked.length === 1) assert.equal(ui.open.cardId, marked[0].id)
       assert.equal(panelViewOf({ columns: [] }, ui, true) === null, ui.open === null)
     }
+  })
+})
+
+test('Property 2: the mark, the Panel and the chat agree', () => {
+  const Chat = () => null
+  forSeeds('mark, panel and chat agree', 150, (r) => {
+    const ids = ['a', 'b', 'c', 'd'].slice(0, r.int(1, 4))
+    const cards = ids.map((id) => ({ id, name: `Card ${id}`, description: '', status: r.pick(['planned', 'in progress', 'done']), spec: null, tasks: null }))
+    const plan = { branch: 'main', commit: 'abc', age_seconds: 1, fetch: { ok: true }, problems: [], groups: [{ epic: { file: 'e.md', name: 'E' }, cards }] }
+    const state = { content: { type: 'plan', plan }, unreachable: false }
+    const records = ids.filter(() => r.bool(0.6)).map((id) => ({ card_id: id, name: `k-${id}`, key: `k-${id}`, created: 't' }))
+    const chats = { ...initialChats, records, byKey: Object.fromEntries(records.map((x) => [x.key, { state: r.pick(['idle', 'working', 'needs-you', 'missing']) }])), at: 0, loaded: true }
+    const target = r.pick(ids)
+    const ui = r.bool(0.7) ? { ...initialUi, open: { cardId: target, key: `k-${target}` } } : initialUi
+    const hasPanel = r.bool(0.7)
+    const view = { ...viewOf(state), chats, ui, panelAvailable: hasPanel }
+    const panel = panelViewOf(view, ui, hasPanel)
+    const board = renderBoard(h, view, {})
+    const tree = renderShell(h, board, panel ? renderPanel(h, panel, h(Chat, { slotKey: panel.key, conversationOnly: true })) : null)
+
+    assert.equal(findAll(tree, (n) => n.type === 'aside').length, panel === null ? 0 : 1)
+    const chatEls = findAll(tree, (n) => n.type === Chat)
+    assert.equal(chatEls.length, panel === null ? 0 : 1)
+    if (panel) assert.deepEqual(chatEls[0].props, { slotKey: panel.key, conversationOnly: true })
+    const marked = findAll(tree, (n) => n.type === 'li' && n.props['data-open'] === 'true')
+    const words = findAll(tree, (n) => n.props.className === 'eb-chat-open')
+    const current = findAll(tree, (n) => n.props['aria-current'] !== undefined)
+    // The Open_Card is the card of the open key whenever a Panel shows and the card has a chat to open.
+    const expected = panel && cardViewOf(cards.find((c) => c.id === panel.cardId), chats, ui, 0).open === true && chats.byKey[panel.key].state !== 'missing' ? 1 : 0
+    assert.deepEqual([marked.length, words.length, current.length], [expected, expected, expected])
+    for (const el of words) assert.equal(textOf(el), 'Chat open')
   })
 })
