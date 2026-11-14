@@ -10,7 +10,6 @@ It matters now because the plan already lives in files on main, and nothing show
 
 ## Not in this epic
 
-- Several projects or repositories on one board. A board shows one repository, set in the app's config.
 - Editing the plan from the board: moving cards, changing statuses or writing epic files.
 - The board following a conductor's work for the person. The board shows one of four states for the chat and embeds Crew's own chat for the person to use. The board's own code does not read the chat's messages, and does not approve or answer anything for the conductor.
 - Merging. The conductor opens pull requests and the person reviews and merges them.
@@ -23,3 +22,4 @@ It matters now because the plan already lives in files on main, and nothing show
 - [Work in the chat](../../.kiro/specs/work-in-the-chat/) — in progress. Click a card to open its conductor's chat beside the board, and approve, answer and steer it without leaving the board. Built after the fix to starting a story.
 - [Filter by epic](../../.kiro/specs/filter-by-epic/) — in progress. A dropdown at the top of the board shows one epic or all of them.
 - [Board design](../../.kiro/specs/board-design/) — in progress. The board looks like part of Kiro Crew: Crew's own buttons, cards, badges, header and notices, column headers like Crew's Sessions board, bold card titles, quieter meta lines, and descriptions cut to three lines. Built after "Work in the chat".
+- [Switch projects](../../.kiro/specs/switch-projects/) — in progress. One board for several projects: `config.json` lists them and a dropdown beside the epic filter switches between them. Built after "Work in the chat" and the chat state change.
