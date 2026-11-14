@@ -17,7 +17,7 @@
     - Normalize the status (trim, lowercase, drop one trailing full stop) and keep it only if it is `planned`, `in progress` or `done`
     - Pull the spec folder name from a link with the `.kiro/specs/<folder>` pattern
     - _Requirements: 5.2, 5.3, 5.4, 5.9, 7.3_
-  - [ ]* 2.3 Check the parsers with example text
+  - [ ] 2.3 Check the parsers with example text
     - Cover optional and nested tasks, `[-]`, unknown status words, a missing em dash, links to spec folders, and whole-file mode
 
 - [ ] 3. Build the plan from a source
@@ -38,7 +38,7 @@
     - Add a card named after the folder for every spec folder that no epic and no standalone story uses
     - Sort the group by name ignoring case, put it after the epics, and leave it out when it has no cards
     - _Requirements: 3.3, 5.9, 5.10, 8.2, 8.3, 8.4_
-  - [ ]* 3.4 Check the plan rules with an in-memory source
+  - [ ] 3.4 Check the plan rules with an in-memory source
     - Cover specs with no epics at all, a spec in two epics, `done` overriding open tasks, a story with a missing spec, `standalone.md` with and without a `## Stories` section, an unreadable file, and an empty plan
 
 - [ ] 4. Read from git
@@ -57,7 +57,7 @@
     - `list_files(*prefixes)` uses `ls-tree -r -z --name-only` on the commit; `read_file(path)` uses `show <commit>:<path>`; both read only the commit, never the working tree
     - Turn a failed read into `SourceError` with code `read_failed`
     - _Requirements: 2.3, 9.1_
-  - [ ]* 4.4 Check the git access against throwaway repositories
+  - [ ] 4.4 Check the git access against throwaway repositories
     - Use temporary repositories with a bare `origin`: `origin/HEAD` set and unset, a failed fetch with and without an earlier copy, files read from the commit while the working tree differs, a repository path with spaces, and a command that times out
 
 - [ ] 5. Serve the plan
