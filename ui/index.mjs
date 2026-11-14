@@ -131,6 +131,146 @@ export function viewOf(state) {
   }
 }
 
+// ---- The page ----
+
+// The level of the page title. Column headings are one level below it and group
+// headings two levels below it, so one edit shifts all three.
+export const TITLE_LEVEL = 1
+
+// The one style sheet. It sets no text or background colour (the host's theme
+// supplies them). Borders, bar tracks, bar fills and tints use `currentColor` or
+// a grey with an alpha between 0 and 1. No rule removes the focus indicator.
+export const STYLE = `
+.eb-root { container-type: inline-size; box-sizing: border-box; height: 100%; overflow-y: auto; padding: 16px; }
+.eb-root *, .eb-root *::before, .eb-root *::after { box-sizing: border-box; }
+.eb-title { margin: 0 0 12px 0; }
+.eb-header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 16px; margin: 0 0 16px 0; }
+.eb-branch { font-weight: 600; }
+.eb-commit { font-family: monospace; }
+.eb-checking { min-width: 0; }
+.eb-notice, .eb-error { border: 1px solid currentColor; border-radius: 6px; margin: 0 0 16px 0; padding: 8px 12px; overflow-wrap: anywhere; }
+.eb-notice p, .eb-error p { margin: 0; }
+.eb-error ul { margin: 8px 0 0 0; padding-left: 20px; }
+.eb-columns { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
+.eb-column { min-width: 0; }
+.eb-column-title { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; margin: 0 0 8px 0; padding-bottom: 4px; border-bottom: 1px solid currentColor; }
+.eb-count { font-weight: 400; opacity: 0.7; }
+.eb-group { min-width: 0; margin: 0 0 12px 0; }
+.eb-group-title { margin: 0 0 6px 0; font-size: 0.95em; overflow-wrap: anywhere; }
+.eb-cards { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.eb-card { min-width: 0; border: 1px solid rgba(128, 128, 128, 0.5); border-radius: 6px; background: rgba(128, 128, 128, 0.1); padding: 8px 12px; overflow-wrap: anywhere; }
+.eb-card-name { font-weight: 600; }
+.eb-card-description { margin-top: 4px; }
+.eb-card-spec { margin-top: 4px; font-family: monospace; font-size: 0.85em; opacity: 0.7; }
+.eb-card-progress { margin-top: 4px; font-size: 0.9em; }
+.eb-bar { margin-top: 4px; height: 6px; border-radius: 3px; background: rgba(128, 128, 128, 0.3); overflow: hidden; }
+.eb-bar-fill { height: 100%; background: currentColor; opacity: 0.6; }
+.eb-empty-column { margin: 0; opacity: 0.7; }
+.eb-problems { margin-top: 16px; border: 1px solid rgba(128, 128, 128, 0.5); border-radius: 6px; padding: 8px 12px; }
+.eb-problems summary { cursor: pointer; }
+.eb-problems ul { margin: 8px 0 0 0; padding-left: 20px; }
+.eb-problems li { overflow-wrap: anywhere; margin-bottom: 4px; }
+@container (min-width: 720px) {
+  .eb-columns { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+@supports not (container-type: inline-size) {
+  @media (min-width: 720px) {
+    .eb-columns { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  }
+}
+`
+
+const EMPTY_PLAN_HINT = 'Specs are read from .kiro/specs/ and epics from docs/epics/.'
+
+function renderCard(h, card, index) {
+  const progress = progressOf(card)
+  return h('li', { className: 'eb-card', key: index },
+    h('div', { className: 'eb-card-name' }, card.name),
+    card.description ? h('div', { className: 'eb-card-description' }, card.description) : null,
+    card.spec != null ? h('div', { className: 'eb-card-spec' }, card.spec) : null,
+    h('div', { className: 'eb-card-progress' }, progress.text),
+    progress.fraction !== null
+      ? h('div', { className: 'eb-bar', 'aria-hidden': 'true' },
+        h('div', { className: 'eb-bar-fill', style: { width: `${progress.fraction * 100}%` } }))
+      : null)
+}
+
+function renderColumn(h, column) {
+  return h('div', { className: 'eb-column', key: column.key },
+    h(`h${TITLE_LEVEL + 1}`, { className: 'eb-column-title' },
+      h('span', null, column.title),
+      ' ',
+      h('span', { className: 'eb-count' }, String(column.count))),
+    column.groups.length === 0
+      ? h('p', { className: 'eb-empty-column' }, 'Nothing here')
+      : column.groups.map((group, index) => h('div', { className: 'eb-group', key: `${group.key}:${index}` },
+        h(`h${TITLE_LEVEL + 2}`, { className: 'eb-group-title' }, group.name ?? 'No epic'),
+        h('ul', { className: 'eb-cards' }, group.cards.map((card, i) => renderCard(h, card, i))))))
+}
+
+function renderProblems(h, problems) {
+  const summary = problems.length === 1 ? '1 file could not be read' : `${problems.length} files could not be read`
+  return h('details', { className: 'eb-problems' },
+    h('summary', null, summary),
+    h('ul', null, problems.map((problem, index) => h('li', { key: index },
+      h('div', null, problem.file),
+      h('div', null, problem.reason)))))
+}
+
+function renderPlanView(h, view) {
+  return [
+    h('div', { className: 'eb-header', key: 'header' },
+      h('span', { className: 'eb-branch' }, view.branch),
+      h('span', { className: 'eb-commit' }, view.commit7),
+      h('span', { className: 'eb-age' }, view.ageText),
+      h('span', { className: 'eb-checking', style: { visibility: view.refreshing ? 'visible' : 'hidden' } },
+        'Checking for updates…')),
+    view.failedFetch
+      ? h('div', { className: 'eb-notice', role: 'status', key: 'failed-fetch' },
+        h('p', null, 'Could not fetch from origin. Showing an earlier copy of the plan.'),
+        view.failedFetch.reason ? h('p', null, view.failedFetch.reason) : null,
+        h('p', null, view.failedFetch.ageText))
+      : null,
+    view.unreachableNotice
+      ? h('div', { className: 'eb-notice', role: 'status', key: 'unreachable' },
+        h('p', null, 'Could not reach the backend. Showing the plan from the last update.'))
+      : null,
+    view.empty
+      ? h('div', { className: 'eb-empty', key: 'empty' },
+        h('p', null, `No specs or epics were found on ${view.branch}.`),
+        h('p', null, EMPTY_PLAN_HINT))
+      : h('div', { className: 'eb-columns', key: 'columns' }, view.columns.map((column) => renderColumn(h, column))),
+    view.problems.length > 0 ? renderProblems(h, view.problems) : null,
+  ]
+}
+
+function renderBody(h, view) {
+  switch (view.kind) {
+    case 'loading':
+      return h('p', { role: 'status' }, 'Loading…')
+    case 'unreachable':
+      return h('p', { className: 'eb-error', role: 'alert' }, 'Could not reach the backend.')
+    case 'error':
+      return h('div', { className: 'eb-error', role: 'alert' },
+        h('p', null, view.message),
+        h('p', null, view.code),
+        view.settings.length > 0
+          ? h('ul', null, view.settings.map((setting, index) => h('li', { key: index }, h('code', null, setting))))
+          : null)
+    default:
+      return renderPlanView(h, view)
+  }
+}
+
+// Builds the page for a view (what `viewOf` returns) with h = createElement.
+// Pure: no React, no hooks, no `window`. Every plan text is passed as a child.
+export function renderBoard(h, view) {
+  return h('div', { className: 'eb-root' },
+    h('style', null, STYLE),
+    h(`h${TITLE_LEVEL}`, { className: 'eb-title' }, 'Epic Board'),
+    renderBody(h, view))
+}
+
 // The host's React is looked up on first use, so importing this module needs no `window`.
 function createPlaceholder(React) {
   const { useState, useEffect, createElement: h } = React
