@@ -47,7 +47,7 @@ test('the default export looks React up on first call and returns createElement(
   globalThis.window = {
     __kirocrew_modules: {
       react: {
-        useState: (value) => [value, () => {}],
+        useReducer: (reducer, initial) => [initial, () => {}],
         useEffect: () => {},
         createElement: (...args) => { calls.push(args); return { element: args } },
       },
