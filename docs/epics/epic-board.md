@@ -17,6 +17,6 @@ It matters now because the plan already lives in files on main, and nothing show
 
 ## Stories
 
-- [Read the plan from main](../../.kiro/specs/read-the-plan-from-main/) — in progress
+- [Read the plan from main](../../.kiro/specs/read-the-plan-from-main/) — done
 - Show the board — planned
 - Start a story — planned
