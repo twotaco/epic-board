@@ -49,6 +49,22 @@ export function forSeeds(name, iterations, fn) {
   }
 }
 
+// forSeeds for an async fn(rng, seed): runs the seeds one after another and rejects naming the seed.
+export async function forSeedsAsync(name, iterations, fn) {
+  const start = baseSeed()
+  for (let i = 0; i < iterations; i += 1) {
+    const seed = start + i
+    try {
+      await fn(rng(seed), seed)
+    } catch (failure) {
+      const message = failure instanceof Error ? failure.message : String(failure)
+      const error = new Error(`property "${name}" failed with seed ${seed} (EB_SEED=${seed}): ${message}`)
+      error.cause = failure
+      throw error
+    }
+  }
+}
+
 // An h for inspecting trees: returns {type, props, children}.
 // Children are flattened one level, and null, undefined and false are removed.
 export function h(type, props, ...children) {

@@ -145,6 +145,10 @@ const REQUEST_TIMEOUT_MS = 10000
 //   onResult(result)  -> receives what `classify` returns, or {kind: 'failure'} for a rejected,
 //                        malformed or aborted request
 //   createAbortController() -> optional; defaults to `new AbortController()`
+//   classifyAnswer(status, body) -> optional; turns an answer into a result. Defaults to `classify`
+//                        (the plan's); the chat poller passes `classifyChats`
+//   delay(result)     -> optional; milliseconds until the next request. Defaults to `nextDelay`
+//                        (the plan's); the chat poller passes `chatDelay`
 // At most one request is in flight. Returns {start, visible, stop}.
 export function createPoller({
   request,
@@ -153,6 +157,8 @@ export function createPoller({
   clearTimer,
   onResult,
   createAbortController = () => new AbortController(),
+  classifyAnswer = classify,
+  delay = nextDelay,
 }) {
   let stopped = false
   let inflight = null // {controller, abortTimer, settled}
@@ -175,7 +181,7 @@ export function createPoller({
     try {
       onResult(result)
     } finally {
-      if (!stopped) nextTimer = setTimer(onNextTimer, nextDelay(result))
+      if (!stopped) nextTimer = setTimer(onNextTimer, delay(result))
     }
   }
 
@@ -198,7 +204,7 @@ export function createPoller({
       (answer) => {
         let result
         try {
-          result = classify(answer.status, answer.body)
+          result = classifyAnswer(answer.status, answer.body)
         } catch {
           result = { kind: 'failure' }
         }
@@ -239,6 +245,319 @@ export function createPoller({
         current.controller.abort()
       }
     },
+  }
+}
+
+// ---- Chats: the state of each started chat, and starting and resuming one ----
+
+// The four states a chat can show. There is no "finished": a story is done only when main says so.
+export const STATE_WORDS = Object.freeze({
+  'needs-you': 'Needs you',
+  working: 'Working',
+  interrupted: 'Interrupted',
+  idle: 'Idle',
+})
+
+// How long a chat that Crew does not know is "restoring" before the card offers to resume it.
+export const RESTORE_MS = 60000
+const CHAT_SOON_MS = 5000
+const CHAT_LATER_MS = 15000
+const AGENT = 'kirocrew-conductor'
+
+// One state for a chat, from its row in Crew's chat list and the role of its last row (or
+// undefined when that has not been read). The first that applies:
+//   Needs you   a tool waits for an approval, or the chat asked a question
+//   Working     a turn is running or waiting for admission
+//   Interrupted the turn ended without a reply, or the last row is an error
+//   Idle        anything else
+// Needs you comes first because a turn that waits for an approval is still running.
+export function stateOf(row, lastRole) {
+  if (row?.pending_approval === true || row?.needs_input === true) return 'needs-you'
+  if (row?.running === true || row?.admission_queued === true) return 'working'
+  if (row?.interrupted === true || lastRole === 'error') return 'interrupted'
+  return 'idle'
+}
+
+// The address of a chat in the dashboard. Only the percent-encoded key goes in it.
+export function chatHref(key) {
+  return `/chat?sid=${encodeURIComponent(key)}`
+}
+
+// Turns what `readChats` resolved into a result for the chat poller: {kind: 'chats', read} or
+// {kind: 'failure'}.
+export function classifyChats(status, body) {
+  if (status === 200 && isObject(body) && isObject(body.byKey) && Array.isArray(body.chats)) {
+    return { kind: 'chats', read: body }
+  }
+  return { kind: 'failure' }
+}
+
+// Whether a missing chat is still within its first minute at the end of a read.
+function isRestoring(read, key) {
+  const since = read.missingSince?.[key]
+  return typeof since === 'number' && read.at - since < RESTORE_MS
+}
+
+// Milliseconds until the next chat read: 5000 while any chat is working, needs the person, or is
+// restoring; 15000 otherwise, and after a failure.
+export function chatDelay(result) {
+  if (result?.kind !== 'chats') return CHAT_LATER_MS
+  const read = result.read
+  for (const [key, entry] of Object.entries(read.byKey)) {
+    if (entry.state === 'working' || entry.state === 'needs-you') return CHAT_SOON_MS
+    if (entry.state === 'missing' && isRestoring(read, key)) return CHAT_SOON_MS
+  }
+  return CHAT_LATER_MS
+}
+
+const errorMessage = (error) => String(error?.message ?? error)
+
+// The role of the newest row in a slot detail, '' when the row has none, null when there are no rows.
+function lastRoleOf(detail) {
+  const rows = Array.isArray(detail?.messages) ? detail.messages : []
+  if (rows.length === 0) return null
+  return String(rows[rows.length - 1]?.role ?? '')
+}
+
+// One read of the chats. Everything it touches is injected:
+//   backend.get(path, {signal}) -> the parsed body of the app's own backend; rejects with an error
+//                                   that has `status` and `error` ({code, message}) on a non-2xx answer
+//   gateway.get(path, {signal}) -> Crew's chat endpoints through useAppApi; rejects with `status`
+//   previous                    -> the chats state, for the missing-since marks and the last-row cache
+//   now()                       -> milliseconds
+// It reads the records, and when there are started chats the chat list, keeps only the rows whose key
+// is a started chat's key, and reads a chat's newest row only when its row is not Needs you, Working or
+// interrupted and its `last_ts` or `messages` changed since the last read. A key that is not in the list
+// is read on its own: a 404 is `missing`. Anything else that goes wrong rejects.
+export async function readChats({ backend, gateway, previous = initialChats, now, signal }) {
+  let answer
+  try {
+    answer = await backend.get('/chats', { signal })
+  } catch (error) {
+    if (error?.error?.code === 'chats_unreadable') {
+      return {
+        at: now(), folder: { id: null, reason: null }, recordsError: { code: 'chats_unreadable', message: String(error.error.message ?? '') },
+        chats: [], byKey: {}, missingSince: {},
+      }
+    }
+    throw error
+  }
+  const records = Array.isArray(answer?.chats) ? answer.chats : []
+  const folder = { id: typeof answer?.folder_id === 'string' ? answer.folder_id : null, reason: answer?.folder_reason ?? null }
+  const byKey = {}
+  const missingSince = {}
+  if (records.length === 0) return { at: now(), folder, recordsError: null, chats: [], byKey, missingSince }
+
+  const list = await gateway.get('/api/chat/slots', { signal })
+  if (!Array.isArray(list)) throw new Error('The chat list is not a list.')
+  const ours = new Set(records.map((record) => record.key))
+  const rows = new Map()
+  for (const row of list) if (isObject(row) && ours.has(row.key)) rows.set(row.key, row)
+
+  const detailOf = async (key) => {
+    try {
+      return await gateway.get(`/api/chat/slots/${encodeURIComponent(key)}?limit=1`, { signal })
+    } catch (error) {
+      if (error?.status === 404) return null
+      throw error
+    }
+  }
+  const markMissing = (key) => {
+    byKey[key] = { state: 'missing' }
+    missingSince[key] = typeof previous.missingSince?.[key] === 'number' ? previous.missingSince[key] : null
+  }
+
+  for (const record of records) {
+    const key = record.key
+    const row = rows.get(key)
+    if (row) {
+      let state = stateOf(row, undefined)
+      let role
+      let roleRead = false
+      if (state === 'idle') {
+        const cached = previous.byKey?.[key]
+        if (cached?.roleRead === true && cached.lastTs === row.last_ts && cached.messages === row.messages) {
+          role = cached.role
+          roleRead = true
+        } else {
+          const detail = await detailOf(key)
+          if (detail === null) {
+            markMissing(key)
+            continue
+          }
+          role = lastRoleOf(detail)
+          roleRead = true
+        }
+        state = stateOf(row, role)
+      }
+      byKey[key] = { state, lastTs: row.last_ts, messages: row.messages, role, roleRead }
+      continue
+    }
+    const detail = await detailOf(key)
+    if (detail === null) {
+      markMissing(key)
+      continue
+    }
+    const role = lastRoleOf(detail)
+    const state = detail.running === true || detail.admission_queued === true ? 'working' : role === 'error' ? 'interrupted' : 'idle'
+    byKey[key] = { state, role, roleRead: true }
+  }
+  const at = now()
+  for (const key of Object.keys(missingSince)) if (missingSince[key] === null) missingSince[key] = at
+  return { at, folder, recordsError: null, chats: records, byKey, missingSince }
+}
+
+// The chats state. `records` are the started chats ({card_id, name, key, created}); `byKey` holds
+// the last read of each; `missingSince` the time the current run of "missing" reads began; `at` the
+// time of the last good read; `failed` is true after a failed read until a good one.
+export const initialChats = Object.freeze({
+  records: [],
+  folder: Object.freeze({ id: null, reason: null }),
+  recordsError: null,
+  byKey: Object.freeze({}),
+  missingSince: Object.freeze({}),
+  at: null,
+  failed: false,
+  loaded: false,
+})
+
+// Results: {kind: 'chats', read} and {kind: 'failure'} from the chat poller, and the page's own
+// {kind: 'started', record} and {kind: 'removed', name}. A failed read keeps what is shown.
+export function chatsReduce(state, result) {
+  switch (result?.kind) {
+    case 'chats': {
+      const { read } = result
+      return {
+        records: read.chats, folder: read.folder, recordsError: read.recordsError ?? null,
+        byKey: read.byKey, missingSince: read.missingSince ?? {}, at: read.at, failed: false, loaded: true,
+      }
+    }
+    case 'failure':
+      return { ...state, failed: true }
+    case 'started': {
+      const record = { card_id: result.record.card_id, name: result.record.name, key: result.record.key, created: result.record.created ?? null }
+      const records = state.records.filter((existing) => existing.card_id !== record.card_id).concat(record)
+      return { ...state, records, recordsError: null }
+    }
+    case 'removed': {
+      const gone = state.records.find((record) => record.name === result.name)
+      if (!gone) return state
+      const { [gone.key]: _entry, ...byKey } = state.byKey
+      const { [gone.key]: _since, ...missingSince } = state.missingSince
+      return { ...state, records: state.records.filter((record) => record !== gone), byKey, missingSince }
+    }
+    default:
+      return state
+  }
+}
+
+// What one card shows, from its plan card, the chats state, the page's own UI state and the time
+// the last read ended (so it stays pure). `ui` is {asking, flows, resumes}:
+//   asking   the card id that has the question open, or null
+//   flows    {cardId: {kind: 'starting', step} | {kind: 'failed', step, reason}}
+//   resumes  {key: {kind: 'resuming'} | {kind: 'failed', reason}}
+// The result's `mode` is one of: plain, startable, question, starting, blocked, chat, restoring,
+// not-open, resuming, resume-failed.
+export function cardViewOf(card, chats, ui = {}, nowMs = chats.at) {
+  const record = chats.records.find((candidate) => candidate.card_id === card.id)
+  if (record) {
+    const key = record.key
+    const entry = chats.byKey[key]
+    if (entry?.state === 'missing') {
+      const resume = ui.resumes?.[key]
+      if (resume?.kind === 'resuming') return { mode: 'resuming', key, name: record.name }
+      if (resume?.kind === 'failed') return { mode: 'resume-failed', key, name: record.name, reason: resume.reason }
+      const since = chats.missingSince[key]
+      const age = typeof since === 'number' && typeof nowMs === 'number' ? nowMs - since : 0
+      return { mode: age < RESTORE_MS ? 'restoring' : 'not-open', key, name: record.name }
+    }
+    return {
+      mode: 'chat', key, name: record.name, href: chatHref(key),
+      state: entry ? entry.state : null,
+      stateWord: entry ? STATE_WORDS[entry.state] : null,
+    }
+  }
+  if (card.status === 'done') return { mode: 'plain' }
+  const flow = ui.flows?.[card.id]
+  if (flow?.kind === 'starting') return { mode: 'starting', step: flow.step }
+  if (ui.asking !== card.id) return { mode: 'startable' }
+  if (chats.recordsError) return { mode: 'blocked', blocked: { kind: 'records', message: chats.recordsError.message } }
+  if (!chats.folder.id) return { mode: 'blocked', blocked: { kind: 'folder', reason: chats.folder.reason } }
+  return { mode: 'question', failure: flow?.kind === 'failed' ? { step: flow.step, reason: flow.reason } : null }
+}
+
+// A start or resume that failed: `step` names where, `reason` is Crew's or the backend's own words.
+export class StartError extends Error {
+  constructor(step, reason, code = null) {
+    super(`${step}: ${reason}`)
+    this.name = 'StartError'
+    this.step = step
+    this.reason = reason
+    this.code = code
+  }
+}
+
+const REASON_MAX_CHARS = 300
+
+function failAt(step, error) {
+  if (error instanceof StartError) return error
+  const reason = errorMessage(error?.error?.message ?? error).slice(0, REASON_MAX_CHARS)
+  return new StartError(step, reason, error?.error?.code ?? null)
+}
+
+// The whole start of a story from its card, in four steps, each named to `onStep` before it runs:
+//   reserve  ask the backend for a name, the brief and the folder id
+//   create   open the chat in Crew (a name the board already created answers with the same chat)
+//   send     send the brief, unless the chat already holds a message
+//   save     tell the backend the chat has started, with the key Crew gave it
+// A failure at any step throws a StartError and leaves the backend's record `reserved`, so a repeat is safe.
+export async function startStory({ cardId, backend, gateway, onStep = () => {} }) {
+  let step = 'reserve'
+  try {
+    onStep(step)
+    const reservation = await backend.post('/chats', { card_id: cardId })
+    if (typeof reservation?.name !== 'string' || typeof reservation.brief !== 'string' || typeof reservation.folder_id !== 'string') {
+      throw new StartError(step, 'The backend answered in a form the page cannot read.')
+    }
+    step = 'create'
+    onStep(step)
+    const row = await gateway.post('/api/chat/slots', { name: reservation.name, agent: AGENT, folder_id: reservation.folder_id })
+    const key = row?.key
+    if (typeof key !== 'string' || key === '') throw new StartError(step, 'Crew answered without a chat key.')
+    step = 'send'
+    onStep(step)
+    if (!(row.messages > 0)) {
+      try {
+        await gateway.post('/api/chat', { slot: key, message: reservation.brief })
+      } catch (error) {
+        // Crew accepts the message and may answer with no JSON, which the host's client reports as an error.
+        if (!/accepted the request/.test(errorMessage(error))) throw error
+      }
+    }
+    step = 'save'
+    onStep(step)
+    await backend.post(`/chats/${encodeURIComponent(reservation.name)}/started`, { key })
+    return { cardId, name: reservation.name, key }
+  } catch (error) {
+    throw failAt(step, error)
+  }
+}
+
+// Resume a chat Crew has closed or not restored. No body.
+export async function resumeChat({ key, gateway }) {
+  try {
+    await gateway.post(`/api/chat/slots/${encodeURIComponent(key)}/resume`)
+  } catch (error) {
+    throw failAt('resume', error)
+  }
+}
+
+// "Start again": forget the board's record of a chat that cannot be resumed. It touches nothing in Crew.
+export async function startAgain({ name, backend }) {
+  try {
+    await backend.del(`/chats/${encodeURIComponent(name)}`)
+  } catch (error) {
+    throw failAt('remove', error)
   }
 }
 

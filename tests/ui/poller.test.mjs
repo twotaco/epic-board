@@ -620,3 +620,63 @@ test('onResult receives the objects classify returns', async () => {
     assert.deepEqual(results[0], classify(answer.status, answer.body))
   }
 })
+// ---- The optional answer reader and delay (the chat poller passes its own) ----
+// Validates: Requirements 6.7
+test('classifyAnswer turns the answer into the result onResult receives, in place of classify', async () => {
+  const scheduler = makeScheduler()
+  const fake = makeRequest()
+  const results = []
+  const seen = []
+  const poller = createPoller({
+    request: fake.request,
+    hidden: () => false,
+    setTimer: scheduler.setTimer,
+    clearTimer: scheduler.clearTimer,
+    onResult: (result) => results.push(result),
+    createAbortController: makeController,
+    classifyAnswer: (status, body) => {
+      seen.push([status, body])
+      return { kind: 'custom', status }
+    },
+  })
+  poller.start()
+  fake.entries[0].resolve({ status: 200, body: { any: 'thing' } })
+  await flush()
+  assert.deepEqual(seen, [[200, { any: 'thing' }]])
+  assert.deepEqual(results, [{ kind: 'custom', status: 200 }])
+})
+test('delay sets the next timer in place of nextDelay, for answers and for failures', async () => {
+  const scheduler = makeScheduler()
+  const fake = makeRequest()
+  const delays = []
+  const poller = createPoller({
+    request: fake.request,
+    hidden: () => false,
+    setTimer: scheduler.setTimer,
+    clearTimer: scheduler.clearTimer,
+    onResult: () => {},
+    createAbortController: makeController,
+    classifyAnswer: (status) => (status === 200 ? { kind: 'custom' } : { kind: 'failure' }),
+    delay: (result) => {
+      delays.push(result.kind)
+      return result.kind === 'custom' ? 5000 : 7000
+    },
+  })
+  poller.start()
+  fake.entries[0].resolve({ status: 200, body: {} })
+  await flush()
+  assert.equal(scheduler.nextTimers()[0].ms, 5000)
+  scheduler.fire(scheduler.nextTimers()[0].id)
+  fake.entries[1].reject(new Error('down'))
+  await flush()
+  assert.equal(scheduler.nextTimers()[0].ms, 7000)
+  assert.deepEqual(delays, ['custom', 'failure'])
+})
+test('without the two options the plan behaviour is unchanged', async () => {
+  const { scheduler, fake, results, poller } = setup()
+  poller.start()
+  fake.entries[0].resolve(PENDING)
+  await flush()
+  assert.deepEqual(results, [{ kind: 'pending' }])
+  assert.equal(scheduler.nextTimers()[0].ms, 2000)
+})
