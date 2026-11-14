@@ -126,15 +126,21 @@ class Run:
             raise ValueError(outcome)
 
 
-def run_seed(seed, observe, interval=60):
+def run_seed(seed, observe, interval=60, generate=generate_steps, prepare=None):
     """Generate the steps for a seed and apply them. observe(run, step, answer) is called after each step.
+
+    generate(rng) makes the steps. prepare(run, rng), when given, is called once before the first step,
+    with the generator's random source, to set the run up.
 
     An AssertionError raised by observe, or any other error, is re-raised with the seed and the steps
     so far, so a failure can be run again.
     """
-    steps = generate_steps(random.Random(seed))
+    rng = random.Random(seed)
+    steps = generate(rng)
     run = Run(interval=interval)
     try:
+        if prepare is not None:
+            prepare(run, rng)
         for step in steps:
             answer = run.apply(step)
             observe(run, step, answer)
@@ -184,6 +190,190 @@ class HolderStateProperty(unittest.TestCase):
         self.assertGreater(saw_plan, ITERATIONS // 4)
         self.assertGreater(saw_error, 0)
         self.assertGreater(saw_pending, 0)
+
+
+def watch_refreshes(run):
+    """Wrap the holder's open_snapshot, which only a running refresh calls.
+
+    While it runs, `refreshing` must be true and a plan request must start no other refresh.
+    A failure is recorded in run.violations and not raised, because run_refresh would swallow it.
+    """
+    run.violations = []
+    holder, harness = run.harness.holder, run.harness
+    original = holder._open_snapshot
+
+    def open_snapshot(repository):
+        queued = len(harness.jobs)
+        if not run.state.refreshing:
+            run.violations.append("refreshing was not true while a refresh ran")
+        holder.request()
+        if len(harness.jobs) != queued:
+            run.violations.append("a second refresh was claimed while one ran")
+        return original(repository)
+
+    holder._open_snapshot = open_snapshot
+
+
+def without_first_read(rng):
+    """Steps for the startup scenario: the first read is done by the startup job, so none is a step.
+
+    One run_job step is always present, so that the startup job is run.
+    """
+    steps = [step for step in generate_steps(rng) if step[0] != "first_read"]
+    steps.insert(rng.randint(0, len(steps)), ("run_job", rng.choice(REFRESH_OUTCOMES)))
+    return steps
+
+
+class RefreshModel:
+    """What the refresh rule says should have happened, kept from the steps and the fake clock alone.
+
+    It never reads the holder's private fields. `queued` counts the refresh jobs the model expects to be
+    claimed and not yet run. With `startup` the first job in the queue is the startup job, not a refresh.
+    """
+
+    def __init__(self, testcase, interval, startup=False, request_after_first_read=False):
+        self.testcase = testcase
+        self.interval = interval
+        self.now = 0.0
+        self.first_read_ended = False
+        self.queued = 0
+        self.last_end = None
+        self.startup_pending = startup
+        self.request_after_first_read = request_after_first_read
+        self.stats = {"claimed_first": 0, "claimed_again": 0, "refused_running": 0, "refused_interval": 0,
+                      "refused_early": 0, "claimed_at_interval": 0, "refused_just_before": 0,
+                      "startup_claimed": 0, "startup_beaten": 0}
+
+    def due(self):
+        return (self.first_read_ended and self.queued == 0 and
+                (self.last_end is None or self.now - self.last_end >= self.interval))
+
+    def observe(self, run, step, answer):
+        t = self.testcase
+        name = step[0]
+        if name == "first_read":
+            self.first_read_ended = True
+        elif name == "advance":
+            self.now += step[1]
+        elif name == "request":
+            due = self.due()
+            self._count_request(due)
+            self.queued += 1 if due else 0
+            if answer[0] == "plan":
+                t.assertEqual(answer[1]["refreshing"], self.queued == 1,
+                              "the answer's refreshing does not match whether a refresh is claimed")
+        elif name == "run_job":
+            self._run_job(run)
+        self._check(run)
+        t.assertEqual(run.violations, [])
+
+    def _count_request(self, due):
+        stats = self.stats
+        if due:
+            stats["claimed_again" if self.last_end is not None else "claimed_first"] += 1
+            if self.last_end is not None and self.now - self.last_end == self.interval:
+                stats["claimed_at_interval"] += 1
+        elif not self.first_read_ended:
+            stats["refused_early"] += 1
+        elif self.queued:
+            stats["refused_running"] += 1
+        else:
+            stats["refused_interval"] += 1
+            if self.now - self.last_end == self.interval - 1:
+                stats["refused_just_before"] += 1
+
+    def _run_job(self, run):
+        t = self.testcase
+        h = run.harness
+        if self.startup_pending:
+            # The startup job reads the plan, then claims and runs the first refresh unless a request
+            # claimed it after the read ended.
+            self.startup_pending = False
+            self.first_read_ended = True
+            t.assertEqual(len(h.reads), 1, "the startup job did not read once")
+            if self.request_after_first_read:
+                self.stats["startup_beaten"] += 1
+                self.queued = 1
+                t.assertEqual(h.opens, [], "the startup job ran a refresh a request had claimed")
+            else:
+                self.stats["startup_claimed"] += 1
+                t.assertEqual(len(h.opens), 1, "the startup job did not run the first refresh")
+                self.last_end = self.now
+                t.assertEqual(run.state.last_refresh_ended, self.now)
+            return
+        if self.queued:
+            self.queued = 0
+            self.last_end = self.now
+            t.assertEqual(run.state.last_refresh_ended, self.now,
+                          "running the refresh did not set last_refresh_ended to the clock")
+
+    def _check(self, run):
+        t = self.testcase
+        h = run.harness
+        holder = h.holder
+        refresh_jobs = h.jobs[1:] if self.startup_pending else h.jobs
+        if self.startup_pending:
+            t.assertEqual(h.jobs[:1], [holder._startup], "the first queued job is not the startup job")
+        t.assertIn(len(refresh_jobs), (0, 1), "more than one refresh is claimed and not finished")
+        t.assertEqual(len(refresh_jobs), self.queued,
+                      "the number of claimed refreshes differs from the rule (%d expected)" % self.queued)
+        for job in refresh_jobs:
+            t.assertEqual(job, holder.run_refresh)
+        t.assertEqual(run.state.refreshing, len(refresh_jobs) == 1,
+                      "refreshing is not true exactly while a refresh is claimed and unfinished")
+
+
+class RefreshRuleProperty(unittest.TestCase):
+    """Property 2: At most one refresh, started only when due.
+
+    The model is kept from the steps and the fake clock. `due` is computed from what the test recorded:
+    whether the first read has ended, whether a claimed refresh is unfinished, and the clock when the
+    last refresh ended.
+
+    **Validates: Requirements 5.4, 6.1, 6.2**
+    """
+
+    def test_at_most_one_refresh_is_claimed_and_only_when_due(self):
+        totals = {}
+        for seed in seeds():
+            with self.subTest(seed=seed):
+                model = RefreshModel(self, 60)
+                run_seed(seed, model.observe, prepare=lambda run, rng: watch_refreshes(run))
+                for key, count in model.stats.items():
+                    totals[key] = totals.get(key, 0) + count
+        # The generator must reach each way a request is answered, or the property proves little.
+        for key in ("claimed_first", "claimed_again", "refused_running", "refused_interval", "refused_early",
+                    "claimed_at_interval", "refused_just_before"):
+            self.assertGreater(totals.get(key, 0), 0, "the generator never reached %s: %r" % (key, totals))
+
+    def test_the_startup_job_reads_then_claims_the_first_refresh(self):
+        totals = {}
+        for seed in seeds(base=BASE_SEED + 100000):
+            with self.subTest(seed=seed):
+                def prepare(run, rng):
+                    watch_refreshes(run)
+                    run._program_first_read(rng.choice(FIRST_READ_RESULTS))
+                    holder = run.harness.holder
+                    # In some runs a request arrives just after the first read ends, before the startup claim.
+                    model.request_after_first_read = rng.random() < 0.3
+                    if model.request_after_first_read:
+                        read = holder.first_read
+
+                        def read_then_request():
+                            read()
+                            holder.request()
+                        holder.first_read = read_then_request
+                    holder.start()
+                    self.assertEqual(len(run.harness.jobs), 1, "start() did not queue one job")
+                    self.assertFalse(run.state.refreshing)
+
+                model = RefreshModel(self, 60, startup=True)
+                run_seed(seed, model.observe, generate=without_first_read, prepare=prepare)
+                for key, count in model.stats.items():
+                    totals[key] = totals.get(key, 0) + count
+        self.assertGreater(totals["startup_claimed"], 0, repr(totals))
+        self.assertGreater(totals["startup_beaten"], 0, repr(totals))
+        self.assertGreater(totals["claimed_again"], 0, repr(totals))
 
 
 if __name__ == "__main__":
