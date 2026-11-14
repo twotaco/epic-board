@@ -21,13 +21,11 @@ The filter is a view on the page. The backend, the `plan` route, `app.json` and 
 
 #### Acceptance Criteria
 
-1. WHEN the board shows a plan whose Filter_Options hold two or more epics besides "All epics" THEN the page SHALL show one dropdown (`select`) with a visible label "Epic", placed between the header line (branch, commit, age) and the columns.
+1. WHEN the board shows a plan THEN the page SHALL show one dropdown (`select`) with a visible label "Epic", placed between the header line (branch, commit, age) and the columns.
 2. THE first option SHALL be "All epics", with the Filter_Key `all`. It SHALL be selected when the page loads and nothing is saved (Requirement 3).
 3. AFTER the first option, there SHALL be one option per Plan_Group that has at least one card, in the plan's order, labelled with the epic's name and keyed by its `file`. The "No epic" group, when it has cards, SHALL be the last option, labelled "No epic" and keyed `no-epic`.
 4. THE page SHALL NOT show the dropdown while it has no plan to show: while loading, on an error, when the backend cannot be reached before a first plan, and when the plan has no cards at all (the empty board of the board spec).
 5. THE dropdown SHALL work with the keyboard and a screen reader as a native `select` does, and its label SHALL be tied to it with `htmlFor` and `id`.
-6. THE page SHALL NOT show the dropdown when the Filter_Options hold only one option besides "All epics" (one epic, or only the "No epic" group), because a choice between all and one is the same board. With no dropdown there is nothing to choose, so the board shows everything the plan has, which is that one group.
-7. WHEN the dropdown is hidden for that reason THEN a Saved_Choice SHALL NOT be reset, unless Requirement 3.2 resets it: a saved key that is the one remaining epic is kept and shows the same board as `all`, and a saved key that is not among the Filter_Options is reset to `all`. WHEN a second epic gains cards later THEN the dropdown SHALL appear and show the Saved_Choice, which is still valid.
 
 ### Requirement 2: What the filter shows
 
