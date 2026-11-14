@@ -325,25 +325,29 @@ function lastRoleOf(detail) {
 //   gateway.get(path, {signal}) -> Crew's chat endpoints through useAppApi; rejects with `status`
 //   previous                    -> the chats state, for the missing-since marks and the last-row cache
 //   now()                       -> milliseconds
+//   onRecords({chats, folder, recordsError}) -> optional; called as soon as the backend has answered,
+//                                   before anything is asked of Crew, so a started chat shows its link
+//                                   even while its state is being read or the read fails
 // It reads the records, and when there are started chats the chat list, keeps only the rows whose key
 // is a started chat's key, and reads a chat's newest row only when its row is not Needs you, Working or
 // interrupted and its `last_ts` or `messages` changed since the last read. A key that is not in the list
 // is read on its own: a 404 is `missing`. Anything else that goes wrong rejects.
-export async function readChats({ backend, gateway, previous = initialChats, now, signal }) {
+export async function readChats({ backend, gateway, previous = initialChats, now, signal, onRecords = () => {} }) {
   let answer
   try {
     answer = await backend.get('/chats', { signal })
   } catch (error) {
     if (error?.error?.code === 'chats_unreadable') {
-      return {
-        at: now(), folder: { id: null, reason: null }, recordsError: { code: 'chats_unreadable', message: String(error.error.message ?? '') },
-        chats: [], byKey: {}, missingSince: {},
-      }
+      const recordsError = { code: 'chats_unreadable', message: String(error.error.message ?? '') }
+      const folder = { id: null, reason: null }
+      onRecords({ chats: [], folder, recordsError })
+      return { at: now(), folder, recordsError, chats: [], byKey: {}, missingSince: {} }
     }
     throw error
   }
   const records = Array.isArray(answer?.chats) ? answer.chats : []
   const folder = { id: typeof answer?.folder_id === 'string' ? answer.folder_id : null, reason: answer?.folder_reason ?? null }
+  onRecords({ chats: records, folder, recordsError: null })
   const byKey = {}
   const missingSince = {}
   if (records.length === 0) return { at: now(), folder, recordsError: null, chats: [], byKey, missingSince }
@@ -421,10 +425,19 @@ export const initialChats = Object.freeze({
   loaded: false,
 })
 
-// Results: {kind: 'chats', read} and {kind: 'failure'} from the chat poller, and the page's own
+// Results: {kind: 'chats', read} and {kind: 'failure'} from the chat poller, {kind: 'records', chats,
+// folder, recordsError} from the start of a read (the records before the states), and the page's own
 // {kind: 'started', record} and {kind: 'removed', name}. A failed read keeps what is shown.
 export function chatsReduce(state, result) {
   switch (result?.kind) {
+    case 'records': {
+      const keys = new Set(result.chats.map((record) => record.key))
+      const keep = (marks) => Object.fromEntries(Object.entries(marks).filter(([key]) => keys.has(key)))
+      return {
+        ...state, records: result.chats, folder: result.folder, recordsError: result.recordsError ?? null,
+        byKey: keep(state.byKey), missingSince: keep(state.missingSince), loaded: true,
+      }
+    }
     case 'chats': {
       const { read } = result
       return {
@@ -588,13 +601,25 @@ export const STYLE = `
 .eb-group { min-width: 0; margin: 0 0 12px 0; }
 .eb-group-title { margin: 0 0 6px 0; font-size: 0.95em; overflow-wrap: anywhere; }
 .eb-cards { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
-.eb-card { min-width: 0; border: 1px solid rgba(128, 128, 128, 0.5); border-radius: 6px; background: rgba(128, 128, 128, 0.1); padding: 8px 12px; overflow-wrap: anywhere; }
+.eb-card { position: relative; min-width: 0; border: 1px solid rgba(128, 128, 128, 0.5); border-radius: 6px; background: rgba(128, 128, 128, 0.1); padding: 8px 12px; overflow-wrap: anywhere; }
 .eb-card-name { font-weight: 600; }
 .eb-card-description { margin-top: 4px; }
 .eb-card-spec { margin-top: 4px; font-family: monospace; font-size: 0.85em; opacity: 0.7; }
 .eb-card-progress { margin-top: 4px; font-size: 0.9em; }
 .eb-bar { margin-top: 4px; height: 6px; border-radius: 3px; background: rgba(128, 128, 128, 0.3); overflow: hidden; }
 .eb-bar-fill { height: 100%; background: currentColor; opacity: 0.6; }
+.eb-card-main { all: unset; font-weight: 600; cursor: pointer; overflow-wrap: anywhere; }
+.eb-card-main::after { content: ''; position: absolute; inset: 0; border-radius: 6px; }
+.eb-card-main:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
+.eb-card[data-mode='startable']:hover, .eb-card[data-mode='question']:hover, .eb-card[data-mode='blocked']:hover, .eb-card[data-mode='chat']:hover { background: rgba(128, 128, 128, 0.2); }
+.eb-card:focus-within { border-color: currentColor; }
+.eb-chat-line { margin-top: 6px; }
+.eb-chat-state { display: inline-block; border: 1px solid currentColor; border-radius: 10px; padding: 0 8px; font-size: 0.85em; }
+.eb-chat-state[data-state='needs-you'] { font-weight: 600; }
+.eb-chat-note { margin: 6px 0 0 0; }
+.eb-question, .eb-chat-controls { position: relative; z-index: 1; margin-top: 8px; }
+.eb-question p, .eb-chat-controls p { margin: 6px 0 0 0; }
+.eb-question button, .eb-chat-controls button { font: inherit; cursor: pointer; margin-top: 6px; }
 .eb-empty-column { margin: 0; opacity: 0.7; }
 .eb-problems { margin-top: 16px; border: 1px solid rgba(128, 128, 128, 0.5); border-radius: 6px; padding: 8px 12px; }
 .eb-problems summary { cursor: pointer; }
@@ -612,20 +637,97 @@ export const STYLE = `
 
 const EMPTY_PLAN_HINT = 'Specs are read from .kiro/specs/ and epics from docs/epics/.'
 
-function renderCard(h, card, index) {
+// What each step of a start says when it fails.
+const STEP_TEXT = {
+  reserve: 'Could not reserve the chat',
+  create: 'Could not create the chat',
+  send: 'Could not send the brief',
+  save: 'Could not save the chat',
+}
+
+const NO_ACTIONS = Object.freeze({
+  ask() {}, cancel() {}, start() {}, close() {}, resume() {}, startAgain() {},
+})
+
+// The part of a card below its progress that belongs to the chat: the state word, the question,
+// or the text and controls of a chat that is restoring or not open. Every text is a literal child.
+function renderChatPart(h, card, view, actions) {
+  switch (view.mode) {
+    case 'chat':
+      return view.state
+        ? h('div', { className: 'eb-chat-line', key: 'chat' },
+          h('span', { className: 'eb-chat-state', 'data-state': view.state }, view.stateWord))
+        : null
+    case 'restoring':
+      return h('p', { className: 'eb-chat-note', role: 'status', key: 'chat' }, 'Restoring chat…')
+    case 'not-open':
+      return h('div', { className: 'eb-chat-controls', key: 'chat' },
+        h('p', { className: 'eb-chat-note', role: 'status' }, 'This chat is not open.'),
+        h('button', { type: 'button', onClick: () => actions.resume(view.key) }, 'Resume chat'))
+    case 'resuming':
+      return h('p', { className: 'eb-chat-note', role: 'status', key: 'chat' }, 'Resuming…')
+    case 'resume-failed':
+      return h('div', { className: 'eb-chat-controls', key: 'chat' },
+        h('p', { className: 'eb-chat-note', role: 'status' }, 'The chat could not be resumed.'),
+        view.reason ? h('p', { className: 'eb-chat-note' }, view.reason) : null,
+        h('button', { type: 'button', onClick: () => actions.startAgain(view.name, card.id) }, 'Start again'))
+    case 'starting':
+      return h('p', { className: 'eb-chat-note', role: 'status', key: 'chat' }, 'Starting…')
+    case 'question': {
+      const onKeyDown = (event) => { if (event?.key === 'Escape') actions.cancel(card.id) }
+      return h('div', { className: 'eb-question', role: 'group', 'aria-label': 'Start a conductor', onKeyDown, key: 'chat' },
+        view.failure
+          ? h('p', { className: 'eb-chat-note', role: 'status' }, `${STEP_TEXT[view.failure.step] ?? 'The start failed'}: ${view.failure.reason}`)
+          : null,
+        h('p', null, 'Start a conductor on this story?'),
+        h('button', { type: 'button', onClick: () => actions.start(card.id) }, 'Start'),
+        ' ',
+        h('button', { type: 'button', onClick: () => actions.cancel(card.id) }, 'Cancel'))
+    }
+    case 'blocked': {
+      const { blocked } = view
+      const onKeyDown = (event) => { if (event?.key === 'Escape') actions.close(card.id) }
+      return h('div', { className: 'eb-question', role: 'group', 'aria-label': 'Start a conductor', onKeyDown, key: 'chat' },
+        blocked.kind === 'folder'
+          ? [
+            h('p', { key: 'a' }, 'No Crew folder is set for this project.'),
+            blocked.reason ? h('p', { key: 'b' }, blocked.reason) : null,
+            h('p', { key: 'c' }, 'Set ', h('code', null, 'EPIC_BOARD_FOLDER'), ' or ', h('code', null, 'folder_id'), ' in config.json.'),
+          ]
+          : h('p', null, blocked.message),
+        h('button', { type: 'button', onClick: () => actions.close(card.id) }, 'Close'))
+    }
+    default:
+      return null
+  }
+}
+
+function renderCard(h, card, index, view, actions) {
   const progress = progressOf(card)
-  return h('li', { className: 'eb-card', key: index },
-    h('div', { className: 'eb-card-name' }, card.name),
+  // Without the chats state a card has no controls: the board as the board spec drew it.
+  const chat = view.chats ? cardViewOf(card, view.chats, view.ui ?? {}) : { mode: 'plain' }
+  const main = { className: 'eb-card-main', 'data-card-id': card.id }
+  // The card's name is the label of its one main control. It stays a button while the question is open,
+  // so a keyboard user's focus is not lost, and it is plain text whenever there is nothing to do.
+  let name = card.name
+  if (chat.mode === 'startable' || chat.mode === 'question' || chat.mode === 'blocked') {
+    name = h('button', { ...main, type: 'button', onClick: () => actions.ask(card.id) }, card.name)
+  } else if (chat.mode === 'chat') {
+    name = h('a', { ...main, href: chat.href }, card.name)
+  }
+  return h('li', { className: 'eb-card', 'data-mode': chat.mode, key: index },
+    h('div', { className: 'eb-card-name' }, name),
     card.description ? h('div', { className: 'eb-card-description' }, card.description) : null,
     card.spec != null ? h('div', { className: 'eb-card-spec' }, card.spec) : null,
     h('div', { className: 'eb-card-progress' }, progress.text),
     progress.fraction !== null
       ? h('div', { className: 'eb-bar', 'aria-hidden': 'true' },
         h('div', { className: 'eb-bar-fill', style: { width: `${progress.fraction * 100}%` } }))
-      : null)
+      : null,
+    renderChatPart(h, card, chat, actions))
 }
 
-function renderColumn(h, column) {
+function renderColumn(h, column, view, actions) {
   return h('div', { className: 'eb-column', key: column.key },
     h(`h${TITLE_LEVEL + 1}`, { className: 'eb-column-title' },
       h('span', null, column.title),
@@ -635,7 +737,7 @@ function renderColumn(h, column) {
       ? h('p', { className: 'eb-empty-column' }, 'Nothing here')
       : column.groups.map((group, index) => h('div', { className: 'eb-group', key: `${group.key}:${index}` },
         h(`h${TITLE_LEVEL + 2}`, { className: 'eb-group-title' }, group.name ?? 'No epic'),
-        h('ul', { className: 'eb-cards' }, group.cards.map((card, i) => renderCard(h, card, i))))))
+        h('ul', { className: 'eb-cards' }, group.cards.map((card, i) => renderCard(h, card, i, view, actions))))))
 }
 
 function renderProblems(h, problems) {
@@ -647,7 +749,7 @@ function renderProblems(h, problems) {
       h('div', null, problem.reason)))))
 }
 
-function renderPlanView(h, view) {
+function renderPlanView(h, view, actions) {
   return [
     h('div', { className: 'eb-header', key: 'header' },
       h('span', { className: 'eb-branch' }, view.branch),
@@ -665,16 +767,20 @@ function renderPlanView(h, view) {
       ? h('div', { className: 'eb-notice', role: 'status', key: 'unreachable' },
         h('p', null, 'Could not reach the backend. Showing the plan from the last update.'))
       : null,
+    view.chats?.failed
+      ? h('div', { className: 'eb-notice', role: 'status', key: 'chats-failed' },
+        h('p', null, 'Could not read chat status. Showing the last known states.'))
+      : null,
     view.empty
       ? h('div', { className: 'eb-empty', key: 'empty' },
         h('p', null, `No specs or epics were found on ${view.branch}.`),
         h('p', null, EMPTY_PLAN_HINT))
-      : h('div', { className: 'eb-columns', key: 'columns' }, view.columns.map((column) => renderColumn(h, column))),
+      : h('div', { className: 'eb-columns', key: 'columns' }, view.columns.map((column) => renderColumn(h, column, view, actions))),
     view.problems.length > 0 ? renderProblems(h, view.problems) : null,
   ]
 }
 
-function renderBody(h, view) {
+function renderBody(h, view, actions) {
   switch (view.kind) {
     case 'loading':
       return h('p', { role: 'status' }, 'Loading…')
@@ -688,30 +794,131 @@ function renderBody(h, view) {
           ? h('ul', null, view.settings.map((setting, index) => h('li', { key: index }, h('code', null, setting))))
           : null)
     default:
-      return renderPlanView(h, view)
+      return renderPlanView(h, view, actions)
   }
 }
 
 // Builds the page for a view (what `viewOf` returns) with h = createElement.
 // Pure: no React, no hooks, no `window`. Every plan text is passed as a child.
-export function renderBoard(h, view) {
+// A plan view that also carries `chats` (the chats state) and `ui` draws the card controls; `actions`
+// are what they call: ask(cardId), cancel(cardId), start(cardId), close(cardId), resume(key) and
+// startAgain(name, cardId). Each defaults to doing nothing.
+export function renderBoard(h, view, actions = {}) {
   return h('div', { className: 'eb-root' },
     h('style', null, STYLE),
     h(`h${TITLE_LEVEL}`, { className: 'eb-title' }, 'Epic Board'),
-    renderBody(h, view))
+    renderBody(h, view, { ...NO_ACTIONS, ...actions }))
 }
 
 const PLAN_URL = '/apps/epic-board/api/plan'
+const BACKEND_BASE = '/apps/epic-board/api'
+
+// The page's own state for the card controls: which card has the question open, the start of each card,
+// the resume of each chat, and a request to put focus back on a card's button.
+//   {kind: 'ask', cardId}                       open the question there (and close it anywhere else)
+//   {kind: 'cancel', cardId}                    close it, forget a failed start, and ask for focus on the card
+//   {kind: 'step', cardId, step}                a start is running
+//   {kind: 'failed', cardId, step, reason}      a start failed; the question stays open with the failure
+//   {kind: 'started', cardId}                   a start worked
+//   {kind: 'resuming', key} | {kind: 'resume-failed', key, reason} | {kind: 'resumed', key}
+export const initialUi = Object.freeze({ asking: null, flows: Object.freeze({}), resumes: Object.freeze({}), focus: null })
+
+function without(object, key) {
+  const { [key]: _gone, ...rest } = object
+  return rest
+}
+
+export function uiReduce(state, action) {
+  switch (action?.kind) {
+    case 'ask':
+      return { ...state, asking: action.cardId }
+    case 'cancel': {
+      const flow = state.flows[action.cardId]
+      return {
+        ...state,
+        asking: state.asking === action.cardId ? null : state.asking,
+        flows: flow?.kind === 'failed' ? without(state.flows, action.cardId) : state.flows,
+        focus: { cardId: action.cardId },
+      }
+    }
+    case 'step':
+      return { ...state, flows: { ...state.flows, [action.cardId]: { kind: 'starting', step: action.step } } }
+    case 'failed':
+      return {
+        ...state,
+        asking: action.cardId,
+        flows: { ...state.flows, [action.cardId]: { kind: 'failed', step: action.step, reason: action.reason } },
+      }
+    case 'started':
+      return {
+        ...state,
+        asking: state.asking === action.cardId ? null : state.asking,
+        flows: without(state.flows, action.cardId),
+      }
+    case 'resuming':
+      return { ...state, resumes: { ...state.resumes, [action.key]: { kind: 'resuming' } } }
+    case 'resume-failed':
+      return { ...state, resumes: { ...state.resumes, [action.key]: { kind: 'failed', reason: action.reason } } }
+    case 'resumed':
+      return { ...state, resumes: without(state.resumes, action.key) }
+    default:
+      return state
+  }
+}
+
+// The app's own backend, through `fetch`. Resolves with the parsed body; a non-2xx answer rejects with an
+// error that has `status` and `error` (the body's {code, message}). Like the plan request, it carries no
+// credential of its own: the host signs it on its way to the backend.
+export function makeBackend(fetchFn) {
+  const call = async (method, path, body, init = {}) => {
+    const options = { method, credentials: 'same-origin', cache: 'no-store', signal: init.signal }
+    if (body !== undefined) {
+      options.headers = { 'Content-Type': 'application/json' }
+      options.body = JSON.stringify(body)
+    }
+    const response = await fetchFn(BACKEND_BASE + path, options)
+    let data = null
+    try {
+      data = await response.json()
+    } catch {
+      data = null
+    }
+    if (!response.ok) throw Object.assign(new Error(`Backend ${response.status}`), { status: response.status, error: data?.error ?? null })
+    return data
+  }
+  return {
+    get: (path, init) => call('GET', path, undefined, init),
+    post: (path, body, init) => call('POST', path, body, init),
+    del: (path, init) => call('DELETE', path, undefined, init),
+  }
+}
+
+// The host's app client (`useAppApi`), or a hook that gives none when the host has no such module.
+function hostApiHook() {
+  const sdk = typeof window !== 'undefined' ? window.__kirocrew_modules?.['@kirocrew/app-sdk'] : undefined
+  return typeof sdk?.useAppApi === 'function' ? sdk.useAppApi : () => null
+}
+
+const NO_CLIENT = 'The host has no app client, so Crew cannot be reached.'
 
 // Builds the page component from the host's React. This is the only function that uses
-// hooks. `env` may supply `fetch`, `document`, `setTimeout` and `clearTimeout` (tests pass
-// fakes); each one defaults to the global and is looked up inside the effect, so importing
-// this module and calling `createBoard` need no `window`.
+// hooks. `env` may supply `fetch`, `document`, `setTimeout`, `clearTimeout`, `now` and `useAppApi`
+// (tests pass fakes); each one defaults to the global and is looked up inside the effect or the
+// component, so importing this module and calling `createBoard` need no `window`.
 export function createBoard(React, env = {}) {
-  const { useReducer, useEffect, createElement: h } = React
+  const { useReducer, useEffect, useRef, createElement: h } = React
 
   return function Board() {
     const [state, dispatch] = useReducer(reduce, initialState)
+    const [chats, chatsDispatch] = useReducer(chatsReduce, initialChats)
+    const [ui, uiDispatch] = useReducer(uiReduce, initialUi)
+    const api = (env.useAppApi ?? hostApiHook())()
+
+    // What the handlers and the chat poller read. Refs, so they always see the latest render.
+    const latest = useRef(null)
+    if (latest.current === null) latest.current = { starts: new Set(), poller: null, alive: true }
+    latest.current.chats = chats
+    latest.current.api = api
 
     useEffect(() => {
       const doc = env.document ?? document
@@ -750,7 +957,109 @@ export function createBoard(React, env = {}) {
       }
     }, [])
 
-    return renderBoard(h, viewOf(state))
+    // The chat poller: the backend's records and, when there are started chats, their states in Crew.
+    useEffect(() => {
+      const doc = env.document ?? document
+      const fetchFn = env.fetch ?? fetch
+      const setTimer = env.setTimeout ?? setTimeout
+      const clearTimer = env.clearTimeout ?? clearTimeout
+      const now = env.now ?? Date.now
+      const backend = makeBackend(fetchFn)
+      const gateway = {
+        get: (path, init) => (latest.current.api ? latest.current.api.get(path, init) : Promise.reject(new Error(NO_CLIENT))),
+        post: (path, ...rest) => (latest.current.api ? latest.current.api.post(path, ...rest) : Promise.reject(new Error(NO_CLIENT))),
+      }
+      latest.current.backend = backend
+      latest.current.gateway = gateway
+
+      const poller = createPoller({
+        request: async (signal) => ({
+          status: 200,
+          body: await readChats({
+            backend, gateway, previous: latest.current.chats, now, signal,
+            onRecords: (records) => { if (latest.current.alive) chatsDispatch({ kind: 'records', ...records }) },
+          }),
+        }),
+        hidden: () => doc.hidden,
+        setTimer: (fn, ms) => setTimer(fn, ms),
+        clearTimer: (handle) => clearTimer(handle),
+        onResult: (result) => chatsDispatch(result),
+        classifyAnswer: classifyChats,
+        delay: chatDelay,
+      })
+      latest.current.poller = poller
+      latest.current.alive = true
+      const onVisibility = () => {
+        if (!doc.hidden) poller.visible()
+      }
+      doc.addEventListener('visibilitychange', onVisibility)
+      poller.start()
+      return () => {
+        latest.current.alive = false
+        latest.current.poller = null
+        poller.stop()
+        doc.removeEventListener('visibilitychange', onVisibility)
+      }
+    }, [])
+
+    // After Cancel or Close, put focus back on the card's button.
+    useEffect(() => {
+      if (!ui.focus) return
+      const doc = env.document ?? document
+      const target = [...doc.querySelectorAll('[data-card-id]')].find((node) => node.getAttribute('data-card-id') === ui.focus.cardId)
+      if (target && typeof target.focus === 'function') target.focus()
+    }, [ui.focus])
+
+    const refresh = () => latest.current.poller?.visible()
+    const live = (fn) => (...args) => { if (latest.current.alive) fn(...args) }
+    const ownUi = live(uiDispatch)
+    const ownChats = live(chatsDispatch)
+
+    const actions = {
+      ask: (cardId) => ownUi({ kind: 'ask', cardId }),
+      cancel: (cardId) => ownUi({ kind: 'cancel', cardId }),
+      close: (cardId) => ownUi({ kind: 'cancel', cardId }),
+      async start(cardId) {
+        const { starts, backend, gateway } = latest.current
+        if (starts.has(cardId)) return // a start is already running for this card
+        starts.add(cardId)
+        ownUi({ kind: 'step', cardId, step: 'reserve' })
+        try {
+          const result = await startStory({ cardId, backend, gateway, onStep: (step) => ownUi({ kind: 'step', cardId, step }) })
+          ownChats({ kind: 'started', record: { card_id: cardId, name: result.name, key: result.key } })
+          ownUi({ kind: 'started', cardId })
+          refresh()
+        } catch (error) {
+          ownUi({ kind: 'failed', cardId, step: error.step ?? 'reserve', reason: error.reason ?? String(error?.message ?? error) })
+          if (error.code === 'chat_exists') refresh() // another page started it: read the records again
+        } finally {
+          starts.delete(cardId)
+        }
+      },
+      async resume(key) {
+        ownUi({ kind: 'resuming', key })
+        try {
+          await resumeChat({ key, gateway: latest.current.gateway })
+          ownUi({ kind: 'resumed', key })
+          refresh()
+        } catch (error) {
+          ownUi({ kind: 'resume-failed', key, reason: error.reason ?? String(error?.message ?? error) })
+        }
+      },
+      async startAgain(name, cardId) {
+        const record = latest.current.chats.records.find((candidate) => candidate.name === name)
+        try {
+          await startAgain({ name, backend: latest.current.backend })
+          ownChats({ kind: 'removed', name })
+          if (record) ownUi({ kind: 'resumed', key: record.key })
+          ownUi({ kind: 'ask', cardId })
+        } catch (error) {
+          if (record) ownUi({ kind: 'resume-failed', key: record.key, reason: error.reason ?? String(error?.message ?? error) })
+        }
+      },
+    }
+
+    return renderBoard(h, { ...viewOf(state), chats, ui }, actions)
   }
 }
 

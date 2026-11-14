@@ -21,6 +21,9 @@
     "healthCheck": "/health",
     "routes": "/api/apps/epic-board"
   },
+  "permissions": {
+    "api": ["/api/chat", "/api/chat/slots"]
+  },
   "platform": {
     "os": ["macos", "linux"]
   }
