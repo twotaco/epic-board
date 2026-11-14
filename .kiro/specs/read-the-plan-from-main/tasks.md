@@ -20,25 +20,25 @@
   - [x] 2.3 Check the parsers with example text
     - Cover optional and nested tasks, `[-]`, unknown status words, a missing em dash, links to spec folders, and whole-file mode
 
-- [ ] 3. Build the plan from a source
-  - [ ] 3.1 Write spec cards and statuses in `backend/plan.py`
+- [x] 3. Build the plan from a source
+  - [x] 3.1 Write spec cards and statuses in `backend/plan.py`
     - Define the source interface (`list_files(*prefixes)`, `read_file(path)`) and the card, group and problem shapes from the design's data model
     - Find spec folders from the file list; give a spec with no `tasks.md` status `planned` and counts of 0 of 0
     - Derive status: `done` when there is at least one task and all are done, `in progress` when any task is done or under way, otherwise `planned`
     - When `tasks.md` cannot be read, add a problem naming the file and the reason, and give the card `planned` with no counts
     - _Requirements: 3.1, 3.2, 3.4, 4.3, 4.4, 4.5, 4.6, 7.1, 7.2, 7.4_
-  - [ ] 3.2 Add epic groups in `backend/plan.py`
+  - [x] 3.2 Add epic groups in `backend/plan.py`
     - Read the epic files in `docs/epics/` except `README.md` and `standalone.md`, in file-name order; a file that cannot be read adds a problem and is skipped
     - Turn each story into a card: a story whose spec folder exists takes the spec's counts and its status from tasks, except `done` in the epic line, which wins; any other story takes its epic status or `planned`
     - Record every spec folder used, and let the same spec appear under several epics
     - Keep an epic with no stories as a group with no cards
     - _Requirements: 5.1, 5.5, 5.6, 5.7, 5.8, 6.1, 6.2, 6.3, 8.1_
-  - [ ] 3.3 Add the "No epic" group in `backend/plan.py`
+  - [x] 3.3 Add the "No epic" group in `backend/plan.py`
     - Read `standalone.md` when it exists; drop its stories whose spec an epic already uses, and use a spec folder at most once
     - Add a card named after the folder for every spec folder that no epic and no standalone story uses
     - Sort the group by name ignoring case, put it after the epics, and leave it out when it has no cards
     - _Requirements: 3.3, 5.9, 5.10, 8.2, 8.3, 8.4_
-  - [ ] 3.4 Check the plan rules with an in-memory source
+  - [x] 3.4 Check the plan rules with an in-memory source
     - Cover specs with no epics at all, a spec in two epics, `done` overriding open tasks, a story with a missing spec, `standalone.md` with and without a `## Stories` section, an unreadable file, and an empty plan
 
 - [ ] 4. Read from git
