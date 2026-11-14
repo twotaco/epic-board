@@ -41,23 +41,23 @@
   - [x] 3.4 Check the plan rules with an in-memory source
     - Cover specs with no epics at all, a spec in two epics, `done` overriding open tasks, a story with a missing spec, `standalone.md` with and without a `## Stories` section, an unreadable file, and an empty plan
 
-- [ ] 4. Read from git
-  - [ ] 4.1 Write the git runner in `backend/gitsource.py`
+- [x] 4. Read from git
+  - [x] 4.1 Write the git runner in `backend/gitsource.py`
     - Run git as an argument list with no shell, with `-C <repository>`, `stdin` closed, `GIT_TERMINAL_PROMPT=0` and `start_new_session=True`
     - Stop a command after 30 seconds by killing its process group, and report that as a failed command with git's trimmed error text
     - Serialize fetches with a lock
     - _Requirements: 9.2, 9.3, 9.4_
-  - [ ] 4.2 Open a snapshot in `backend/gitsource.py`
+  - [x] 4.2 Open a snapshot in `backend/gitsource.py`
     - Check that the path is a directory and a git checkout; otherwise raise `SourceError` with code `not_a_checkout`
     - Find the main branch from `origin/HEAD`, falling back to `main`
     - Fetch `+refs/heads/<branch>:refs/remotes/origin/<branch>`; resolve the ref to a commit
     - When the fetch fails but the ref resolves, return a snapshot carrying the fetch error; when the ref does not resolve, raise `SourceError` with code `ref_unreadable`
     - _Requirements: 1.4, 2.1, 2.2, 2.4, 2.5, 2.6, 9.1_
-  - [ ] 4.3 Add file access to the snapshot
+  - [x] 4.3 Add file access to the snapshot
     - `list_files(*prefixes)` uses `ls-tree -r -z --name-only` on the commit; `read_file(path)` uses `show <commit>:<path>`; both read only the commit, never the working tree
     - Turn a failed read into `SourceError` with code `read_failed`
     - _Requirements: 2.3, 9.1_
-  - [ ] 4.4 Check the git access against throwaway repositories
+  - [x] 4.4 Check the git access against throwaway repositories
     - Use temporary repositories with a bare `origin`: `origin/HEAD` set and unset, a failed fetch with and without an earlier copy, files read from the commit while the working tree differs, a repository path with spaces, and a command that times out
 
 - [ ] 5. Serve the plan
