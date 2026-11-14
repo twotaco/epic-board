@@ -61,6 +61,15 @@ def read_text(source, path, problems):
         return None
 
 
+def add_ids(groups):
+    """Give every card its `id`: the epic file, a `#` and the card's name, or `#` and the name
+    for the "No epic" group. A story's name and epic stay put when its spec lands, so its id does too."""
+    for group in groups:
+        prefix = group["epic"]["file"] if group["epic"] else ""
+        for item in group["cards"]:
+            item["id"] = f"{prefix}#{item['name']}"
+
+
 def build_plan(source):
     """Return (groups, problems)."""
     problems = []
@@ -102,4 +111,5 @@ def build_plan(source):
     if loose:
         loose.sort(key=lambda c: c["name"].casefold())
         groups.append({"epic": None, "cards": loose})
+    add_ids(groups)
     return groups, problems
