@@ -12,22 +12,23 @@ Group 1 is the page's logic, including saving and restoring the choice, with no 
 
 - [ ] 1. Page logic: options, filter and view
   - [ ] 1.1 Add `filterOptions` and `filterPlan` to `ui/index.mjs`
-    - Export both, as the design says. `filterPlan` never mutates its argument and returns the plan itself for `all` or for a key no group has
+    - Export both, as the design says. `filterOptions` returns every option including `all`; the dropdown's hiding is decided in `viewOf` (1.2), not here. `filterPlan` never mutates its argument and returns the plan itself for `all` or for a key no group has
     - Group keys are computed as `columnsOf` computes them, in one shared helper so the two cannot drift apart
     - Do not change `columnsOf`, `progressOf` or any chat function
     - _Requirements: 1.2, 1.3, 2.1, 2.2, 2.6_
   - [ ] 1.2 Give `viewOf` a second parameter `filterKey = 'all'`
     - A `plan` view gains `filter: {key, options}` and builds `columns` from `filterPlan`; `empty`, `problems` and `failedFetch` come from the whole plan
     - A stored key that is not among the options gives the effective key `all`
+    - `filter.show` is `!empty && options.length >= 3`: no dropdown for one epic or only "No epic". A saved key that is the one remaining epic is kept (same board as `all`); settled in the design
     - Check that every existing call of `viewOf` and every existing test passes unchanged
-    - _Requirements: 1.4, 2.3, 2.4, 2.5, 3.1, 3.2, 3.3_
+    - _Requirements: 1.1, 1.4, 1.6, 1.7, 2.3, 2.4, 2.5, 3.1, 3.2, 3.3_
   - [ ] 1.3 Add `loadChoice` and `saveChoice` to `ui/index.mjs`
     - Export `FILTER_STORAGE_KEY` (`'epic-board.filter'`), `loadChoice(storage)` and `saveChoice(storage, key)` as the design says: neither throws, neither reads `window`, a missing storage, a throwing call or a non-text value gives `all` on a read and `false` on a write
     - _Requirements: 3.5, 3.6, 3.8_
   - [ ] 1.4 Write `tests/ui/filter.test.mjs`
     - Cases for `filterOptions`: order, a group with no card skipped, "No epic" last, two epics with one name, no groups
     - Cases for `filterPlan`: `all`, one epic, "No epic", an unknown key, no mutation, card `id`s and chat-relevant fields kept, a spec under two epics appearing once
-    - Cases for `viewOf`: counts per column under a filter, a column with no card, the key falling back to `all`, `empty` ignoring the filter, problems and notices not filtered
+    - Cases for `viewOf`: `view: filter.show is false with one epic`, `view: filter.show is true with two epics`, `view: filter.show is false on the empty plan`, a single "No epic" group hiding it, a kept saved key with one epic, a missing saved key reset, counts per column under a filter, a column with no card, the key falling back to `all`, `empty` ignoring the filter, problems and notices not filtered
     - One `forSeeds` property: for random plans and keys, the filtered cards are exactly the chosen group's cards and `all` equals the unfiltered columns
     - Storage tests with a fake storage and a throwing one: `save: saveChoice writes the key under epic-board.filter`, `save: all is saved too`, `save: a throwing setItem does not throw`, `restore: loadChoice returns the saved key`, `restore: nothing saved gives all`, `restore: no storage gives all`, `restore: a throwing getItem gives all`, `restore: a non-text value gives all`, `fallback: a saved epic missing from the plan shows all epics and resets the Saved_Choice`
     - _Requirements: 1.2, 1.3, 1.4, 2.1, 2.2, 2.3, 2.4, 2.5, 2.6, 3.2, 3.5, 3.6, 3.7, 3.8_
@@ -37,15 +38,15 @@ Group 1 is the page's logic, including saving and restoring the choice, with no 
 
 - [ ] 2. Page: the dropdown, the state and the check
   - [ ] 2.1 Draw the dropdown in `ui/index.mjs`
-    - Add `renderFilter` and call it from `renderPlanView` directly after the header, when the plan is not empty; add `filter` to `NO_ACTIONS` and a few `.eb-filter` lines to `STYLE`
+    - Add `renderFilter` and call it from `renderPlanView` directly after the header, when `view.filter.show` is true; add `filter` to `NO_ACTIONS` and a few `.eb-filter` lines to `STYLE`
     - The label is "Epic", tied to the `select` by `htmlFor` and `id`; plan text is passed as children only
-    - Extend `tests/ui/render.test.mjs`: the label, the first option, the selected value, one option per entry, `onChange` calling `actions.filter`, no dropdown while loading, on an error or on the empty board, notices and problems still drawn
-    - _Requirements: 1.1, 1.2, 1.3, 1.4, 1.5, 2.5_
+    - Extend `tests/ui/render.test.mjs`: the label, the first option, the selected value, one option per entry, `onChange` calling `actions.filter`, `render: dropdown hidden with one epic`, `render: dropdown hidden with only the No epic group`, `render: dropdown shown with two or more`, no dropdown while loading, on an error or on the empty board, notices and problems still drawn
+    - _Requirements: 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 2.5_
   - [ ] 2.2 Hold, save and restore the choice in `createBoard`
     - `useState(() => loadChoice(storage))` for the key, with `storage` taken from `env.storage` or `window.localStorage` inside a `try`; pass the key to `viewOf`; give `renderBoard` a `filter` action that sets the key and calls `saveChoice`; an effect for a `plan` view sets the key and the Saved_Choice back to `all` when the view's effective key differs
     - Leave both pollers, the start flow and the resume flow as they are
-    - Extend `tests/ui/board.test.mjs` (add `useState` to the fake React in `tests/ui/support.mjs` if it lacks one, and a fake `storage` to `env`): `board: choosing an epic saves it`, `board: a saved epic is restored on load`, `board: a missing saved epic falls back to all epics`, a board with a throwing storage still filters in memory, nothing reset before the first plan; choosing an epic shows only its cards; a new plan keeps the choice; a new plan without the epic goes back to all and stays there when the epic returns; a failed plan poll keeps the filter working; a chat poll and a start leave the choice alone
-    - _Requirements: 3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 3.7, 3.8, 4.1, 4.2_
+    - Extend `tests/ui/board.test.mjs` (add `useState` to the fake React in `tests/ui/support.mjs` if it lacks one, and a fake `storage` to `env`): `board: choosing an epic saves it`, `board: a saved epic is restored on load`, `board: a missing saved epic falls back to all epics`, a board with a throwing storage still filters in memory, nothing reset before the first plan, `board: no dropdown and a kept saved choice with a single epic`, `board: a saved choice that is not the single epic is reset`, `board: the dropdown appears with the saved choice when a second epic arrives`; choosing an epic shows only its cards; a new plan keeps the choice; a new plan without the epic goes back to all and stays there when the epic returns; a failed plan poll keeps the filter working; a chat poll and a start leave the choice alone
+    - _Requirements: 1.7, 3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 3.7, 3.8, 4.1, 4.2_
   - [ ] 2.3 Check `app.json` and the backend are untouched
     - Run `git diff origin/main --stat` and confirm no file under `backend/`, no `app.json` and no `config.json` changed, and that the existing `app.json` test still shows no `storage` permission
     - _Requirements: 4.1, 4.2_
