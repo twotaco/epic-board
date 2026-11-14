@@ -73,10 +73,23 @@ class AppJsonTests(unittest.TestCase):
         self.assertTrue(os.path.isfile(os.path.join(ROOT, "ui", self.app["ui"]["entry"])))
         self.assertTrue(os.path.isfile(os.path.join(ROOT, self.app["backend"]["entryPoint"])))
 
-    def test_no_api_permission(self):
+    def test_api_permission_is_exactly_the_two_chat_paths(self):
+        # start-a-story, Requirement 1, criterion 3
         permissions = self.app.get("permissions", {})
         self.assertIsInstance(permissions, dict)
-        self.assertNotIn("api", permissions)
+        self.assertEqual(permissions.get("api"), ["/api/chat", "/api/chat/slots"])
+
+    def test_no_other_permission_is_declared(self):
+        permissions = self.app.get("permissions", {})
+        self.assertEqual(sorted(permissions), ["api"])
+        for name in ("sessionApproval", "chatSlots", "spawn", "agentTurns", "network", "storage"):
+            self.assertNotIn(name, permissions)
+        self.assertNotIn("memberThreads", permissions)
+        self.assertNotIn("events", permissions)
+
+    def test_the_other_declarations_are_kept(self):
+        self.assertEqual(self.app["platform"]["os"], ["macos", "linux"])
+        self.assertEqual(self.app["backend"]["port"], "auto")
 
 
 if __name__ == "__main__":
