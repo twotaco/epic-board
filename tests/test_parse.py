@@ -48,6 +48,21 @@ class StoryTests(unittest.TestCase):
             ("Six", "x", "planned"),
         ])
 
+    def test_description_after_first_full_stop(self):
+        text = """## Stories
+- [A](.kiro/specs/a/) — done. Frozen: records what was built. Not edited.
+- B — planned. A connected agent can start it.
+- C — in progress.
+- D — soon. done later.
+"""
+        got = [(s.name, s.status, s.description) for s in parse_stories(text, False)]
+        self.assertEqual(got, [
+            ("A", "done", "Frozen: records what was built. Not edited."),
+            ("B", "planned", "A connected agent can start it."),
+            ("C", "in progress", ""),
+            ("D", None, "done later."),
+        ])
+
     def test_name_falls_back_to_file(self):
         self.assertEqual(parse_epic("no heading", "f.md").name, "f.md")
 

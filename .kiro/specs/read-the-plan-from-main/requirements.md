@@ -70,7 +70,7 @@ Statuses are `planned`, `in progress` and `done`.
 1. WHEN the main branch contains Markdown files in `docs/epics/` THEN each file SHALL be read as an epic, except `README.md`, which SHALL be ignored, and `standalone.md`, which is read as described in criterion 9.
 2. WHEN an epic is read THEN its name SHALL be the text of its first level-one heading, or its file name if it has none.
 3. WHEN an epic has a `## Stories` section THEN each list item in that section of the form `- [Name](link) — status` or `- Name — status` SHALL be a story of that epic, in the order written.
-4. WHEN a story's status text, ignoring case, surrounding spaces and a trailing full stop, is `planned`, `in progress` or `done` THEN that SHALL be the story's epic status. Any other text, or no text, SHALL mean the story has no epic status.
+4. WHEN the text after a story's dash is read THEN the status SHALL be the text before its first full stop, or all of it if it has none, and anything after that full stop SHALL be the story's description. WHEN the status, ignoring case and surrounding spaces, is `planned`, `in progress` or `done` THEN that SHALL be the story's epic status. Any other text, or no text, SHALL mean the story has no epic status.
 5. WHEN a story's link points to a spec folder under `.kiro/specs/` that exists on the main branch THEN the story SHALL be that spec's card, named as the story is named.
 6. WHEN a story has no link, or its link points to a spec folder that does not exist on the main branch THEN the story SHALL be a card with no spec, whose status is its epic status, or `planned` if it has none.
 7. WHEN the same spec is listed in more than one epic THEN its card SHALL appear under each of those epics.
