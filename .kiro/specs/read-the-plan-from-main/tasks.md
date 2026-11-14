@@ -5,19 +5,19 @@
   - Create `.gitignore` listing `config.json`, `__pycache__/` and `*.pyc`
   - _Requirements: 1.1, 1.5_
 
-- [ ] 2. Parse tasks and epic pages
-  - [ ] 2.1 Write `backend/parse.py` task counting
+- [x] 2. Parse tasks and epic pages
+  - [x] 2.1 Write `backend/parse.py` task counting
     - `parse_tasks(text)` returns done, under-way and total counts from checkbox items at any nesting depth
     - Skip optional tasks (`*` directly after the checkbox) in every count; count `[x]` and `[X]` as done and `[-]` as under way
     - _Requirements: 4.1, 4.2_
-  - [ ] 2.2 Add epic and story parsing to `backend/parse.py`
+  - [x] 2.2 Add epic and story parsing to `backend/parse.py`
     - `parse_epic(text, file)` returns the name from the first level-one heading, or the file name
     - `parse_stories(text, whole_file)` reads the `## Stories` section, or the whole file when asked, taking only list items at the first column in whole-file mode
     - Match `- [Name](link) — status` and `- Name — status`; skip lines that do not fit without reporting them
     - Normalize the status (trim, lowercase, drop one trailing full stop) and keep it only if it is `planned`, `in progress` or `done`
     - Pull the spec folder name from a link with the `.kiro/specs/<folder>` pattern
     - _Requirements: 5.2, 5.3, 5.4, 5.9, 7.3_
-  - [ ] 2.3 Check the parsers with example text
+  - [x] 2.3 Check the parsers with example text
     - Cover optional and nested tasks, `[-]`, unknown status words, a missing em dash, links to spec folders, and whole-file mode
 
 - [ ] 3. Build the plan from a source
