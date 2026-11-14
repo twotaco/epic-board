@@ -14,7 +14,7 @@
     - `parse_epic(text, file)` returns the name from the first level-one heading, or the file name
     - `parse_stories(text, whole_file)` reads the `## Stories` section, or the whole file when asked, taking only list items at the first column in whole-file mode
     - Match `- [Name](link) — status` and `- Name — status`; skip lines that do not fit without reporting them
-    - Normalize the status (trim, lowercase, drop one trailing full stop) and keep it only if it is `planned`, `in progress` or `done`
+    - Normalize the status (take the text before the first full stop, trim, lowercase; keep the rest as the description) and keep it only if it is `planned`, `in progress` or `done`
     - Pull the spec folder name from a link with the `.kiro/specs/<folder>` pattern
     - _Requirements: 5.2, 5.3, 5.4, 5.9, 7.3_
   - [x] 2.3 Check the parsers with example text

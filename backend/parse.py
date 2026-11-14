@@ -4,7 +4,7 @@ from collections import namedtuple
 
 TaskCounts = namedtuple("TaskCounts", "done under_way total")
 Epic = namedtuple("Epic", "name stories")
-Story = namedtuple("Story", "name link status")
+Story = namedtuple("Story", "name link status description")
 
 TASK = re.compile(r"^\s*[-*+]\s+\[([ xX-])\](\*)?")
 STORY = re.compile(r"^[-*] (?:\[([^\]]*)\]\(([^)]*)\)|(.+?)) —(?: (.*))?$")
@@ -31,12 +31,11 @@ def parse_epic(text, file):
     return Epic(match.group(1).strip() if match else file, parse_stories(text, False))
 
 
-def normalize_status(text):
-    text = text.strip().lower()
-    if text.endswith("."):
-        text = text[:-1]
-    text = text.strip()
-    return text if text in STATUSES else None
+def split_status(text):
+    """Return (status or None, description). The status is the text before the first full stop."""
+    head, _, rest = text.partition(".")
+    head = head.strip().lower()
+    return (head if head in STATUSES else None), rest.strip()
 
 
 def parse_stories(text, whole_file):
@@ -57,7 +56,8 @@ def parse_stories(text, whole_file):
             continue
         name = (match.group(1) if match.group(1) is not None else match.group(3)).strip()
         link = match.group(2)
-        stories.append(Story(name, link, normalize_status(match.group(4) or "")))
+        status, description = split_status(match.group(4) or "")
+        stories.append(Story(name, link, status, description))
     return stories
 
 
