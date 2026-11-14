@@ -60,12 +60,12 @@
   - [x] 4.4 Check the git access against throwaway repositories
     - Use temporary repositories with a bare `origin`: `origin/HEAD` set and unset, a failed fetch with and without an earlier copy, files read from the commit while the working tree differs, a repository path with spaces, and a command that times out
 
-- [ ] 5. Serve the plan
-  - [ ] 5.1 Add `load_repository()` to `backend/server.py`
+- [x] 5. Serve the plan
+  - [x] 5.1 Add `load_repository()` to `backend/server.py`
     - Use `EPIC_BOARD_REPOSITORY` when it is set and not empty; otherwise `config.json` in the app's own folder, which must be an object with a text `repository`; a bad value in the first source found is an error and does not fall through
     - Expand `~`, make the path absolute, and build an error that names both the variable and the full path of `config.json`
     - _Requirements: 1.2, 1.4_
-  - [ ] 5.2 Add the routes to `backend/server.py`
+  - [x] 5.2 Add the routes to `backend/server.py`
     - Run `ThreadingHTTPServer` on `127.0.0.1` and the `PORT` from the environment; match GET paths on their end: `/health` and `/plan`; answer anything else with 404
     - `/health` answers `{"ok": true}` whatever the configuration
     - `/plan` never reads the query or body; it opens a snapshot, builds the plan, and answers with the repository, branch, ref, commit, fetch result, groups and problems
