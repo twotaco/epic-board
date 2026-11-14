@@ -380,6 +380,59 @@ export function renderBoard(h, view) {
     renderBody(h, view))
 }
 
+const PLAN_URL = '/apps/epic-board/api/plan'
+
+// Builds the page component from the host's React. This is the only function that uses
+// hooks. `env` may supply `fetch`, `document`, `setTimeout` and `clearTimeout` (tests pass
+// fakes); each one defaults to the global and is looked up inside the effect, so importing
+// this module and calling `createBoard` need no `window`.
+export function createBoard(React, env = {}) {
+  const { useReducer, useEffect, createElement: h } = React
+
+  return function Board() {
+    const [state, dispatch] = useReducer(reduce, initialState)
+
+    useEffect(() => {
+      const doc = env.document ?? document
+      const fetchFn = env.fetch ?? fetch
+      const setTimer = env.setTimeout ?? setTimeout
+      const clearTimer = env.clearTimeout ?? clearTimeout
+
+      // A GET of the plan route. A body that is not JSON rejects, which the poller counts
+      // as a failure.
+      const request = async (signal) => {
+        const response = await fetchFn(PLAN_URL, {
+          method: 'GET',
+          credentials: 'same-origin',
+          cache: 'no-store',
+          signal,
+        })
+        const body = await response.json()
+        return { status: response.status, body }
+      }
+
+      const poller = createPoller({
+        request,
+        hidden: () => doc.hidden,
+        setTimer: (fn, ms) => setTimer(fn, ms),
+        clearTimer: (handle) => clearTimer(handle),
+        onResult: (result) => dispatch(result),
+      })
+      const onVisibility = () => {
+        if (!doc.hidden) poller.visible()
+      }
+      doc.addEventListener('visibilitychange', onVisibility)
+      poller.start()
+      return () => {
+        poller.stop()
+        doc.removeEventListener('visibilitychange', onVisibility)
+      }
+    }, [])
+
+    return renderBoard(h, viewOf(state))
+  }
+}
+
 // The host's React is looked up on first use, so importing this module needs no `window`.
 function createPlaceholder(React) {
   const { useState, useEffect, createElement: h } = React
