@@ -309,6 +309,8 @@ A failure is wrapped in `{step, reason}` where `reason` is the error's message c
 
 The "click anywhere on the card" behaviour needs no script. The card is `position: relative`, and the main control's `::after` covers the card (`position: absolute; inset: 0`). The question and the resume controls are `position: relative` with a higher `z-index`, so they take their own clicks. This keeps the card one tab stop for its main control, and Enter and Space work as on any button or link. Escape in the question calls `cancel`. After Cancel, an effect puts focus back on the card's button, found by a `data-card-id` attribute.
 
+What the link does on a click (Requirement 7, criteria 5 and 6) is decided by one handler on the `a`, and the stretched `::after` makes every click on the card reach it. `renderBoard` takes one more action, `openChat(key)`, and the `a`'s `onClick` calls it, and calls `preventDefault`, only when the page was given a chat panel and the click is a plain one: `button` 0 and none of `ctrlKey`, `metaKey`, `shiftKey`, `altKey`. Every other click, and every click when there is no chat panel, is left alone, so the browser follows the link. `work-in-the-chat` owns the panel and what `openChat` does.
+
 `STYLE` gains rules for the pointer cursor, the hover and focus-within tint (`rgba(128, 128, 128, 0.12)`), the state word, the question and the notice, all with `currentColor` or a grey with an alpha between 0 and 1. No rule removes the focus outline.
 
 #### The component
@@ -323,7 +325,7 @@ The link is not rendered by `cardViewOf` from the read alone. The start's result
 "permissions": { "api": ["/api/chat", "/api/chat/slots"] }
 ```
 
-`/api/chat` is a path prefix: it covers `POST /api/chat`, and `/api/chat/slots` covers the create, list, detail and resume routes. The spike declared both and worked. These entries only decide which paths the page's client will send. The page runs as the person, so nothing in Crew stops it from calling the approve, answer, stop or resume routes under `/api/chat/slots`, and `app.json` does not limit it. Requirement 6, criterion 6 therefore holds because the page's code never sends those requests, and the source scan in task 3.5 checks it.
+`/api/chat` is a path prefix: it covers `POST /api/chat`, and `/api/chat/slots` covers the create, list, detail and resume routes. The spike declared both and worked. These entries only decide which paths the page's client will send. The page runs as the person, so nothing in Crew stops it from calling the approve, answer, stop or resume routes under `/api/chat/slots`, and `app.json` does not limit it. Requirement 6, criterion 6 therefore holds because the board's own code never sends those requests, and the source scan in task 3.5 checks it. The scan reads `ui/index.mjs`, which holds the board's code and not Crew's chat component. The chat component that `work-in-the-chat` embeds does send approvals and answers when the person uses it, as the person, and the scan does not see them.
 
 ## Data Models
 
@@ -427,6 +429,7 @@ Edited in place, as the board spec did, because the behaviour moved:
 | Board spec, requirement 1.2 | The page may also send the requests of `start-a-story` Requirements 4, 5, 6 and 8 |
 | Board spec, requirement 1.3 | The page may also have the card controls of `start-a-story` Requirements 2, 4, 7 and 8 (4 for "Send the brief again") |
 | Board spec, introduction | The next story is described as it now is |
+| This spec, requirement 7 (criteria 1, 5 and 6), requirement 6 (criterion 6) and the introduction | Edited by `work-in-the-chat`, which owns the panel: a click opens the chat in Crew's chat panel when the host has one and follows the link otherwise, and the board's own code, not the person, never approves or answers |
 | Epic page | The "Started" mark became the four states; "Live tracking" in "Not in this epic" became "Following a conductor's work inside its chat" |
 
 Checks that the board story wrote and that stop being true (the tasks bring them in line):
