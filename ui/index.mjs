@@ -538,6 +538,7 @@ export function cardViewOf(card, chats, ui = {}, nowMs = chats.at) {
       state: entry ? entry.state : null,
       stateWord: entry ? STATE_WORDS[entry.state] : null,
       brief: ui.briefs?.[key] ?? null,
+      open: ui.open?.key === key,
     }
   }
   if (card.status === 'done') return { mode: 'plain' }
@@ -547,6 +548,31 @@ export function cardViewOf(card, chats, ui = {}, nowMs = chats.at) {
   if (chats.recordsError) return { mode: 'blocked', blocked: { kind: 'records', message: chats.recordsError.message } }
   if (!chats.folder.id) return { mode: 'blocked', blocked: { kind: 'folder', reason: chats.folder.reason } }
   return { mode: 'question', failure: flow?.kind === 'failed' ? { step: flow.step, reason: flow.reason } : null }
+}
+
+// Whether the host's value is something React can mount as a component.
+export function isChatPanel(value) {
+  return typeof value === 'function' || (typeof value === 'object' && value !== null && '$$typeof' in value)
+}
+
+// What the Panel shows, or null: {cardId, key, title}. `title` is the plan card's name, found by id in the
+// columns of `view`, or 'Chat' when the plan has no such card now. Null when no chat is open or the host has
+// no chat panel.
+export function panelViewOf(view, ui, hasPanel) {
+  if (!hasPanel || !ui?.open) return null
+  const { cardId, key } = ui.open
+  for (const column of view?.columns ?? []) {
+    for (const group of column.groups ?? []) {
+      const found = (group.cards ?? []).find((card) => card.id === cardId)
+      if (found) return { cardId, key, title: found.name }
+    }
+  }
+  return { cardId, key, title: 'Chat' }
+}
+
+// A click the page takes over: the primary button with no modifier key, and not already handled.
+export function isPlainClick(event) {
+  return event.button === 0 && !event.ctrlKey && !event.metaKey && !event.shiftKey && !event.altKey && !event.defaultPrevented
 }
 
 // A start or resume that failed: `step` names where, `reason` is Crew's or the backend's own words.
@@ -967,8 +993,11 @@ const BACKEND_BASE = '/apps/epic-board/api'
 //   {kind: 'started', cardId}                   a start worked
 //   {kind: 'resuming', key} | {kind: 'resume-failed', key, reason} | {kind: 'resumed', key}
 //   {kind: 'brief-sending', key} | {kind: 'brief-failed', key, reason} | {kind: 'brief-sent', key}
+//   {kind: 'open-chat', cardId, key}            show that chat in the Panel (the same state when it is already open)
+//   {kind: 'close-chat', key?, focus?}          close the Panel; with `key` only if that chat is the open one;
+//                                               with `focus` ask for focus on the card that was open
 export const initialUi = Object.freeze({
-  asking: null, flows: Object.freeze({}), resumes: Object.freeze({}), briefs: Object.freeze({}), focus: null,
+  asking: null, flows: Object.freeze({}), resumes: Object.freeze({}), briefs: Object.freeze({}), focus: null, open: null,
 })
 
 function without(object, key) {
@@ -1015,6 +1044,12 @@ export function uiReduce(state, action) {
       return { ...state, briefs: { ...state.briefs, [action.key]: { kind: 'failed', reason: action.reason } } }
     case 'brief-sent':
       return { ...state, briefs: without(state.briefs, action.key) }
+    case 'open-chat':
+      return state.open?.key === action.key ? state : { ...state, open: { cardId: action.cardId, key: action.key } }
+    case 'close-chat': {
+      if (!state.open || (action.key !== undefined && state.open.key !== action.key)) return state
+      return { ...state, open: null, focus: action.focus === true ? { cardId: state.open.cardId } : state.focus }
+    }
     default:
       return state
   }
