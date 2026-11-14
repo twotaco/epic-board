@@ -18,7 +18,7 @@ It matters now because the plan already lives in files on main, and nothing show
 ## Stories
 
 - [Read the plan from main](../../.kiro/specs/read-the-plan-from-main/) — done
-- [Show the board](../../.kiro/specs/show-the-board/) — in progress
+- [Show the board](../../.kiro/specs/show-the-board/) — done
 - [Start a story](../../.kiro/specs/start-a-story/) — in progress. Click a card to start a conductor on it, see the state of its chat on the card, and open the chat from the card.
 - Filter by epic — planned. A dropdown at the top of the board shows one epic or all of them.
 - Board design — planned. A clearer type scale, bold column and card titles, quieter meta lines, and descriptions cut to three lines.

@@ -177,7 +177,7 @@ The placeholder page (`ui/index.mjs`) stays in place until group 4 replaces it. 
     - Run `python3 -m unittest discover -s tests -t .` and `node --test tests/ui/*.test.mjs` and report the counts run, passed and skipped for each
     - _Requirements: 1.1, 1.2, 1.3, 1.4, 7.1, 7.2, 7.3, 7.4_
 
-- [ ] 5. Check it works end to end
+- [x] 5. Check it works end to end
   - [x] 5.1 Run the backend on this repository and on throwaway checkouts
     - Start `backend/server.py` with a `PORT` and `EPIC_BOARD_REPOSITORY` set to this repository and request `/health` and `/plan`; the first answer is 202 `{"pending": true}` or a first-read plan with `fetch` `{"ok": null}` and `age_seconds` null; later answers have `fetch` `{"ok": true}`, `age_seconds` of 0 or more and `refreshing`
     - Compare the cards with the epic and spec files on main: each story line's description appears on its card, a card with no description has `""`, and the spec counts match `tasks.md`
@@ -185,7 +185,7 @@ The placeholder page (`ui/index.mjs`) stays in place until group 4 replaces it. 
     - On a throwaway clone, set `remote.origin.uploadpack` to `sleep 20; git-upload-pack` so the fetch is slow; request `/plan` while the refresh runs and see an answer within 1 second with `refreshing` true
     - Try the error cases: no setting (409 on every request, no git run), a path that is not a checkout (409), and a query string carrying another `repo` path (ignored); do not change this repository's own settings or `config.json`
     - _Requirements: 4.1, 4.2, 5.1, 5.2, 5.3, 5.4, 5.5, 5.6, 6.1, 6.2, 6.3, 6.4, 6.5_
-  - [ ] 5.2 Install the app in Kiro Crew and check the page (done by you in the app)
+  - [x] 5.2 Install the app in Kiro Crew and check the page (done by you in the app)
     - Install the app, set `config.json` or the environment variable, and open the page; confirm the host loads the default export and shows the board, and "Loading…" gives way to the board without a reload
     - Check light and dark themes (text and backgrounds from the host, nothing disappears), three columns at 720 px and wider and stacked below with the host sidebar open and closed, long names wrapping inside cards, the reserved space (columns do not move when "Checking for updates…" appears), the focus ring on the disclosure summary and Enter and Space toggling it, and that switching tabs stops requests and switching back requests at once
     - Check the heading level: if the host already has an `h1`, change the one constant in `ui/index.mjs` to move the title, column headings and group headings down together; confirm that the host ignores the page module's named exports (open question 3 in the design)
