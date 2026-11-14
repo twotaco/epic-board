@@ -94,66 +94,66 @@ The placeholder page (`ui/index.mjs`) stays in place until group 4 replaces it. 
     - Run `python3 -m unittest discover -s tests -t .` and report the counts run, passed and skipped
     - _Requirements: 5.1, 5.2, 5.3, 5.4, 5.5, 5.6, 6.1, 6.2, 6.3, 6.4, 6.5_
 
-- [ ] 3. Page logic
-  - [ ] 3.1 Make `ui/index.mjs` importable under Node and add the page test helper
+- [x] 3. Page logic
+  - [x] 3.1 Make `ui/index.mjs` importable under Node and add the page test helper
     - Move the `window.__kirocrew_modules.react` lookup from the top of the module into the default export, so importing the module needs no `window`; the placeholder stays the default export and keeps working
     - Create `tests/ui/support.mjs` (defines no tests) with a seeded generator that prints its seed on failure, and an `h` that returns `{type, props, children}` objects for inspecting trees
     - _Requirements: 1.1, 1.2_
-  - [ ] 3.2 Add the data functions to `ui/index.mjs`: `columnsOf`, `progressOf`, `ageText`, `nextDelay`
+  - [x] 3.2 Add the data functions to `ui/index.mjs`: `columnsOf`, `progressOf`, `ageText`, `nextDelay`
     - `columnsOf(plan)` returns Planned, In progress and Done, each with `key`, `title`, `count` and groups `{key, name|null, cards}`; keep only groups with a card of that status, in the plan's order, and name a group with no epic "No epic"
     - `progressOf(card)` gives "No spec yet", "Tasks could not be read", "No tasks yet" or "`<done>` of `<total>` task(s)" with a fraction clamped to 0..1 (none for the first three)
     - `ageText(seconds)` words the age as "Updated less than a minute ago", minutes, hours and days, singular when N is 1, and "Not yet updated from origin" for none
     - `nextDelay(result)` gives 2000 for pending or `refreshing` true and 15000 otherwise, including a failure
     - _Requirements: 2.1, 2.2, 3.3, 3.4, 3.5, 7.3, 8.2_
-  - [ ] 3.3 Add `classify`, `initialState`, `reduce` and `viewOf` to `ui/index.mjs`
+  - [x] 3.3 Add `classify`, `initialState`, `reduce` and `viewOf` to `ui/index.mjs`
     - `classify(status, body)` returns `pending` (202 and `{"pending": true}`), `error` (body with an `error` object), `plan` (body with a `groups` array) or `failure`
     - `reduce` follows the design's table: plan and error replace `content` and clear `unreachable`; pending keeps `content` and clears `unreachable`; failure keeps `content` and sets `unreachable`
     - `viewOf(state)` returns `loading`, `unreachable`, `error` or `plan`, with the fields `renderBoard` needs (notices, header, columns or empty-plan text, problems)
     - _Requirements: 7.4, 9.1, 9.2, 9.3, 9.4, 9.5, 9.6_
-  - [ ] 3.4 Add `STYLE` and `renderBoard(h, view)` to `ui/index.mjs`
+  - [x] 3.4 Add `STYLE` and `renderBoard(h, view)` to `ui/index.mjs`
     - `STYLE` is one string: classes prefixed `eb-`; one column, three columns inside `@container (min-width: 720px)` with an `@supports not (container-type: inline-size)` media-query fallback; `min-width: 0` on grid items and `overflow-wrap: anywhere` on card text; no text or background colour set; borders, bar tracks, bar fills and tints in `currentColor` or an alpha between 0 and 1; no named, hex or `rgb()` colour; no `outline: none`
     - `renderBoard` builds the title (`h1`, one constant for the level), the header (branch, first 7 characters of the commit, age text, an always-present "Checking for updates…" slot hidden with `visibility: hidden` unless refreshing), the three columns (`h2` with count, `h3` per group, one `ul` of `li` per group), cards (name, description when not empty, spec folder as plain text, progress text, bar `aria-hidden="true"` only when there is a fraction), "Nothing here", and the states of Requirement 9
     - Roles: `status` on "Loading…", the failed-fetch notice and the unreachable notice; `alert` on the backend error and on "Could not reach the backend."; no other `alert`
     - The problems disclosure is one native `details` with a `summary` ("N files could not be read", "1 file could not be read"), collapsed by default, listing every problem's file and reason; the `summary` is the only interactive element
     - Pass every plan text as a child; no `dangerouslySetInnerHTML`
     - _Requirements: 1.3, 1.4, 2.1, 2.2, 2.3, 2.4, 2.5, 3.1, 3.2, 3.3, 3.4, 3.5, 8.1, 8.3, 9.1, 9.2, 9.3, 9.4, 9.5, 9.6, 10.1, 10.2, 10.3, 10.4_
-  - [ ] 3.5 Add `createPoller({request, hidden, setTimer, clearTimer, onResult})` to `ui/index.mjs`
+  - [x] 3.5 Add `createPoller({request, hidden, setTimer, clearTimer, onResult})` to `ui/index.mjs`
     - `start()` sends a request at once unless hidden; at most one request in flight; a 10-second abort timer through an `AbortController` counts as a failure
     - When a request settles, call `onResult` and set one timer for `nextDelay(result)`; when the timer fires and the page is hidden send nothing and set no timer
     - `visible()` clears the timer and sends at once unless a request is in flight; `stop()` clears the timer, aborts a request in flight and makes later results be ignored
     - _Requirements: 7.1, 7.2, 7.3, 7.4_
-  - [ ] 3.6 Write property test for grouping into columns in `tests/ui/columns.test.mjs`
+  - [x] 3.6 Write property test for grouping into columns in `tests/ui/columns.test.mjs`
     - **Property 4: Grouping puts each card in one column**
     - Generated plans (cards in several groups, a card in two epic groups, empty groups); at least 100 iterations with the seed printed on failure
     - Also check "Nothing here" input (a column with no cards) as an example
     - **Validates: Requirements 2.1, 2.2**
-  - [ ] 3.7 Write property test for progress text in `tests/ui/progress.test.mjs`
+  - [x] 3.7 Write property test for progress text in `tests/ui/progress.test.mjs`
     - **Property 5: Progress text matches the counts**
     - Examples: no spec, `tasks` none, total 0, total 1 ("1 of 1 task")
     - **Validates: Requirements 3.4**
-  - [ ] 3.8 Write property test for age wording in `tests/ui/age.test.mjs`
+  - [x] 3.8 Write property test for age wording in `tests/ui/age.test.mjs`
     - **Property 6: Age wording follows the age**
     - Examples: none, 0, 59, 60, 3599, 3600, 86399, 86400 seconds
     - **Validates: Requirements 8.2**
-  - [ ] 3.9 Write property test for the poller in `tests/ui/poller.test.mjs`
+  - [x] 3.9 Write property test for the poller in `tests/ui/poller.test.mjs`
     - **Property 7: The poller keeps one request in flight and sleeps when hidden**
     - Fake scheduler and fake request; random sequences of timer firings, visibility changes, answers, failures and timeouts
     - Examples: request at once on start and on becoming visible, delay 2000 and 15000, the 10-second abort, cleanup by `stop()`
     - **Validates: Requirements 7.1, 7.2, 7.3, 7.4**
-  - [ ] 3.10 Write property test for the reducer and views in `tests/ui/state.test.mjs`
+  - [x] 3.10 Write property test for the reducer and views in `tests/ui/state.test.mjs`
     - **Property 8: A shown plan is replaced only by an answer**
     - Examples: `classify` of each answer shape, each row of the design's view table, an old error or notice replaced in one update, "Loading…" returning after the unreachable error state when an answer is pending
     - **Validates: Requirements 9.1, 9.5**
-  - [ ] 3.11 Check `renderBoard` and `STYLE` in `tests/ui/render.test.mjs`
+  - [x] 3.11 Check `renderBoard` and `STYLE` in `tests/ui/render.test.mjs`
     - No `button`, `a`, `input` or click handler in any view, and `summary` is the only interactive element; one `details`; heading levels in every view with no level skipped; the roles in each view, and no other `alert`; markup in names, descriptions and problems is a literal child
     - Description, folder name and "No spec yet" on cards; bar `aria-hidden` and absent without a fraction; header text; the "Checking for updates…" slot always in the tree; the failed-fetch notice with reason and age; the unreachable notice and error state; the empty-plan text; the error with message, code and each `settings` entry; disclosure summary counts and every problem untruncated
     - Scan `STYLE` for colour literals and `outline: none`, and check that it holds the 720px container query and its `@supports` fallback
     - _Requirements: 1.3, 1.4, 2.3, 2.4, 2.5, 3.1, 3.2, 3.3, 3.4, 3.5, 8.1, 8.3, 9.1, 9.2, 9.3, 9.4, 9.5, 9.6, 10.1, 10.2, 10.3, 10.4_
-  - [ ] 3.12 Write `tests/test_ui.py`
+  - [x] 3.12 Write `tests/test_ui.py`
     - Run `node --test tests/ui/` as a subprocess and fail with node's output if it fails; skip with a stated reason when `node` is not on the path
     - Check that `app.json` keeps its route and backend declarations (name `epic-board`, backend entry point `backend/server.py`, health check, routes, the one UI page at `/apps/epic-board` with `index.mjs`) and adds no `permissions.api` entry
     - _Requirements: 1.1_
-  - [ ] 3.13 Run the tests
+  - [x] 3.13 Run the tests
     - Run `python3 -m unittest discover -s tests -t .` and `node --test tests/ui/` and report the counts run, passed and skipped for each; a skipped page test is reported as skipped, not as passed
     - _Requirements: 1.1, 1.2, 1.3, 1.4, 2.1, 2.2, 3.4, 7.1, 7.2, 7.3, 7.4, 8.2, 9.1, 9.5_
 
