@@ -60,6 +60,77 @@ export function nextDelay(result) {
   return 15000
 }
 
+function isObject(value) {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+}
+
+// Turns a plan answer into a result: {kind: 'pending'}, {kind: 'plan', plan},
+// {kind: 'error', error} or {kind: 'failure'}. Anything of an unknown shape is a failure.
+export function classify(status, body) {
+  if (!isObject(body)) return { kind: 'failure' }
+  if (status === 202) {
+    const keys = Object.keys(body)
+    return keys.length === 1 && keys[0] === 'pending' && body.pending === true
+      ? { kind: 'pending' }
+      : { kind: 'failure' }
+  }
+  if (isObject(body.error)) return { kind: 'error', error: body.error }
+  if (Array.isArray(body.groups)) return { kind: 'plan', plan: body }
+  return { kind: 'failure' }
+}
+
+// The reducer state: `content` is null, {type: 'plan', plan} or {type: 'error', error};
+// `unreachable` is true after a failure until a later answer can be read.
+export const initialState = Object.freeze({ content: null, unreachable: false })
+
+export function reduce(state, result) {
+  switch (result?.kind) {
+    case 'plan':
+      return { content: { type: 'plan', plan: result.plan }, unreachable: false }
+    case 'error':
+      return { content: { type: 'error', error: result.error }, unreachable: false }
+    case 'pending':
+      return { content: state.content, unreachable: false }
+    case 'failure':
+      return { content: state.content, unreachable: true }
+    default:
+      return state
+  }
+}
+
+// What the page shows for a state. `kind` is 'loading', 'unreachable', 'error' or 'plan'.
+export function viewOf(state) {
+  const { content, unreachable } = state
+  if (content === null) return { kind: unreachable ? 'unreachable' : 'loading' }
+  if (content.type === 'error') {
+    if (unreachable) return { kind: 'unreachable' }
+    const { error } = content
+    return {
+      kind: 'error',
+      message: error.message,
+      code: error.code,
+      settings: Array.isArray(error.settings) ? error.settings : [],
+    }
+  }
+  const { plan } = content
+  const groups = Array.isArray(plan.groups) ? plan.groups : []
+  const empty = !groups.some((group) => Array.isArray(group.cards) && group.cards.length > 0)
+  const age = ageText(plan.age_seconds)
+  return {
+    kind: 'plan',
+    plan,
+    branch: plan.branch,
+    commit7: String(plan.commit ?? '').slice(0, 7),
+    ageText: age,
+    refreshing: plan.refreshing === true,
+    failedFetch: plan.fetch?.ok === false ? { reason: plan.fetch.reason ?? '', ageText: age } : null,
+    unreachableNotice: unreachable,
+    empty,
+    columns: empty ? null : columnsOf(plan),
+    problems: Array.isArray(plan.problems) ? plan.problems : [],
+  }
+}
+
 // The host's React is looked up on first use, so importing this module needs no `window`.
 function createPlaceholder(React) {
   const { useState, useEffect, createElement: h } = React
