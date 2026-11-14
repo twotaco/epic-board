@@ -76,12 +76,12 @@
   - Create `ui/index.mjs` using the host's React as the spike's page did; it fetches `/apps/epic-board/api/plan` and prints the repository, branch, commit, the number of cards per group, any problems, and any error
   - _Requirements: 1.1_
 
-- [ ] 7. Check it works end to end
+- [x] 7. Check it works end to end
   - [x] 7.1 Run the backend on this repository
     - Start `backend/server.py` with a `PORT` and `EPIC_BOARD_REPOSITORY` set, request `/health` and `/plan`, and compare the answer with the epic and spec files on the main branch
     - Try the error cases: no setting, a path that is not a checkout, a `config.json` with a bad value, and a query string carrying another `repo` path
     - _Requirements: 1.1, 1.2, 1.3, 1.4, 2.6_
-  - [ ] 7.2 Install the app in Kiro Crew (done by you in the app)
+  - [x] 7.2 Install the app in Kiro Crew (done by you in the app)
     - Install the app, set `config.json` or the environment variable, and confirm the placeholder page shows the plan
     - Confirm the page can call its own backend with no permission entry; if the host refuses, add entries for the app's own routes
     - _Requirements: 1.1_
