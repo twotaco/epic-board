@@ -1,0 +1,27 @@
+{
+  "name": "epic-board",
+  "version": "0.1.0",
+  "displayName": "Epic Board",
+  "description": "A kanban of a project's specs and epics, read from its main branch.",
+  "author": "twotaco",
+  "ui": {
+    "entry": "index.mjs",
+    "pages": [
+      {
+        "route": "/apps/epic-board",
+        "label": "Epic Board",
+        "icon": "Kanban"
+      }
+    ]
+  },
+  "backend": {
+    "entryPoint": "backend/server.py",
+    "type": "python",
+    "port": "auto",
+    "healthCheck": "/health",
+    "routes": "/api/apps/epic-board"
+  },
+  "platform": {
+    "os": ["macos", "linux"]
+  }
+}
