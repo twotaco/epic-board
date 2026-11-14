@@ -77,7 +77,7 @@
   - _Requirements: 1.1_
 
 - [ ] 7. Check it works end to end
-  - [ ] 7.1 Run the backend on this repository
+  - [x] 7.1 Run the backend on this repository
     - Start `backend/server.py` with a `PORT` and `EPIC_BOARD_REPOSITORY` set, request `/health` and `/plan`, and compare the answer with the epic and spec files on the main branch
     - Try the error cases: no setting, a path that is not a checkout, a `config.json` with a bad value, and a query string carrying another `repo` path
     - _Requirements: 1.1, 1.2, 1.3, 1.4, 2.6_
