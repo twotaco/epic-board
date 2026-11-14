@@ -1,5 +1,7 @@
-// Epic Board placeholder page: shows what the backend read from main.
-// Replaced by the "Show the board" story. Uses the host's React.
+// Epic Board page: a read-only board of the project's specs and epics, read from the
+// main branch by the backend. Uses the host's React (looked up on first render). The
+// pure parts (data functions, reducer, views, poller, renderBoard) are exported so
+// tests can import them under Node without `window`.
 
 // ---- Pure data functions (no `window`, no React) ----
 
@@ -380,59 +382,66 @@ export function renderBoard(h, view) {
     renderBody(h, view))
 }
 
-// The host's React is looked up on first use, so importing this module needs no `window`.
-function createPlaceholder(React) {
-  const { useState, useEffect, createElement: h } = React
+const PLAN_URL = '/apps/epic-board/api/plan'
 
-  return function EpicBoard() {
-    const [plan, setPlan] = useState(null)
-    const [error, setError] = useState('')
+// Builds the page component from the host's React. This is the only function that uses
+// hooks. `env` may supply `fetch`, `document`, `setTimeout` and `clearTimeout` (tests pass
+// fakes); each one defaults to the global and is looked up inside the effect, so importing
+// this module and calling `createBoard` need no `window`.
+export function createBoard(React, env = {}) {
+  const { useReducer, useEffect, createElement: h } = React
+
+  return function Board() {
+    const [state, dispatch] = useReducer(reduce, initialState)
 
     useEffect(() => {
-      let timer = null
-      let stopped = false
-      const load = () => {
-        fetch('/apps/epic-board/api/plan', { credentials: 'same-origin' })
-          .then(async (response) => {
-            const body = await response.json().catch(() => null)
-            if (stopped) return
-            if (response.status === 202 && body?.pending === true) {
-              timer = setTimeout(load, 2000)
-              return
-            }
-            if (!response.ok) throw new Error(body?.error?.message ?? `Request failed with status ${response.status}`)
-            setPlan(body)
-          })
-          .catch((failure) => { if (!stopped) setError(String(failure?.message ?? failure)) })
+      const doc = env.document ?? document
+      const fetchFn = env.fetch ?? fetch
+      const setTimer = env.setTimeout ?? setTimeout
+      const clearTimer = env.clearTimeout ?? clearTimeout
+
+      // A GET of the plan route. A body that is not JSON rejects, which the poller counts
+      // as a failure.
+      const request = async (signal) => {
+        const response = await fetchFn(PLAN_URL, {
+          method: 'GET',
+          credentials: 'same-origin',
+          cache: 'no-store',
+          signal,
+        })
+        const body = await response.json()
+        return { status: response.status, body }
       }
-      load()
+
+      const poller = createPoller({
+        request,
+        hidden: () => doc.hidden,
+        setTimer: (fn, ms) => setTimer(fn, ms),
+        clearTimer: (handle) => clearTimer(handle),
+        onResult: (result) => dispatch(result),
+      })
+      const onVisibility = () => {
+        if (!doc.hidden) poller.visible()
+      }
+      doc.addEventListener('visibilitychange', onVisibility)
+      poller.start()
       return () => {
-        stopped = true
-        if (timer !== null) clearTimeout(timer)
+        poller.stop()
+        doc.removeEventListener('visibilitychange', onVisibility)
       }
     }, [])
 
-    return h('div', { style: { padding: 24, overflowY: 'auto', height: '100%' } },
-      h('h2', null, 'Epic Board'),
-      error ? h('pre', { style: { color: '#c33', whiteSpace: 'pre-wrap' } }, error)
-        : !plan ? h('p', null, 'Loading…')
-        : h('pre', { style: { whiteSpace: 'pre-wrap', fontSize: 12 } }, [
-          `repository: ${plan.repository}`,
-          `branch: ${plan.branch} (${plan.ref})`,
-          `commit: ${plan.commit}`,
-          plan.fetch.ok !== false ? 'fetch: ok' : `fetch failed, showing an earlier copy: ${plan.fetch.reason}`,
-          ...plan.groups.map((group) => `${group.epic ? group.epic.name : 'No epic'}: ${group.cards.length} cards`),
-          `problems: ${plan.problems.length ? JSON.stringify(plan.problems) : 'none'}`,
-        ].join('\n')))
+    return renderBoard(h, viewOf(state))
   }
 }
 
+// The host's React is looked up on first use, so importing this module needs no `window`.
 let built = null
 
 export default function EpicBoardPage(props) {
   if (built === null) {
     const React = window.__kirocrew_modules.react
-    built = { React, Component: createPlaceholder(React) }
+    built = { React, Component: createBoard(React) }
   }
   return built.React.createElement(built.Component, props)
 }

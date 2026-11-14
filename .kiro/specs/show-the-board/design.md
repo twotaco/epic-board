@@ -319,9 +319,9 @@ The properties above need generated input, but the backend and the page are test
 
 **Backend.** `tests/test_held.py` drives `Holder` with a fake clock (a list the test advances), a fake `open_snapshot` and `read_snapshot` returning programmed snapshots or raising, a fake `build_plan`, and a `spawn` that queues jobs. Properties 1 to 3 run random sequences of "request", "advance clock by 0 to 120 s", "run the next queued job with outcome X" against a small model. Examples cover 5.1 (a refresh blocked on a `threading.Event` while a request is answered, no sleeping) and the `internal` code. `tests/test_server.py` runs HTTP on port 0 with holders built from fakes, plus one real-git class that runs the first read and then one refresh by hand. `tests/test_gitsource.py` checks `read_snapshot` against throwaway repositories: it does not fetch (origin advances, the result does not), `fetched` is `None`, and a missing ref raises `ref_unreadable`.
 
-**Page.** The page tests are `tests/ui/*.test.mjs`, run with `node --test tests/ui/`, using only `node:test` and `node:assert`. They import `ui/index.mjs` directly. `renderBoard(h, view)` takes `h` as an argument, so the tests pass a `h` that returns `{type, props, children}` objects and inspect the tree: no `button`, `a`, `input` or click handler; heading levels in every view; roles; literal text; the one `details`. `createPoller` is tested with a fake scheduler and a fake request. The style sheet is scanned for colour literals and for `outline: none`.
+**Page.** The page tests are `tests/ui/*.test.mjs`, run with `node --test tests/ui/*.test.mjs`, using only `node:test` and `node:assert`. They import `ui/index.mjs` directly. `renderBoard(h, view)` takes `h` as an argument, so the tests pass a `h` that returns `{type, props, children}` objects and inspect the tree: no `button`, `a`, `input` or click handler; heading levels in every view; roles; literal text; the one `details`. `createPoller` is tested with a fake scheduler and a fake request. The style sheet is scanned for colour literals and for `outline: none`.
 
-**Where Node fits.** The project has no Node setup: no `package.json`, and AGENTS.md names one check, `python3 -m unittest discover -s tests -t .`. Node 22 is installed on the author's machine, and `.mjs` files run as modules without a `package.json`. To keep one command, `tests/test_ui.py` runs `node --test tests/ui/` as a subprocess, fails with node's output if it fails, and is skipped with a stated reason when `node` is not on the path. A skipped page test must not be read as a pass, so the report line is "N tests ran, M skipped". This is an open question for the owner (below).
+**Where Node fits.** The project has no Node setup: no `package.json`, and AGENTS.md names one check, `python3 -m unittest discover -s tests -t .`. Node 22 is installed on the author's machine, and `.mjs` files run as modules without a `package.json`. To keep one command, `tests/test_ui.py` runs `node --test` as a subprocess from the repository root and passes the sorted list of `tests/ui/*.test.mjs` files explicitly, because Node 22 reads a directory argument as a module path and fails. It fails with node's output if it fails, and is skipped with a stated reason when `node` is not on the path. A skipped page test must not be read as a pass, so the report line is "N tests ran, M skipped". This is an open question for the owner (below).
 
 | Req | Backend tests | Page tests | Manual, in a browser |
 |---|---|---|---|
@@ -361,7 +361,7 @@ The first story's code and tests were written for the old criteria. The earlier 
 
 ## Open Questions
 
-1. **Node for the page tests.** Is Node an accepted development prerequisite? If so, AGENTS.md (the owner's file) should say that the page tests run through `tests/test_ui.py`, or by `node --test tests/ui/`. If not, the page's pure functions have no automated tests and Requirements 2, 3, 7, 8, 9 and 10 depend on manual checks.
+1. **Node for the page tests.** Is Node an accepted development prerequisite? If so, AGENTS.md (the owner's file) should say that the page tests run through `tests/test_ui.py`, or by `node --test tests/ui/*.test.mjs`. If not, the page's pure functions have no automated tests and Requirements 2, 3, 7, 8, 9 and 10 depend on manual checks.
 2. **Property-testing library.** Properties are checked with seeded generators written in the tests, because the project adds no dependency. Hypothesis (Python) and fast-check (Node) would shrink failing cases but are dependencies.
 3. **Heading level and named exports.** The title is `h1`, from one constant. If the host's chrome already has an `h1`, the constant moves to 2. The design also assumes the host ignores named exports from the page module. Both are checked in the manual pass on the host.
 
@@ -369,7 +369,7 @@ The first story's code and tests were written for the old criteria. The earlier 
 
 ```
 python3 -m unittest discover -s tests -t .
-node --test tests/ui/
+node --test tests/ui/*.test.mjs
 ```
 
 The first command includes `tests/test_ui.py`, which runs the second when Node is installed. Report the number of tests that ran, passed and were skipped. For a change that touches only Markdown, skip both and say so.
