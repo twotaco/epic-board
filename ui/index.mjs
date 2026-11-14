@@ -704,6 +704,8 @@ export const STYLE = `
 .eb-notice, .eb-error { border: 1px solid currentColor; border-radius: 6px; margin: 0 0 16px 0; padding: 8px 12px; overflow-wrap: anywhere; }
 .eb-notice p, .eb-error p { margin: 0; }
 .eb-error ul { margin: 8px 0 0 0; padding-left: 20px; }
+.eb-filter { margin: 0 0 16px 0; }
+.eb-filter select { font: inherit; padding: 4px 8px; }
 .eb-columns { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
 .eb-column { min-width: 0; }
 .eb-column-title { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; margin: 0 0 8px 0; padding-bottom: 4px; border-bottom: 1px solid currentColor; }
@@ -756,7 +758,7 @@ const STEP_TEXT = {
 }
 
 const NO_ACTIONS = Object.freeze({
-  ask() {}, cancel() {}, start() {}, close() {}, sendBrief() {}, resume() {}, startAgain() {},
+  ask() {}, cancel() {}, start() {}, close() {}, sendBrief() {}, resume() {}, startAgain() {}, filter() {},
 })
 
 // The part of a card below its progress that belongs to the chat: the state word, the question,
@@ -870,7 +872,25 @@ function renderProblems(h, problems) {
       h('div', null, problem.reason)))))
 }
 
-function renderPlanView(h, view, actions) {
+// The epic dropdown: the host's Select when there is one, else a native select. Both are named "Epic".
+function renderFilter(h, filter, actions, Select) {
+  const control = Select
+    ? h(Select, {
+      'aria-label': 'Epic',
+      value: filter.key,
+      options: filter.options.map((option) => ({ value: option.key, label: option.label })),
+      // shortcut: the host Select's onChange shape was not seen; takes a value or an event. Fix here if a host differs.
+      onChange: (arg) => actions.filter(typeof arg === 'string' ? arg : arg?.target?.value),
+    })
+    : h('select', {
+      'aria-label': 'Epic',
+      value: filter.key,
+      onChange: (event) => actions.filter(event.target.value),
+    }, filter.options.map((option) => h('option', { key: option.key, value: option.key }, option.label)))
+  return h('div', { className: 'eb-filter', key: 'filter' }, control)
+}
+
+function renderPlanView(h, view, actions, parts = {}) {
   return [
     h('div', { className: 'eb-header', key: 'header' },
       h('span', { className: 'eb-branch' }, view.branch),
@@ -878,6 +898,7 @@ function renderPlanView(h, view, actions) {
       h('span', { className: 'eb-age' }, view.ageText),
       h('span', { className: 'eb-checking', style: { visibility: view.refreshing ? 'visible' : 'hidden' } },
         'Checking for updates…')),
+    view.empty || !view.filter ? null : renderFilter(h, view.filter, actions, parts.Select),
     view.failedFetch
       ? h('div', { className: 'eb-notice', role: 'status', key: 'failed-fetch' },
         h('p', null, 'Could not fetch from origin. Showing an earlier copy of the plan.'),
@@ -901,7 +922,7 @@ function renderPlanView(h, view, actions) {
   ]
 }
 
-function renderBody(h, view, actions) {
+function renderBody(h, view, actions, parts) {
   switch (view.kind) {
     case 'loading':
       return h('p', { role: 'status' }, 'Loading…')
@@ -915,7 +936,7 @@ function renderBody(h, view, actions) {
           ? h('ul', null, view.settings.map((setting, index) => h('li', { key: index }, h('code', null, setting))))
           : null)
     default:
-      return renderPlanView(h, view, actions)
+      return renderPlanView(h, view, actions, parts)
   }
 }
 
@@ -924,11 +945,12 @@ function renderBody(h, view, actions) {
 // A plan view that also carries `chats` (the chats state) and `ui` draws the card controls; `actions`
 // are what they call: ask(cardId), cancel(cardId), start(cardId), close(cardId), sendBrief(key), resume(key)
 // and startAgain(name, cardId). Each defaults to doing nothing.
-export function renderBoard(h, view, actions = {}) {
+// `parts.Select` is the host's Select component, or none for a native select.
+export function renderBoard(h, view, actions = {}, parts = {}) {
   return h('div', { className: 'eb-root' },
     h('style', null, STYLE),
     h(`h${TITLE_LEVEL}`, { className: 'eb-title' }, 'Epic Board'),
-    renderBody(h, view, { ...NO_ACTIONS, ...actions }))
+    renderBody(h, view, { ...NO_ACTIONS, ...actions }, parts))
 }
 
 const PLAN_URL = '/apps/epic-board/api/plan'
@@ -1029,6 +1051,25 @@ function hostApiHook() {
   return typeof sdk?.useAppApi === 'function' ? sdk.useAppApi : () => null
 }
 
+// The host's Crew Select, or null when the module or its Select is missing or the lookup throws.
+export function hostSelect() {
+  try {
+    const Select = typeof window !== 'undefined' ? window.__kirocrew_modules?.['@kirocrew/ui']?.Select : undefined
+    return typeof Select === 'function' || (typeof Select === 'object' && Select !== null) ? Select : null
+  } catch {
+    return null
+  }
+}
+
+// The browser's localStorage, or undefined when there is none or reading it throws.
+function hostStorage() {
+  try {
+    return typeof window !== 'undefined' ? window.localStorage : undefined
+  } catch {
+    return undefined
+  }
+}
+
 const NO_CLIENT = 'The host has no app client, so Crew cannot be reached.'
 
 // Builds the page component from the host's React. This is the only function that uses
@@ -1036,13 +1077,16 @@ const NO_CLIENT = 'The host has no app client, so Crew cannot be reached.'
 // (tests pass fakes); each one defaults to the global and is looked up inside the effect or the
 // component, so importing this module and calling `createBoard` need no `window`.
 export function createBoard(React, env = {}) {
-  const { useReducer, useEffect, useRef, createElement: h } = React
+  const { useReducer, useState, useEffect, useRef, createElement: h } = React
 
   return function Board() {
     const [state, dispatch] = useReducer(reduce, initialState)
     const [chats, chatsDispatch] = useReducer(chatsReduce, initialChats)
     const [ui, uiDispatch] = useReducer(uiReduce, initialUi)
     const api = (env.useAppApi ?? hostApiHook())()
+    const storage = env.storage !== undefined ? env.storage : hostStorage()
+    const Select = env.Select !== undefined ? env.Select : hostSelect()
+    const [filterKey, setFilterKey] = useState(() => loadChoice(storage))
 
     // What the handlers and the chat poller read. Refs, so they always see the latest render.
     const latest = useRef(null)
@@ -1160,6 +1204,11 @@ export function createBoard(React, env = {}) {
     const ownUi = live(uiDispatch)
     const ownChats = live(chatsDispatch)
 
+    const filter = (key) => {
+      setFilterKey(key)
+      saveChoice(storage, key)
+    }
+
     const actions = {
       ask: (cardId) => ownUi({ kind: 'ask', cardId }),
       cancel: (cardId) => ownUi({ kind: 'cancel', cardId }),
@@ -1238,7 +1287,17 @@ export function createBoard(React, env = {}) {
       },
     }
 
-    return renderBoard(h, { ...viewOf(state), chats, ui }, actions)
+    const view = viewOf(state, filterKey)
+    // A saved or chosen epic that the plan lacks: show all epics and save that.
+    const effectiveKey = view.kind === 'plan' ? view.filter.key : filterKey
+    useEffect(() => {
+      if (effectiveKey !== filterKey) {
+        setFilterKey(effectiveKey)
+        saveChoice(storage, effectiveKey)
+      }
+    }, [effectiveKey, filterKey])
+
+    return renderBoard(h, { ...view, chats, ui }, { ...actions, filter }, { Select })
   }
 }
 

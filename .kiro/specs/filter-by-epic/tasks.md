@@ -35,25 +35,25 @@ Group 1 is the page's logic, including saving and restoring the choice, with no 
     - Run `python3 -m unittest discover -s tests -t .` and report run, passed and skipped. `tests/test_ui.py` runs the page tests with Node; report it as skipped when Node is missing, not as a pass
     - _Requirements: 4.3_
 
-- [ ] 2. Page: the dropdown, the state and the check
-  - [ ] 2.1 Draw the dropdown in `ui/index.mjs`
+- [x] 2. Page: the dropdown, the state and the check
+  - [x] 2.1 Draw the dropdown in `ui/index.mjs`
     - Add `hostSelect()` beside `hostApiHook`: it reads `window.__kirocrew_modules?.['@kirocrew/ui']?.Select` inside a `try` and behind `typeof window !== 'undefined'`, gives `null` when it is missing or the lookup throws, and needs no `window` to import. `createBoard` takes `env.Select` or `hostSelect()` inside the component and gives it to `renderBoard` as `parts.Select` (a fourth, optional argument)
     - Add `renderFilter(h, filter, actions, Select)`, drawing the host `Select` when there is one and a native `select` otherwise, both with `aria-label="Epic"`, and call it from `renderPlanView` directly after the header, when the plan is not empty; add `filter` to `NO_ACTIONS` and a few `.eb-filter` lines to `STYLE`
     - The host `Select`'s `onChange` is adapted to take a value or an event; plan text is passed as children or as option labels only
     - Extend `tests/ui/render.test.mjs`: `render: host Select used when present`, `render: native select when the ui module is missing`, `render: native select when Select is missing from the module`, `render: aria-label Epic on the host Select`, `render: aria-label Epic on the native select`, `host: hostSelect finds Select`, `host: hostSelect gives null with no window`, `host: hostSelect gives null when the lookup throws`, the first option, the selected value, one option per entry, `onChange` calling `actions.filter` (with a value and with an event), no dropdown while loading, on an error or on the empty board, notices and problems still drawn
     - _Requirements: 1.1, 1.2, 1.3, 1.4, 1.5, 2.5_
-  - [ ] 2.2 Hold, save and restore the choice in `createBoard`
+  - [x] 2.2 Hold, save and restore the choice in `createBoard`
     - `useState(() => loadChoice(storage))` for the key, with `storage` taken from `env.storage` or `window.localStorage` inside a `try`; pass the key to `viewOf`; give `renderBoard` a `filter` action that sets the key and calls `saveChoice`; an effect for a `plan` view sets the key and the Saved_Choice back to `all` when the view's effective key differs
     - Leave both pollers, the start flow and the resume flow as they are
     - Extend `tests/ui/board.test.mjs` (add `useState` to the fake React in `tests/ui/support.mjs` if it lacks one, and a fake `storage` to `env`): `board: choosing an epic saves it`, `board: a saved epic is restored on load`, `board: a missing saved epic falls back to all epics`, a board with a throwing storage still filters in memory, nothing reset before the first plan; choosing an epic shows only its cards; a new plan keeps the choice; a new plan without the epic goes back to all and stays there when the epic returns; a failed plan poll keeps the filter working; a chat poll and a start leave the choice alone
     - _Requirements: 3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 3.7, 3.8, 4.1, 4.2_
-  - [ ] 2.3 Check `app.json` and the backend are untouched
+  - [x] 2.3 Check `app.json` and the backend are untouched
     - Run `git diff origin/main --stat` and confirm no file under `backend/`, no `app.json` and no `config.json` changed, and that the existing `app.json` test still shows no `storage` permission
     - _Requirements: 4.1, 4.2_
   - [ ] 2.4 Check it in a browser or on the host
     - Open the board on a project with two epics and a "No epic" group. Choose each option and check the columns, the counts and a card's chat state; wait for a plan refresh and check the choice stays; reload the page and check the choice comes back; remove or rename the saved epic and reload, and check the board shows all epics. Check that `localStorage` works in the host's page, that the host `Select` is the control drawn, that choosing with it changes the board, and that its props match the design. Report what was checked, or that it could not be checked
     - _Requirements: 1.1, 1.3, 2.2, 2.3, 2.4, 3.1, 3.5, 3.6, 3.7_
-  - [ ] 2.5 Run the tests and report the counts
+  - [x] 2.5 Run the tests and report the counts
     - Run `python3 -m unittest discover -s tests -t .` and report run, passed and skipped, with the page tests named separately
     - _Requirements: 4.3_
 
