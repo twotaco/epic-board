@@ -376,5 +376,90 @@ class RefreshRuleProperty(unittest.TestCase):
         self.assertGreater(totals["claimed_again"], 0, repr(totals))
 
 
+class AgeModel:
+    """What the plan age should be, kept from the steps and the fake clock alone.
+
+    It records the clock when each refresh with the outcome "fetch_ok" ran. The fetch is stamped when
+    open_snapshot returns and the fake clock does not move during a job, so that is the clock at the time
+    the job runs. Every other outcome is a failed refresh (a fetch that succeeded but whose plan then
+    failed to build moves nothing), and so is the first read. It never reads the holder's private fields.
+    """
+
+    def __init__(self, testcase):
+        self.testcase = testcase
+        self.now = 0.0
+        self.last_ok = None            # the clock when the latest "fetch_ok" refresh ran
+        self.opens_seen = 0
+        self.previous = None           # (last_ok, age) of the previous plan answer
+        self.stats = {"null_after_first_read": 0, "null_after_failure": 0, "non_null": 0,
+                      "failed_after_success": 0, "answer_after_failed_after_success": 0,
+                      "monotone_pair": 0, "two_successes": 0}
+        self._failed_after_success = False
+
+    def observe(self, run, step, answer):
+        name = step[0]
+        if name == "advance":
+            self.now += step[1]
+        elif name == "run_job":
+            self._after_job(run, step[1])
+        elif name == "request" and answer[0] == "plan":
+            self._check_answer(run, answer[1])
+
+    def _after_job(self, run, outcome):
+        opened = len(run.harness.opens)
+        if opened == self.opens_seen:
+            return  # no job was queued, so nothing ran
+        self.opens_seen = opened
+        if outcome == "fetch_ok":
+            if self.last_ok is not None:
+                self.stats["two_successes"] += 1
+            self.last_ok = self.now
+            self._failed_after_success = False
+        elif self.last_ok is not None:
+            self.stats["failed_after_success"] += 1
+            self._failed_after_success = True
+
+    def _check_answer(self, run, body):
+        t = self.testcase
+        age = body["age_seconds"]
+        if self.last_ok is None:
+            t.assertIsNone(age, "age_seconds is set but no refresh fetch has succeeded")
+            self.stats["null_after_failure" if run.harness.opens else "null_after_first_read"] += 1
+            self.previous = None
+            return
+        t.assertIsNotNone(age, "age_seconds is none after a successful fetch")
+        t.assertIs(type(age), int, "age_seconds is not an int: %r" % (age,))
+        t.assertGreaterEqual(age, 0)
+        t.assertEqual(age, int(max(0, self.now - self.last_ok)),
+                      "age_seconds is not the whole seconds since the latest successful fetch")
+        self.stats["non_null"] += 1
+        if self._failed_after_success:
+            self.stats["answer_after_failed_after_success"] += 1
+        if self.previous is not None and self.previous[0] == self.last_ok:
+            t.assertGreaterEqual(age, self.previous[1], "age_seconds decreased as the clock advanced")
+            self.stats["monotone_pair"] += 1
+        self.previous = (self.last_ok, age)
+
+
+class PlanAgeProperty(unittest.TestCase):
+    """Property 3: Age follows the last successful fetch.
+
+    **Validates: Requirements 5.2, 5.4, 6.3, 6.4, 6.5**
+    """
+
+    def test_age_is_none_until_a_fetch_succeeds_and_then_counts_from_the_latest_one(self):
+        totals = {}
+        for seed in seeds(base=BASE_SEED + 200000):
+            with self.subTest(seed=seed):
+                model = AgeModel(self)
+                run_seed(seed, model.observe)
+                for key, count in model.stats.items():
+                    totals[key] = totals.get(key, 0) + count
+        # The generator must reach each case, or the property proves little.
+        for key in ("null_after_first_read", "null_after_failure", "non_null", "failed_after_success",
+                    "answer_after_failed_after_success", "monotone_pair", "two_successes"):
+            self.assertGreater(totals.get(key, 0), 0, "the generator never reached %s: %r" % (key, totals))
+
+
 if __name__ == "__main__":
     unittest.main()
