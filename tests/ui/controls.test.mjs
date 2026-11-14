@@ -195,3 +195,13 @@ test('an unreadable file clears the records and shows its error', () => {
   const state = chatsReduce(initialChats, { kind: 'records', chats: [], folder: { id: null, reason: null }, recordsError: { code: 'chats_unreadable', message: 'bad' } })
   assert.deepEqual([state.records, state.recordsError.message, state.loaded], [[], 'bad', true])
 })
+
+test('the page starts with no chat open, and no other action touches it', () => {
+  assert.equal(initialUi.open, null)
+  let state = uiReduce(initialUi, { kind: 'open-chat', cardId: A, key: 'k1' })
+  for (const action of [{ kind: 'ask', cardId: B }, { kind: 'cancel', cardId: B }, { kind: 'step', cardId: B, step: 's' },
+    { kind: 'started', cardId: B }, { kind: 'resuming', key: 'k2' }, { kind: 'brief-sent', key: 'k2' }]) {
+    state = uiReduce(state, action)
+  }
+  assert.deepEqual(state.open, { cardId: A, key: 'k1' })
+})

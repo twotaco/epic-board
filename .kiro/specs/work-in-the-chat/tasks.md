@@ -10,22 +10,22 @@ Group 1 is the page's pure logic. Group 2 draws the panel and its styles. Group 
 
 ## Tasks
 
-- [ ] 1. Page: the pure parts
-  - [ ] 1.1 Add the pure functions and the state to `ui/index.mjs`
+- [x] 1. Page: the pure parts
+  - [x] 1.1 Add the pure functions and the state to `ui/index.mjs`
     - `isChatPanel(value)`, `isPlainClick(event)` and `panelViewOf(view, ui, hasPanel)` as the design gives them
     - `initialUi` gains `open: null`; `uiReduce` gains `open-chat` (same state when the key is already open) and `close-chat` (with an optional `key` guard and an optional `focus`, which sets `focus: {cardId}` of the card that was open)
     - `cardViewOf` gives a `chat` view `open`, true when `ui.open?.key` is its key
     - Nothing else in the file changes, and no other action touches `open`
     - _Requirements: 1.1, 1.3, 1.4, 2.1, 2.2, 2.3, 2.6_
-  - [ ] 1.2 Check them in `tests/ui/panel.test.mjs` and the existing files
+  - [x] 1.2 Check them in `tests/ui/panel.test.mjs` and the existing files
     - `isChatPanel`: a function, a memo-like object with `$$typeof`, `null`, `undefined`, a string, a number and a plain object; `isPlainClick`: each modifier alone, a secondary and a middle button, and `defaultPrevented`; `panelViewOf`: the title from the plan, `'Chat'` when the card is gone, null with no host panel and with nothing open; `uiReduce` for the two actions including the key guard and the focus request
     - `tests/ui/controls.test.mjs` and `tests/ui/chats.test.mjs`: the new field in `initialUi`, and `cardViewOf`'s `open`
     - _Requirements: 1.1, 1.3, 1.4, 2.1, 2.2, 2.3, 2.6_
-  - [ ] 1.3 Write property test for one open chat in `tests/ui/panel.test.mjs`
+  - [x] 1.3 Write property test for one open chat in `tests/ui/panel.test.mjs`
     - **Property 1: At most one chat is open, and it is always one the page started**
     - Seeded sequences of `open-chat` and `close-chat` actions, records added and removed, reads that drop or keep records and failed reads; at least 100 iterations with the seed printed on failure
     - **Validates: Requirements 1.3, 1.4, 2.1, 2.2, 2.3, 2.6**
-  - [ ] 1.4 Run the tests
+  - [x] 1.4 Run the tests
     - Run `python3 -m unittest discover -s tests -t .` and `node --test tests/ui/*.test.mjs` and report the counts run, passed and skipped for each
     - _Requirements: 1.1, 1.3, 1.4, 2.1, 2.2, 2.3, 2.6_
 

@@ -386,7 +386,7 @@ test('a card with a started chat is a link in every column, with its state once 
   for (const status of ['planned', 'in progress', 'done']) {
     const chats = chatsWith({ records: started(), byKey: { k1: { state: 'needs-you' } } })
     assert.deepEqual(cardViewOf(card({ status }), chats, { asking: 'e.md#A' }), {
-      mode: 'chat', key: 'k1', name: 'k1', href: '/chat?sid=k1', state: 'needs-you', stateWord: 'Needs you', brief: null,
+      mode: 'chat', key: 'k1', name: 'k1', href: '/chat?sid=k1', state: 'needs-you', stateWord: 'Needs you', brief: null, open: false,
     }, status)
   }
 })
@@ -463,4 +463,11 @@ test('Property 6: the restoring clock', async () => {
       }
     }
   })
+})
+
+test('a started chat is open only when the page has it open', () => {
+  const chats = chatsWith({ records: started(), byKey: { k1: { state: 'idle' } } })
+  assert.equal(cardViewOf(card(), chats, { open: { cardId: 'e.md#A', key: 'k1' } }).open, true)
+  assert.equal(cardViewOf(card(), chats, { open: { cardId: 'e.md#B', key: 'k2' } }).open, false)
+  assert.equal(cardViewOf(card(), chats, {}).open, false)
 })
