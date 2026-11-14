@@ -1,0 +1,4 @@
+# The board's local settings: the repository path on this machine.
+config.json
+__pycache__/
+*.pyc
