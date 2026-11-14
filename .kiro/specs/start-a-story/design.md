@@ -279,7 +279,7 @@ async function startStory({cardId, backend, gateway, onStep}) {
 }
 ```
 
-A failure is wrapped in `{step, reason}` where `reason` is the error's message cut to 300 characters. The `accepted the request` case is the spike's finding: Crew accepts the message and may not answer with JSON, which the host's client reports as an error. The host's client adds its own `embed_app` field to the create body, which records the chat as begun on this app's page; the page adds nothing else (Requirement 4.3). The page holds at most one running sequence per card id in its UI state, so a second activation is ignored (Requirement 4.6).
+A failure is wrapped in `{step, reason}` where `reason` is the error's message cut to 300 characters. The `accepted the request` case is the spike's finding: Crew accepts the message and may not answer with JSON, which the host's client reports as an error. The host's client adds its own `embed_app` field to the create body; the page adds nothing else (Requirement 4.3). The page runs as the person, so the chat comes out like one the person started (`app` empty, `origin` `user`), and on Crew 0.12.1 nothing on disk marks it as this app's. The page holds at most one running sequence per card id in its UI state, so a second activation is ignored (Requirement 4.6).
 
 `backend.post` and `backend.get` are `fetch` of `/apps/epic-board/api/chats…` with `credentials: 'same-origin'`, the abort signal, and a JSON body, like the plan request. They resolve with the parsed body, and reject with an error carrying `status` and the body's `error` when the status is not 2xx. `gateway` is the host's `useAppApi()` client, which rejects with `status` and `body`.
 
@@ -307,7 +307,7 @@ The link is not rendered by `cardViewOf` from the read alone. The start's result
 "permissions": { "api": ["/api/chat", "/api/chat/slots"] }
 ```
 
-`/api/chat` is a path prefix: it covers `POST /api/chat`, and `/api/chat/slots` covers the create, list, detail and resume routes. The spike declared both and worked. The app declares no `sessionApproval`, so the approve and answer routes answer 403 to it, which is what Requirement 6, criterion 6 wants.
+`/api/chat` is a path prefix: it covers `POST /api/chat`, and `/api/chat/slots` covers the create, list, detail and resume routes. The spike declared both and worked. These entries only decide which paths the page's client will send. The page runs as the person, so nothing in Crew stops it from calling the approve, answer, stop or resume routes under `/api/chat/slots`, and `app.json` does not limit it. Requirement 6, criterion 6 therefore holds because the page's code never sends those requests, and the source scan in task 3.5 checks it.
 
 ## Data Models
 
@@ -435,7 +435,7 @@ The backend and pure page functions are tested with the tools the project has. P
 | 3 | Brief and slug tests; Properties 4, 5 | | Read one brief of each kind in a started chat |
 | 4 | Reserve refusals; `started` answers | `startStory`; Property 7 | Start on a throwaway project; the chat opens in the project's folder and sends the brief once |
 | 5 | Store; Property 3; routes; signature; limits | | A signed request from the page reaches `chats`; restart keeps the records |
-| 6 | | Properties 1, 2; `readChats`; polling; notice | **Check that the chat list is limited to our own chats**; states change as the conductor works |
+| 6 | | Properties 1, 2; `readChats`; polling; notice | **Check that the board receives every chat's row and keeps only the keys in `chats.json`, and never shows another chat's preview**; states change as the conductor works |
 | 7 | | `chatHref`; link markup | **Check that `/chat?sid=` opens our chat** |
 | 8 | | Property 6; resume flow | Restart Crew with a started chat; Restoring, then back; Resume on a chat that is not open |
 | 9 | | Roles; colours; keyboard; literal text | Light and dark theme; focus ring |
@@ -454,9 +454,9 @@ The backend and pure page functions are tested with the tools the project has. P
 ## Open Questions
 
 1. **Folder.** Is a folder id in a setting acceptable for the first version, or should the board offer a picker of the folders Crew lists?
-2. **The chat list for an app.** A code comment in `dashboard/chat_api/slot_detail.py` says an app's rows are "already app-scoped downstream", but I did not find the filter, and the per-slot routes are the ones the documentation says are ownership-checked. The page ignores other rows either way. If the list is not limited, the page still receives other chats' previews, and the right fix is in Crew. The manual check decides this.
-3. **`useAppApi` details.** Does `api.get('/api/chat/slots/<key>?limit=1')` accept a query string, and does `get`'s second argument take `{signal}`? The documentation says the path check applies to the initial URL and that `request`, `get` and `post` accept `RequestInit`; this has not been run.
-4. **`limit=1` returns the newest row.** The handler reads the whole window when `limit` is absent and pages by `before`; I did not confirm which end a bare `limit` returns.
-5. **Does uninstalling the app reset its chats?** The documentation says a chat begun by `post('/api/chat/slots', ...)` is recorded as begun on the app's page and that uninstalling gives it a fresh start. The records in the data folder would then name chats that are gone.
-6. **Does the host pass the signature and the secret?** The backend relies on `KIROCREW_PROXY_SECRET` and on `X-KiroCrew-Proxy` on every proxied request, as the documentation says; the spike did not use them.
+2. **The chat list for an app.** Closed by a probe on Crew 0.12.1. `GET /api/chat/slots` is not limited to our chats: it returns the row of every chat, the person's own included, both to the page and to an app token. The board therefore receives every chat's row and keeps only the keys in `chats.json` (Requirement 6, criterion 1), and never shows another chat's preview.
+3. **`useAppApi` details.** Closed by a probe on Crew 0.12.1. `useAppApi` accepts a query string in the path (`?limit=1` works) and passes `{signal}` through, so an abort rejects. A 404 comes back as an `AppApiError` with a numeric `status`.
+4. **`limit=1` returns the newest row.** Closed by a probe on Crew 0.12.1. `?limit=1` returns the newest row.
+5. **Does uninstalling the app reset its chats?** Closed by a probe on Crew 0.12.1. Uninstalling does not delete chats: the chats and their messages stay. Chats the page creates can be resumed.
+6. **Does the host pass the signature and the secret?** Closed by a probe on Crew 0.12.1. A separate-process backend receives `KIROCREW_PROXY_SECRET`, and proxied requests carry a v1 `X-KiroCrew-Proxy` header that verifies.
 7. **What if the brief's `agent` is unavailable?** The spike created chats with `kirocrew-conductor`; a Crew without that agent would fail at the create step with the reason shown.
