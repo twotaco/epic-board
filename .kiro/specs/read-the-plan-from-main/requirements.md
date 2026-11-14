@@ -30,11 +30,11 @@ Statuses are `planned`, `in progress` and `done`.
 
 #### Acceptance Criteria
 
-1. WHEN the plan is requested THEN the backend SHALL determine the main branch: the branch `origin/HEAD` points to in the checkout, or `main` if `origin/HEAD` is not set or does not name a branch.
-2. WHEN the main branch is determined THEN the backend SHALL fetch it from `origin` and read every file from `origin/<main branch>`.
+1. WHEN the plan is built THEN the backend SHALL determine the main branch: the branch `origin/HEAD` points to in the checkout, or `main` if `origin/HEAD` is not set or does not name a branch.
+2. WHEN the main branch is determined THEN the backend SHALL fetch it from `origin` and read every file from `origin/<main branch>`, except that the first plan after the backend starts is read before any fetch, as `show-the-board` Requirement 5 describes.
 3. WHEN the plan is read THEN the backend SHALL read files from the git object store and SHALL NOT read the working tree, so uncommitted changes and local branches have no effect on the plan.
 4. IF the fetch fails and a previously fetched `origin/<main branch>` exists THEN the backend SHALL read that copy and the plan response SHALL say that the fetch failed and give the reason.
-5. IF the fetch fails and no `origin/<main branch>` exists THEN the plan response SHALL be an error that says the ref could not be read, and SHALL contain no plan.
+5. IF the fetch fails, no `origin/<main branch>` exists and the backend holds no earlier plan (`show-the-board` Requirement 6) THEN the plan response SHALL be an error that says the ref could not be read, and SHALL contain no plan.
 6. WHEN the plan is returned THEN the response SHALL name the repository, the main branch and the ref it was read from.
 
 ### Requirement 3
@@ -108,7 +108,7 @@ Statuses are `planned`, `in progress` and `done`.
 1. WHEN the plan is returned THEN it SHALL contain one group per epic, in order of epic file name, each holding its cards in the order the stories are written.
 2. WHEN a spec is listed in no epic, or a story comes from `standalone.md` THEN its card SHALL be in a group named "No epic". A spec SHALL appear there once, however many times `standalone.md` lists it, and the cards SHALL be ordered by name, ignoring case.
 3. WHEN the "No epic" group would have no cards THEN the plan SHALL omit it.
-4. WHEN a card is returned THEN it SHALL contain its name, its status, its spec folder name or none, its task counts, and the name of the epic it is under or none. The task counts SHALL be none only for a card with no spec, or for a spec whose `tasks.md` exists but cannot be read.
+4. WHEN a card is returned THEN it SHALL contain its name, its status, its spec folder name or none, its task counts, its description (`show-the-board` Requirement 4), and the name of the epic it is under or none. The task counts SHALL be none only for a card with no spec, or for a spec whose `tasks.md` exists but cannot be read.
 
 ### Requirement 9
 
