@@ -15,7 +15,7 @@ The placeholder page (`ui/index.mjs`) stays in place until group 4 replaces it. 
     - In `build_plan`, the card made for a spec folder that no story lists passes `""`
     - Do not change `backend/parse.py`; `Story.description` is already trimmed by `split_status`
     - _Requirements: 4.1, 4.2, 4.3_
-  - [~] 1.2 Check the descriptions in `tests/test_plan.py`
+  - [x] 1.2 Check the descriptions in `tests/test_plan.py`
     - Add cases to `PlanTests` for Requirement 4: a story whose spec exists and one whose spec is missing both carry the description; whitespace at both ends is removed and inner spacing, later full stops and punctuation are unchanged
     - No full stop after the dash, and only whitespace after the first full stop, give `""`
     - A spec no story lists gives `""` and takes nothing from its own files; a spec listed only by a line the parser ignores also gives `""`
