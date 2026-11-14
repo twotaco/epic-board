@@ -68,14 +68,14 @@ sequenceDiagram
     B-->>P: {name, brief, folder_id}  (record reserved)
     P->>G: POST /api/chat/slots {name, agent, folder_id}
     G-->>P: row {key, messages}
-    P->>G: POST /api/chat {slot: key, message: brief}   (skipped when messages > 0)
     P->>B: POST /chats/<name>/started {key}
     B-->>P: record started
-    P->>G: GET /api/chat/slots  (state read, at once)
+    Note over P: the card shows its link, and the page reads its state at once
+    P->>G: POST /api/chat {slot: key, message: brief}   (skipped when messages > 0)
+    Note over P,G: Crew answers when the turn ends. The page stops waiting when Crew accepts the request or after 10 seconds.
 ```
-
-A failure at any arrow leaves the record `reserved`. A repeat of the whole sequence reserves the same name, finds the chat already created (Crew answers a create for a name the app already owns with the existing row), skips the send when the chat already holds a message, and saves.
-
+The chat is saved before the brief is sent. `POST /api/chat` does not answer until the conductor's turn ends, and a turn that waits for a tool approval or an answer does not end by itself. If the page waited for it, the card would stay on "Starting…" with no link, the record would stay `reserved`, a page left or reloaded in the meantime would lose the start, and the card could never show Needs you. Saving first means the link and the state appear as soon as the chat exists, and a turn that is waiting for the person shows as Needs you.
+A failure before the save leaves the record `reserved`. A repeat of the whole sequence reserves the same name, finds the chat already created (Crew answers a create for a name the app already owns with the existing row), and saves; it sends the brief only when the chat holds no message. A failure of the send leaves the record `started` and the card with its link; the card says the brief was not sent and offers to send it again.
 ## Components and Interfaces
 
 ### `plan.py`: card `id` (first spec, 8.4)
@@ -133,7 +133,7 @@ Your job: write this story's spec. It has none yet.
 1. Read the story's entry in the epic page, and the project's AGENTS.md and steering files. Follow them for how specs, branches and checks work.
 2. Create a branch named story/{folder} from origin/{branch}. If the project names branches another way, follow the project.
 3. Write requirements.md, design.md and tasks.md in .kiro/specs/{folder}/, in the project's usual spec format.
-4. If the story has an epic page, change the story's line in it to link to .kiro/specs/{folder}/. Keep its status.
+4. If the story has an epic page, change the story's line in it to link to .kiro/specs/{folder}/. Set its status to in progress.
 5. Commit, push the branch, and open one pull request into {branch}.
 
 Rules:
@@ -158,12 +158,13 @@ Your job: build the next task group of this story's spec.
 3. If the spec has no tasks, write tasks.md as the only change of your pull request and build nothing.
 4. Create a branch named story/{spec}-g<N> from origin/{branch}, where <N> is the number of that group. If the project names branches another way, follow the project.
 5. Tick each task you finish in tasks.md, in the same branch. Run the checks the project names and fix what fails.
-6. Commit, push the branch, and open one pull request into {branch}.
+6. If your group ticks the last task in tasks.md, set the story's line in the epic page to done, in the same pull request.   (only when the story has an epic)
+7. Commit, push the branch, and open one pull request into {branch}.
 
 Rules: (the same three lines)
 ```
 
-The branch name is spelled in the brief because the board knows the group number only as "first unticked"; the conductor counts it. Both templates are about 1,500 characters before the names go in (the tests measure it). With every inserted name at 255 characters, a brief stays under 5,000, below the 6,000 limit.
+The branch name is spelled in the brief because the board knows the group number only as "first unticked"; the conductor counts it. The same goes for the status of the story's line: the board does not know whether the group will tick the last task, so the conductor decides, and the brief says what to do in that case. The story's line in the epic page is the only file other than the spec that a brief lets the conductor change, and only the status word and the link. A story with no epic gets neither epic step, and the steps are numbered again. Both templates are about 1,500 characters before the names go in (the tests measure it). With every inserted name at 255 characters, a brief stays under 5,000, below the 6,000 limit.
 
 **`slugify(name, taken)`**: `re.sub(r"[^a-z0-9]+", "-", name.casefold())` after `casefold` and ASCII-only matching, `strip("-")`, cut to 60, `rstrip("-")`, `"story"` when empty, then `-2`, `-3`… while the result is in `taken`. `taken` is the set of spec folders in the plan.
 
@@ -253,7 +254,7 @@ The whole read shares one `AbortSignal`, which the poller aborts after 10 second
 | card has a started record, key missing, under 60 s | `restoring` | name as plain text, "Restoring chat…" (status) |
 | missing 60 s or more, no resume under way | `not-open` | name as plain text, "This chat is not open.", "Resume chat" |
 | resume under way, or failed | `resuming`, `resume-failed` | "Resuming…", or "The chat could not be resumed." with reason and "Start again" |
-| card has a started record otherwise | `chat` | name as a link, the state word once read |
+| card has a started record otherwise | `chat` | name as a link, the state word once read, and while its brief is being sent "Sending the brief…", or after a failed send "The brief was not sent" with the reason and "Send the brief again" (`ui.briefs[key]`) |
 | no started record, column Done | `plain` | name as text, nothing else |
 | no started record, question open on this card | `question` | the question, or the start's progress or failure text |
 | no started record, folder not set or records unreadable, and the person opened it | `blocked` | the text of Requirement 2, criterion 6 |
@@ -264,22 +265,37 @@ The time is the end of the latest read and not the current clock, so rendering s
 #### The start sequence (Requirement 4)
 
 ```js
-async function startStory({cardId, backend, gateway, onStep}) {
-  // each step names itself first: onStep('reserve'), 'create', 'send', 'save'
+const SEND_WAIT_MS = 10000
+
+// Sends the brief and ends when Crew has accepted it, which is not when the turn ends.
+function sendBrief({gateway, key, brief, setTimer, clearTimer}) {
+  return new Promise((resolve, reject) => {
+    let settled = false
+    const end = (how, value) => { if (!settled) { settled = true; clearTimer(timer); how(value) } }
+    const timer = setTimer(() => end(resolve), SEND_WAIT_MS)       // 10 s with no error: sent
+    gateway.post('/api/chat', {slot: key, message: brief}).then(
+      () => end(resolve),                                           // the turn ended: sent
+      (error) => (/accepted the request/.test(String(error?.message ?? error)) ? end(resolve) : end(reject, error)))
+  })                                                                // anything after the end is ignored, errors too
+}
+
+async function startStory({cardId, backend, gateway, onStep, onSaved, setTimer, clearTimer}) {
+  // each step names itself first: onStep('reserve'), 'create', 'save', 'send'
   const reservation = await backend.post('/chats', {card_id: cardId})
   const row = await gateway.post('/api/chat/slots',
     {name: reservation.name, agent: 'kirocrew-conductor', folder_id: reservation.folder_id})
   const key = row.key                       // text, else the step fails
-  if (!(row.messages > 0)) {
-    try { await gateway.post('/api/chat', {slot: key, message: reservation.brief}) }
-    catch (error) { if (!/accepted the request/.test(String(error?.message ?? error))) throw error }
-  }
   await backend.post(`/chats/${reservation.name}/started`, {key})
-  return {key}
+  const saved = {cardId, name: reservation.name, key, brief: reservation.brief}
+  onSaved(saved)                            // the link and the state appear now
+  if (!(row.messages > 0)) await sendBrief({gateway, key, brief: reservation.brief, setTimer, clearTimer})
+  return saved
 }
 ```
 
-A failure is wrapped in `{step, reason}` where `reason` is the error's message cut to 300 characters. The `accepted the request` case is the spike's finding: Crew accepts the message and may not answer with JSON, which the host's client reports as an error. The host's client adds its own `embed_app` field to the create body; the page adds nothing else (Requirement 4.3). The page runs as the person, so the chat comes out like one the person started (`app` empty, `origin` `user`), and on Crew 0.12.1 nothing on disk marks it as this app's. The page holds at most one running sequence per card id in its UI state, so a second activation is ignored (Requirement 4.6).
+A failure is wrapped in `{step, reason}` where `reason` is the error's message cut to 300 characters. A failure of the `send` step is thrown after `onSaved` has run, and carries `saved`, so the page knows the chat exists and holds the brief for a retry. `sendBrief` leaves the request running after 10 seconds and ignores what it later answers, and it does not abort it: aborting a request that Crew has accepted could be read as a stop. A request still waiting after 10 seconds has reached Crew, so a later error cannot mean that the brief never left the page. The `accepted the request` case is the spike's finding: Crew accepts the message and may not answer with JSON, which the host's client reports as an error. The host's client adds its own `embed_app` field to the create body; the page adds nothing else (Requirement 4.3). The page runs as the person, so the chat comes out like one the person started (`app` empty, `origin` `user`), and on Crew 0.12.1 nothing on disk marks it as this app's. The page holds at most one running sequence per card id in its UI state, so a second activation is ignored (Requirement 4.6).
+
+**Sending again.** `retryBrief({gateway, key, brief, setTimer, clearTimer})` reads `GET /api/chat/slots` and finds the row whose `key` is the chat's. With no row, or a list that is not a list, it throws a `send` failure with that reason and sends nothing. With a row whose `messages` is greater than 0 it sends nothing and the caller treats the brief as sent. Only with a row whose `messages` is 0 does it call `sendBrief`. The page keeps the brief in memory only (`briefs`, by key), so the button exists only for as long as the page does; a reloaded page shows the chat with its link and state and no note. Requirement 4.9 does not promise more, and the open question below asks whether it should.
 
 `backend.post` and `backend.get` are `fetch` of `/apps/epic-board/api/chats…` with `credentials: 'same-origin'`, the abort signal, and a JSON body, like the plan request. They resolve with the parsed body, and reject with an error carrying `status` and the body's `error` when the status is not 2xx. `gateway` is the host's `useAppApi()` client, which rejects with `status` and `body`.
 
@@ -297,7 +313,7 @@ The "click anywhere on the card" behaviour needs no script. The card is `positio
 
 #### The component
 
-`createBoard(React, env)` gains a second reducer for `chats` and `ui`, and a second effect that builds the chat poller. `env.useAppApi` defaults to the host's `window.__kirocrew_modules['@kirocrew/app-sdk'].useAppApi`, looked up inside the component on first render; the page tests pass a fake. The chat poller's `request(signal)` is `readChats` with the page's two clients, `hidden`, the timers, `visible()` on `visibilitychange` and `stop()` on unmount are wired exactly as the plan poller's are. When a start succeeds the component calls the chat poller's `visible()`, which reads at once unless a read is in flight; a read in flight began before the new record was saved, and the next one is at most 15 seconds later (5 seconds if any chat is restoring, Requirement 6.7). Hence a started card shows its link at once from the start's result and its state after the next read.
+`createBoard(React, env)` gains a second reducer for `chats` and `ui`, and a second effect that builds the chat poller. `env.useAppApi` defaults to the host's `window.__kirocrew_modules['@kirocrew/app-sdk'].useAppApi`, looked up inside the component on first render; the page tests pass a fake. The chat poller's `request(signal)` is `readChats` with the page's two clients, `hidden`, the timers, `visible()` on `visibilitychange` and `stop()` on unmount are wired exactly as the plan poller's are. When the chat is saved (`onSaved`) the component adds the record, clears the question and calls the chat poller's `visible()`, which reads at once unless a read is in flight; a read in flight began before the new record was saved, and the next one is at most 15 seconds later (5 seconds if any chat is restoring, Requirement 6.7). Hence a started card shows its link at once from the start's result and its state after the next read, while the brief is still being sent. The send's own result goes to `ui.briefs`: sending, failed with its reason, or forgotten once it is sent. The send's 10-second timer is made through the component's `setTimeout` and is cleared on unmount, so an unmounted page leaves no timer behind.
 
 The link is not rendered by `cardViewOf` from the read alone. The start's result adds the new record to the chat state at once (`started` action), so the link appears without waiting.
 
@@ -376,11 +392,11 @@ As in the board design, these are checked with seeded generators written in the 
 
 **Validates: Requirements 8.2, 8.3**
 
-### Property 7: A repeated start never sends the brief twice and never makes a second chat
+### Property 7: A chat is saved before its brief is sent, and the brief is never sent twice
 
-*For any* schedule of failures at each step of `startStory` across repeated attempts, against a fake backend and a fake Crew that behave as described (a reservation is stable, a create of a known name returns the same row with its message count, a send adds one message), at most one message is sent, at most one chat exists for the card, and an attempt in which every step succeeds ends with the record `started` with the chat's key.
+*For any* schedule of failures at each step of `startStory` and of the send, across repeated starts and retries, against a fake backend and a fake Crew that behave as described (a reservation is stable, a create of a known name returns the same row with its message count, a send adds one message and may answer at once, fail before Crew has it, fail after it, or never answer), no brief is sent while the record is `reserved`; the saving is never refused for want of an answer to the send; a send that never answers ends 10 seconds after it began and counts as sent; at most one message is sent and at most one chat exists for the card; a retry sends only when the chat's `messages` is 0; and a start in which the reservation, the creation and the saving succeed ends with the record `started` with the chat's key whatever happens to the send.
 
-**Validates: Requirements 4.3, 4.4, 4.5, 4.6**
+**Validates: Requirements 4.3, 4.4, 4.5, 4.6, 4.7, 4.9**
 
 ## Error Handling
 
@@ -392,7 +408,10 @@ As in the board design, these are checked with seeded generators written in the 
 | Backend | `chats.json` unreadable | 500 `chats_unreadable` naming the file; the file is left as it is; the page shows the message on a card that is asked to start, and the cards that have chats show no chats |
 | Backend | Data folder not writable | 500 `internal` on a reserve, started or delete; reads still work |
 | Backend | Reserve on a Done card, an unknown card, a card with a chat, no plan, no folder | 409 with the codes of Requirement 4.2 |
-| Page | A start step fails | The card says which step and why, and offers the question again; the record stays `reserved` |
+| Page | The reservation, the creation or the saving fails | The card says which step and why, and offers the question again; the record stays `reserved` |
+| Page | The send fails before 10 seconds with an error other than "accepted the request" | The card keeps its link and its state, says "The brief was not sent" with the reason, and offers "Send the brief again"; the record stays `started` |
+| Page | The send is still waiting after 10 seconds | The brief counts as sent; what the request later answers is ignored |
+| Page | A retry finds no row for the chat, or a row that holds a message | Nothing is sent; with a message the brief counts as sent, without a row the failure is shown again |
 | Page | Crew's chat list or a detail read fails, or the backend's `/chats` fails | The shown states stay and the notice appears; retry after 15 s |
 | Page | A started chat is missing | Restoring for 60 s, then Resume |
 | Page | Resume fails | The reason and "Start again", which removes only the board's record |
@@ -406,7 +425,7 @@ Edited in place, as the board spec did, because the behaviour moved:
 |---|---|
 | First spec, requirement 8.4 | A card also has `id` |
 | Board spec, requirement 1.2 | The page may also send the requests of `start-a-story` Requirements 4, 5, 6 and 8 |
-| Board spec, requirement 1.3 | The page may also have the card controls of `start-a-story` Requirements 2, 7 and 8 |
+| Board spec, requirement 1.3 | The page may also have the card controls of `start-a-story` Requirements 2, 4, 7 and 8 (4 for "Send the brief again") |
 | Board spec, introduction | The next story is described as it now is |
 | Epic page | The "Started" mark became the four states; "Live tracking" in "Not in this epic" became "Following a conductor's work inside its chat" |
 
@@ -425,7 +444,7 @@ Checks that the board story wrote and that stop being true (the tasks bring them
 The backend and pure page functions are tested with the tools the project has. Python tests run with `python3 -m unittest discover -s tests -t .`, and the page tests with Node through `tests/test_ui.py`, as `AGENTS.md` says.
 
 - **Backend.** `test_proxyauth.py` checks `verify` against signatures computed in the test, and against the host's own worked cases where the documentation gives them: stale, future, non-digit, empty, non-ASCII and altered body. `test_chats.py` covers the brief templates, `slugify`, `find_card`, the store on a temporary folder (including an unreadable file left untouched and a leftover temporary file), and `ChatService.handle` with a fake holder, a signing helper and a temporary folder: every code of the table, the order of the checks, the body limit, and the routes' answers. A small HTTP test on port 0 checks that `GET`, `POST` and `DELETE` reach `ChatService` through `make_server`, that `plan` and `health` are unchanged and unsigned, and that no git command runs. `test_chats_properties.py` holds Properties 3 to 5.
-- **Page.** `tests/ui/chats.test.mjs` covers Properties 1, 2 and 6, `readChats` with a fake backend and a fake gateway (the requests made, none for an unchanged `last_ts`, a 404 as missing, other rejections as failures), `classifyChats`, `chatDelay`, and `cardViewOf` for each mode of its table. `tests/ui/start.test.mjs` covers `startStory`, `resumeChat` and Property 7 with fakes, including the `accepted the request` case, a create that answers an existing chat, and a second activation ignored. `render.test.mjs` is extended: each card mode's markup and roles, the question's buttons, the focus-related attributes, the one `a` or `button` per card main control, no heading added, literal text for chat messages and reasons, `STYLE` colour and outline scans with the new rules. `board.test.mjs` is extended: the chat poller starts with the page, sends nothing while hidden, reads at once on becoming visible and after a start, and stops on unmount.
+- **Page.** `tests/ui/chats.test.mjs` covers Properties 1, 2 and 6, `readChats` with a fake backend and a fake gateway (the requests made, none for an unchanged `last_ts`, a 404 as missing, other rejections as failures), `classifyChats`, `chatDelay`, and `cardViewOf` for each mode of its table. `tests/ui/start.test.mjs` covers `startStory`, `resumeChat`, `retryBrief` and Property 7 with fakes, including the order of the requests (the save before the send), a send that never answers (ended by a virtual 10-second timer, with the saving already done), a send that fails and a retry that sends only when `messages` is 0, the `accepted the request` case, a create that answers an existing chat, and a second activation ignored. `render.test.mjs` is extended: each card mode's markup and roles, the question's buttons, the focus-related attributes, the one `a` or `button` per card main control, no heading added, literal text for chat messages and reasons, `STYLE` colour and outline scans with the new rules. `board.test.mjs` is extended: the chat poller starts with the page, sends nothing while hidden, reads at once on becoming visible and after a start, and stops on unmount.
 - **Properties 1 to 7** are in the files above.
 
 | Req | Backend tests | Page tests | Manual, on the host |
@@ -433,7 +452,7 @@ The backend and pure page functions are tested with the tools the project has. P
 | 1 | `load_folder` cases; `data_dir` | `app.json` permissions in `test_ui.py` | The data folder is writable by the backend; the folder id set |
 | 2 | | Card modes; question; Cancel and Escape; Done card inert; blocked texts | Click anywhere on a card; keyboard; focus returns |
 | 3 | Brief and slug tests; Properties 4, 5 | | Read one brief of each kind in a started chat |
-| 4 | Reserve refusals; `started` answers | `startStory`; Property 7 | Start on a throwaway project; the chat opens in the project's folder and sends the brief once |
+| 4 | Reserve refusals; `started` answers | `startStory` (the order, a send that never answers, a failed send, a retry); Property 7 | Start on a throwaway project; the chat opens in the project's folder and sends the brief once; **start a story whose conductor waits for a tool approval, and confirm the card has its link and shows Needs you while the request is still open** |
 | 5 | Store; Property 3; routes; signature; limits | | A signed request from the page reaches `chats`; restart keeps the records |
 | 6 | | Properties 1, 2; `readChats`; polling; notice | **Check that the board receives every chat's row and keeps only the keys in `chats.json`, and never shows another chat's preview**; states change as the conductor works |
 | 7 | | `chatHref`; link markup | **Check that `/chat?sid=` opens our chat** |
@@ -445,6 +464,7 @@ The backend and pure page functions are tested with the tools the project has. P
 - **Card identity.** The `id` is the epic file and the card's name, not the spec folder, so a story's chat stays with its card when the conductor's pull request is merged and the card gains a spec. The cost is that renaming a story in its epic page, or moving it to another epic, loses its chat link. The record stays in the file, and "Start again" does not apply because the card no longer matches; this is accepted.
 - **Needs you before Working.** The four states are given as fields. Their order matters because a turn waiting for an approval is also running. The order is Needs you, Working, Interrupted, Idle.
 - **The brief is built by the backend.** It is plain text built from the plan on main, so the same code can be tested in Python and the page holds no prompt text.
+- **The chat is saved before the brief is sent.** Found in use: `POST /api/chat` answers when the conductor's turn ends, so a turn waiting for an approval kept the card on "Starting…", the record `reserved` and the link missing. The send is now the last step and the page does not wait for the turn. The 10 seconds is a judgement: long enough for a refusal that comes back at once to be seen, short enough that a turn that is waiting for the person is not mistaken for a hang. A request that has been waiting that long has reached Crew.
 - **No new dependency.** The signature check, the store and the page's flows use the standard library and the host's React. The page's server calls use `fetch` as the plan poller does.
 - **The folder is a setting, as the repository is.** The person puts a Crew folder id in `EPIC_BOARD_FOLDER` or `config.json`. A folder picker would need `GET /api/chat/folders` and a place to keep the choice, and can be added later without changing the records.
 - **The link is a URL.** `/chat?sid=<key>` is the shape the host's own links use (`session_deep_link`). The SDK's `useChatLauncher().openChat({slotKey})` is the other way and would keep the person inside the app's frame; the requirement asks for a link, and the manual check confirms it opens the chat.
@@ -460,3 +480,4 @@ The backend and pure page functions are tested with the tools the project has. P
 5. **Does uninstalling the app reset its chats?** Closed by a probe on Crew 0.12.1. Uninstalling does not delete chats: the chats and their messages stay. Chats the page creates can be resumed.
 6. **Does the host pass the signature and the secret?** Closed by a probe on Crew 0.12.1. A separate-process backend receives `KIROCREW_PROXY_SECRET`, and proxied requests carry a v1 `X-KiroCrew-Proxy` header that verifies.
 7. **What if the brief's `agent` is unavailable?** The spike created chats with `kirocrew-conductor`; a Crew without that agent would fail at the create step with the reason shown.
+8. **A brief that was not sent, after the page is gone.** The page keeps the brief in memory, so after a reload a chat whose brief was never sent shows its link and an Idle state and no note, and the person would have to type the brief themselves. Should the backend rebuild the brief for a started chat (a route such as `GET /chats/<name>/brief`, refused when the chat holds a message), so that "Send the brief again" survives a reload?

@@ -386,9 +386,18 @@ test('a card with a started chat is a link in every column, with its state once 
   for (const status of ['planned', 'in progress', 'done']) {
     const chats = chatsWith({ records: started(), byKey: { k1: { state: 'needs-you' } } })
     assert.deepEqual(cardViewOf(card({ status }), chats, { asking: 'e.md#A' }), {
-      mode: 'chat', key: 'k1', name: 'k1', href: '/chat?sid=k1', state: 'needs-you', stateWord: 'Needs you',
+      mode: 'chat', key: 'k1', name: 'k1', href: '/chat?sid=k1', state: 'needs-you', stateWord: 'Needs you', brief: null,
     }, status)
   }
+})
+
+test('a started chat carries its brief note, which only a chat shows', () => {
+  const chats = chatsWith({ records: started(), byKey: { k1: { state: 'idle' } } })
+  assert.deepEqual(cardViewOf(card(), chats, { briefs: { k1: { kind: 'sending' } } }).brief, { kind: 'sending' })
+  assert.deepEqual(cardViewOf(card(), chats, { briefs: { k1: { kind: 'failed', reason: 'boom' } } }).brief, { kind: 'failed', reason: 'boom' })
+  assert.equal(cardViewOf(card(), chats, { briefs: { other: { kind: 'sending' } } }).brief, null)
+  assert.equal(cardViewOf(card(), chatsWith({ records: started() }), { briefs: { k1: { kind: 'failed', reason: 'x' } } }).href, '/chat?sid=k1', 'the link stays')
+  assert.equal(cardViewOf(card(), chatsWith(), { briefs: { k1: { kind: 'sending' } } }).mode, 'startable', 'a card with no chat has no brief note')
 })
 
 test('a started chat that has not been read yet is a link with no state', () => {

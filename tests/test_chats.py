@@ -34,7 +34,9 @@ class BriefTests(unittest.TestCase):
         self.assertIn("Your job: write this story's spec. It has none yet.", text)
         self.assertIn("branch named story/filter-by-epic from origin/main", text)
         self.assertIn("requirements.md, design.md and tasks.md in .kiro/specs/filter-by-epic/", text)
-        self.assertIn("Change the story's line in the epic page to link to .kiro/specs/filter-by-epic/", text)
+        self.assertIn("Change the story's line in the epic page to link to .kiro/specs/filter-by-epic/. "
+                      "Set its status to in progress.", text)
+        self.assertNotIn("Keep its status", text)
         self.assertIn("open one pull request into main", text)
         self.assertIn("If the project names branches another way, follow the project.", text)
         self.assert_rules(text)
@@ -65,11 +67,31 @@ class BriefTests(unittest.TestCase):
         self.assert_rules(text)
         self.assertNotIn("write this story's spec", text)
 
+    def test_with_spec_brief_sets_the_story_to_done_when_the_last_task_is_ticked(self):
+        text = build_brief(WITH_SPEC, "epic-board.md", "main")
+        done_step = ("If your group ticks the last task in tasks.md, set the story's line in the epic page to done, "
+                     "in the same pull request.")
+        self.assertIn(done_step, text)
+        steps = [l for l in lines_of(text) if re.match(r"^\d+\. ", l)]
+        # the step sits after the ticking and before the commit and pull request
+        self.assertTrue(steps[-2].endswith(done_step), steps)
+        self.assertIn("open one pull request into main", steps[-1])
+        numbers = [l.split(".")[0] for l in steps]
+        self.assertEqual(numbers, [str(i) for i in range(1, len(numbers) + 1)])
+        self.assertNotIn("Keep its status", text)
+
+    def test_the_no_spec_brief_never_says_the_story_is_done(self):
+        self.assertNotIn("to done", build_brief(NO_SPEC, "epic-board.md", "main"))
+
     def test_with_spec_brief_with_no_epic(self):
         text = build_brief(WITH_SPEC, None, "trunk")
         self.assertIn("Epic page: none, this story has no epic", text)
         self.assertIn("from origin/trunk", text)
         self.assert_rules(text, "trunk")
+        # no epic page, so no line of it to set
+        self.assertNotIn("set the story's line", text)
+        numbers = [l.split(".")[0] for l in lines_of(text) if re.match(r"^\d+\. ", l)]
+        self.assertEqual(numbers, [str(i) for i in range(1, len(numbers) + 1)])
 
     def test_the_two_variants_are_chosen_by_the_spec_alone(self):
         for spec, marker in ((None, "write this story's spec"), ("x", "build the next task group")):

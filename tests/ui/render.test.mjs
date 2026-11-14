@@ -847,7 +847,7 @@ const missing = (at, since = 0, key = 'k1') => withChat(key, { state: 'missing' 
 // Records what the controls call.
 function recorder() {
   const calls = []
-  const actions = Object.fromEntries(['ask', 'cancel', 'start', 'close', 'resume', 'startAgain'].map((name) => [name, (...args) => calls.push([name, ...args])]))
+  const actions = Object.fromEntries(['ask', 'cancel', 'start', 'close', 'sendBrief', 'resume', 'startAgain'].map((name) => [name, (...args) => calls.push([name, ...args])]))
   return { calls, actions }
 }
 const renderWith = (view, actions) => renderBoard(h, view, actions)
@@ -1114,4 +1114,69 @@ test('the new classes have rules in STYLE, and the stretched control sits under 
   assert.match(STYLE, /\.eb-question,\s*\.eb-chat-controls\s*\{[^}]*position:\s*relative[^}]*z-index:\s*1/)
   assert.match(STYLE, /\.eb-card-main:focus-visible\s*\{[^}]*outline:\s*2px solid currentColor/)
   assert.ok(!/outline\s*:\s*(none|0)/i.test(STYLE))
+})
+
+// ---- The brief of a started chat (start-a-story Requirement 4, criterion 9) ----
+// Validates: Requirements 4.7, 4.9, 9.2, 9.3
+const briefView = (brief, over = {}) => chatsView({ chats: withChat('k1', { state: 'needs-you' }), ui: { briefs: { k1: brief } }, ...over })
+
+test('while the brief is sent the card keeps its link and its state and says so with a status role, and has no button', () => {
+  const li = theCard(renderWith(briefView({ kind: 'sending' })))
+  assert.equal(li.props['data-mode'], 'chat')
+  assert.equal(links(li)[0].props.href, '/chat?sid=k1')
+  assert.deepEqual(findAll(li, (n) => n.props.className === 'eb-chat-state').map(textOf), ['Needs you'])
+  assert.deepEqual(findAll(li, (n) => n.props.role === 'status').map(textOf), ['Sending the brief…'])
+  assert.equal(buttons(li).length, 0)
+})
+
+test('a brief that was not sent: the card keeps its link and state, shows the text and the reason, and a Send the brief again button', () => {
+  const { calls, actions } = recorder()
+  const li = theCard(renderWith(briefView({ kind: 'failed', reason: 'API 500: boom' }), actions))
+  assert.equal(links(li)[0].props.href, '/chat?sid=k1')
+  assert.deepEqual(findAll(li, (n) => n.props.className === 'eb-chat-state').map(textOf), ['Needs you'])
+  assert.deepEqual(findAll(li, (n) => n.props.role === 'status').map(textOf), ['The brief was not sent'])
+  assert.ok(textOf(li).includes('API 500: boom'))
+  assert.deepEqual(buttons(li).map(labelOf), ['Send the brief again'])
+  assert.equal(findAll(li, (n) => n.props.role === 'alert').length, 0)
+  buttons(li)[0].props.onClick()
+  assert.deepEqual(calls, [['sendBrief', 'k1']])
+})
+
+test('the button of a failed brief sits in the controls layer above the stretched link', () => {
+  const li = theCard(renderWith(briefView({ kind: 'failed', reason: 'x' })))
+  const controls = findAll(li, (n) => n.props.className === 'eb-chat-controls')
+  assert.equal(controls.length, 1)
+  assert.deepEqual(buttons(controls[0]).map(labelOf), ['Send the brief again'])
+  assert.match(STYLE, /\.eb-question,\s*\.eb-chat-controls\s*\{[^}]*position:\s*relative[^}]*z-index:\s*1/)
+})
+
+test('a failed brief with no reason shows the text and the button only', () => {
+  const li = theCard(renderWith(briefView({ kind: 'failed', reason: '' })))
+  assert.deepEqual(findAll(li, (n) => n.props.role === 'status').map(textOf), ['The brief was not sent'])
+  assert.deepEqual(buttons(li).map(labelOf), ['Send the brief again'])
+})
+
+test('a card with no brief note, or whose chat is missing, shows no brief text', () => {
+  for (const view of [chatsView({ chats: withChat('k1') }), chatsView({ chats: missing(60000), ui: { briefs: { k1: { kind: 'failed', reason: 'x' } } } })]) {
+    const li = theCard(renderWith(view))
+    assert.ok(!/Sending the brief|The brief was not sent|Send the brief again/.test(textOf(li)))
+  }
+})
+
+test('the reason of a failed brief is a literal child, never HTML', () => {
+  const markup = '<img src=x onerror=alert(1)> **bold**'
+  const tree = renderWith(briefView({ kind: 'failed', reason: markup }))
+  assert.ok(textOf(theCard(tree)).includes(markup))
+  assert.equal(findAll(tree, (n) => n.type === 'img' || n.type === 'script').length, 0)
+  for (const node of elements(tree)) assert.equal(node.props.dangerouslySetInnerHTML, undefined)
+})
+
+test('the brief states keep the board\'s structure: one title, no heading added, only status and group roles', () => {
+  for (const brief of [{ kind: 'sending' }, { kind: 'failed', reason: 'x' }]) {
+    const view = briefView(brief)
+    const tree = renderWith(view)
+    assertStructure(tree, `brief ${brief.kind}`, { cardControls: true })
+    assert.deepEqual(headingLevels(tree), headingLevels(renderBoard(h, { ...view, chats: undefined, ui: undefined })))
+    for (const role of rolesOf(tree)) assert.ok(['status', 'group'].includes(role), role)
+  }
 })
