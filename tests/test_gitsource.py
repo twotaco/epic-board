@@ -98,6 +98,16 @@ class ReadSnapshotTests(Repos):
         self.assertIsNone(snap.fetched)
         self.assertIsNone(snap.fetch_error)
 
+    def test_first_read_follows_origin_head_and_falls_back_to_main(self):
+        git(self.seed, "checkout", "-q", "-b", "trunk")
+        git(self.seed, "push", "-q", "origin", "trunk")
+        git(self.checkout, "fetch", "-q", "origin")
+        git(self.checkout, "remote", "set-head", "origin", "trunk")
+        self.assertEqual((read_snapshot(self.checkout).branch, read_snapshot(self.checkout).ref),
+                         ("trunk", "origin/trunk"))
+        git(self.checkout, "remote", "set-head", "origin", "-d")
+        self.assertEqual(read_snapshot(self.checkout).branch, "main")
+
     def test_no_remote_branch_is_ref_unreadable_without_fetch_reason(self):
         bare = os.path.join(self.root, "lonely")
         subprocess.run(["git", "init", "-q", bare], check=True)
