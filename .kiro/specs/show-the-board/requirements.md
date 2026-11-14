@@ -2,7 +2,7 @@
 
 ## Introduction
 
-This story is the second of the Epic Board epic (`docs/epics/epic-board.md`). It builds on "Read the plan from main" (`.kiro/specs/read-the-plan-from-main/`, called "the earlier spec" below), whose backend returns the plan as data. This story replaces the placeholder page (`ui/index.mjs`) with a read-only board, and changes the backend so that the page never waits on git. The next story, "Start a story", adds the Start button and the "Started" mark on cards.
+This story is the second of the Epic Board epic (`docs/epics/epic-board.md`). It builds on "Read the plan from main" (`.kiro/specs/read-the-plan-from-main/`, called "the earlier spec" below), whose backend returns the plan as data. This story replaces the placeholder page (`ui/index.mjs`) with a read-only board, and changes the backend so that the page never waits on git. The next story, "Start a story" (`.kiro/specs/start-a-story/`), adds the question on a card that starts a conductor, the state of that conductor's chat on the card, and the link to the chat.
 
 The board shows every card of the plan in three columns: Planned, In progress and Done. Inside a column the cards are grouped under their epic, with "No epic" last. Each card shows its name, its description, its task progress and its spec folder name.
 
@@ -25,8 +25,8 @@ Four criteria of the earlier spec were edited in place because this story change
 #### Acceptance Criteria
 
 1. WHEN the page is opened at the app's route THEN the page SHALL show the board in place of the placeholder, and `app.json` SHALL keep its route and backend declarations.
-2. THE page SHALL make no request other than reads of the backend's `plan` route, and SHALL use the host's React with no added dependency or build step.
-3. THE page SHALL have no Start button, no "Started" mark and no interactive element other than the unreadable-files disclosure (Requirement 9). An interactive element is any link, button, input or other control that responds to click or keyboard activation.
+2. THE page SHALL make no request other than reads of the backend's `plan` route and the requests that `start-a-story` Requirements 4, 5, 6 and 8 describe, and SHALL use the host's React with no added dependency or build step.
+3. THE page SHALL have no interactive element other than the unreadable-files disclosure (Requirement 9) and the card controls that `start-a-story` Requirements 2, 7 and 8 describe. An interactive element is any link, button, input or other control that responds to click or keyboard activation.
 4. THE page SHALL show every text it takes from the plan, such as names, descriptions, folder names, messages, settings and problems, as literal text and not as HTML or Markdown.
 
 ### Requirement 2: Columns and grouping

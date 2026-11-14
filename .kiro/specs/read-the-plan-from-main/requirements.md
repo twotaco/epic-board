@@ -108,7 +108,7 @@ Statuses are `planned`, `in progress` and `done`.
 1. WHEN the plan is returned THEN it SHALL contain one group per epic, in order of epic file name, each holding its cards in the order the stories are written.
 2. WHEN a spec is listed in no epic, or a story comes from `standalone.md` THEN its card SHALL be in a group named "No epic". A spec SHALL appear there once, however many times `standalone.md` lists it, and the cards SHALL be ordered by name, ignoring case.
 3. WHEN the "No epic" group would have no cards THEN the plan SHALL omit it.
-4. WHEN a card is returned THEN it SHALL contain its name, its status, its spec folder name or none, its task counts, its description (`show-the-board` Requirement 4), and the name of the epic it is under or none. The task counts SHALL be none only for a card with no spec, or for a spec whose `tasks.md` exists but cannot be read.
+4. WHEN a card is returned THEN it SHALL contain its name, its status, its spec folder name or none, its task counts, its description (`show-the-board` Requirement 4), the name of the epic it is under or none, and its `id`. The task counts SHALL be none only for a card with no spec, or for a spec whose `tasks.md` exists but cannot be read. The `id` SHALL be the file name of the epic the card is under, a `#`, and the card's name, for example `epic-board.md#Start a story`, or a `#` and the card's name for a card in the "No epic" group. The `id` does not change when a story's spec is merged to main, because a story's name and epic stay the same.
 
 ### Requirement 9
 
