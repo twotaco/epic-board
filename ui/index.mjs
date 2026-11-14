@@ -15,6 +15,9 @@ const COLUMNS = [
 // Groups and cards keep the plan's order. A card listed under two epics is in
 // two groups and counts twice. A group with no epic is named "No epic" and
 // keyed "no-epic"; an epic group is keyed by its file name.
+// A group's Filter_Key: its epic's file name, or "no-epic". Shared by columnsOf and the filter.
+const groupKey = (group) => (group.epic ? group.epic.file : 'no-epic')
+
 export function columnsOf(plan) {
   const planGroups = Array.isArray(plan?.groups) ? plan.groups : []
   return COLUMNS.map(({ key, title }) => {
@@ -24,7 +27,7 @@ export function columnsOf(plan) {
       const cards = (group.cards ?? []).filter((card) => card.status === key)
       if (cards.length === 0) continue
       groups.push({
-        key: group.epic ? group.epic.file : 'no-epic',
+        key: groupKey(group),
         name: group.epic ? group.epic.name : null,
         cards,
       })
@@ -100,8 +103,50 @@ export function reduce(state, result) {
   }
 }
 
+// ---- The epic filter ----
+
+export const FILTER_STORAGE_KEY = 'epic-board.filter'
+
+// The dropdown's options: All epics, then one per group that has a card, in the plan's order.
+export function filterOptions(plan) {
+  const groups = Array.isArray(plan?.groups) ? plan.groups : []
+  return [
+    { key: 'all', label: 'All epics' },
+    ...groups
+      .filter((group) => Array.isArray(group.cards) && group.cards.length > 0)
+      .map((group) => ({ key: groupKey(group), label: group.epic ? group.epic.name : 'No epic' })),
+  ]
+}
+
+// The plan narrowed to one group. `all`, or a key no group has, gives the plan itself. Never mutates.
+export function filterPlan(plan, key) {
+  if (key === 'all' || !Array.isArray(plan?.groups)) return plan
+  const groups = plan.groups.filter((group) => groupKey(group) === key)
+  return groups.length === 0 ? plan : { ...plan, groups }
+}
+
+// The saved choice, or 'all' when there is no storage, the read throws or the value is not text.
+export function loadChoice(storage) {
+  try {
+    const value = storage?.getItem(FILTER_STORAGE_KEY)
+    return typeof value === 'string' && value !== '' ? value : 'all'
+  } catch {
+    return 'all'
+  }
+}
+
+// Saves the choice. Gives false, and throws nothing, when there is no storage or the write fails.
+export function saveChoice(storage, key) {
+  try {
+    storage.setItem(FILTER_STORAGE_KEY, key)
+    return true
+  } catch {
+    return false
+  }
+}
+
 // What the page shows for a state. `kind` is 'loading', 'unreachable', 'error' or 'plan'.
-export function viewOf(state) {
+export function viewOf(state, filterKey = 'all') {
   const { content, unreachable } = state
   if (content === null) return { kind: unreachable ? 'unreachable' : 'loading' }
   if (content.type === 'error') {
@@ -118,6 +163,8 @@ export function viewOf(state) {
   const groups = Array.isArray(plan.groups) ? plan.groups : []
   const empty = !groups.some((group) => Array.isArray(group.cards) && group.cards.length > 0)
   const age = ageText(plan.age_seconds)
+  const options = filterOptions(plan)
+  const key = options.some((option) => option.key === filterKey) ? filterKey : 'all'
   return {
     kind: 'plan',
     plan,
@@ -128,7 +175,8 @@ export function viewOf(state) {
     failedFetch: plan.fetch?.ok === false ? { reason: plan.fetch.reason ?? '', ageText: age } : null,
     unreachableNotice: unreachable,
     empty,
-    columns: empty ? null : columnsOf(plan),
+    filter: { key, options },
+    columns: empty ? null : columnsOf(filterPlan(plan, key)),
     problems: Array.isArray(plan.problems) ? plan.problems : [],
   }
 }

@@ -10,28 +10,28 @@ Group 1 is the page's logic, including saving and restoring the choice, with no 
 
 ## Tasks
 
-- [ ] 1. Page logic: options, filter and view
-  - [ ] 1.1 Add `filterOptions` and `filterPlan` to `ui/index.mjs`
+- [x] 1. Page logic: options, filter and view
+  - [x] 1.1 Add `filterOptions` and `filterPlan` to `ui/index.mjs`
     - Export both, as the design says. `filterPlan` never mutates its argument and returns the plan itself for `all` or for a key no group has
     - Group keys are computed as `columnsOf` computes them, in one shared helper so the two cannot drift apart
     - Do not change `columnsOf`, `progressOf` or any chat function
     - _Requirements: 1.2, 1.3, 2.1, 2.2, 2.6_
-  - [ ] 1.2 Give `viewOf` a second parameter `filterKey = 'all'`
+  - [x] 1.2 Give `viewOf` a second parameter `filterKey = 'all'`
     - A `plan` view gains `filter: {key, options}` and builds `columns` from `filterPlan`; `empty`, `problems` and `failedFetch` come from the whole plan
     - A stored key that is not among the options gives the effective key `all`
     - Check that every existing call of `viewOf` and every existing test passes unchanged
     - _Requirements: 1.4, 2.3, 2.4, 2.5, 3.1, 3.2, 3.3_
-  - [ ] 1.3 Add `loadChoice` and `saveChoice` to `ui/index.mjs`
+  - [x] 1.3 Add `loadChoice` and `saveChoice` to `ui/index.mjs`
     - Export `FILTER_STORAGE_KEY` (`'epic-board.filter'`), `loadChoice(storage)` and `saveChoice(storage, key)` as the design says: neither throws, neither reads `window`, a missing storage, a throwing call or a non-text value gives `all` on a read and `false` on a write
     - _Requirements: 3.5, 3.6, 3.8_
-  - [ ] 1.4 Write `tests/ui/filter.test.mjs`
+  - [x] 1.4 Write `tests/ui/filter.test.mjs`
     - Cases for `filterOptions`: order, a group with no card skipped, "No epic" last, two epics with one name, no groups
     - Cases for `filterPlan`: `all`, one epic, "No epic", an unknown key, no mutation, card `id`s and chat-relevant fields kept, a spec under two epics appearing once
     - Cases for `viewOf`: counts per column under a filter, a column with no card, the key falling back to `all`, `empty` ignoring the filter, problems and notices not filtered
     - One `forSeeds` property: for random plans and keys, the filtered cards are exactly the chosen group's cards and `all` equals the unfiltered columns
     - Storage tests with a fake storage and a throwing one: `save: saveChoice writes the key under epic-board.filter`, `save: all is saved too`, `save: a throwing setItem does not throw`, `restore: loadChoice returns the saved key`, `restore: nothing saved gives all`, `restore: no storage gives all`, `restore: a throwing getItem gives all`, `restore: a non-text value gives all`, `fallback: a saved epic missing from the plan shows all epics and resets the Saved_Choice`
     - _Requirements: 1.2, 1.3, 1.4, 2.1, 2.2, 2.3, 2.4, 2.5, 2.6, 3.2, 3.5, 3.6, 3.7, 3.8_
-  - [ ] 1.5 Run the tests and report the counts
+  - [x] 1.5 Run the tests and report the counts
     - Run `python3 -m unittest discover -s tests -t .` and report run, passed and skipped. `tests/test_ui.py` runs the page tests with Node; report it as skipped when Node is missing, not as a pass
     - _Requirements: 4.3_
 
