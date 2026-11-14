@@ -191,6 +191,7 @@ Group 1 is all backend and changes nothing the page uses except an added `id` on
 - Group 3 is the one that brings the board story's checks in line with the edited criteria 1.2 and 1.3 of that spec; no file of the earlier specs is ticked, and their requirements were edited in place before this story's tasks (see "Edits to earlier specs and checks" in the design)
 - No task is optional: every task checks a requirement of this spec
 - The open questions in the design are for the owner; the host-dependent ones are checked in 4.2
+- Requirement 7 (criteria 1, 5 and 6) and Requirement 6, criterion 6 were changed by `work-in-the-chat`, whose tasks build them. The ticked tasks of groups 3 and 5 describe the link as it was, and are not reopened
 - Group 5 comes from using the board: `POST /api/chat` answers only when the conductor's turn ends, so a turn waiting for a tool approval left the card on "Starting…" with no link. Requirement 4 (criteria 4 to 7 and the new 9), the design's start sequence and Property 7 changed with it; Requirement 1.3 of the board spec now names Requirement 4 as one of the places card controls are defined. The briefs of Requirement 3 changed in the same group: a new spec's story is set to in progress, and a story whose last task is ticked is set to done in the same pull request (5.7)
 
 ## Task Dependency Graph
