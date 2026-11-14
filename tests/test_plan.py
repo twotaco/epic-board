@@ -89,7 +89,7 @@ class PlanTests(unittest.TestCase):
         self.assertEqual(groups[0]["cards"][0]["tasks"], None)
         self.assertEqual(groups[0]["cards"][0]["status"], "planned")
 
-    def test_every_card_has_the_six_fields_and_tasks_is_none_only_without_a_readable_tasks_file(self):
+    def test_every_card_has_the_seven_fields_and_tasks_is_none_only_without_a_readable_tasks_file(self):
         groups, _ = build_plan(Memory({
             ".kiro/specs/ok/tasks.md": "- [x] 1\n",
             ".kiro/specs/none/design.md": "x",
@@ -100,7 +100,7 @@ class PlanTests(unittest.TestCase):
         cards = {c["name"]: c for g in groups for c in g["cards"]}
         self.assertEqual(len(cards), 4)
         for found in cards.values():
-            self.assertEqual(set(found), {"name", "status", "spec", "tasks", "description", "epic"})
+            self.assertEqual(set(found), {"name", "status", "spec", "tasks", "description", "epic", "id"})
         self.assertEqual(cards["Ok"]["tasks"], {"done": 1, "total": 1})
         self.assertEqual(cards["none"]["tasks"], {"done": 0, "total": 0})
         self.assertIsNone(cards["none"]["epic"])
@@ -241,6 +241,61 @@ class DescriptionTests(unittest.TestCase):
         self.assertEqual(len(groups), 1)
         self.assertEqual(groups[0]["epic"]["name"], "E")
         self.assertEqual(described(groups[0]), [("S", "The epic's words.")])
+
+
+def ids(group):
+    return [c["id"] for c in group["cards"]]
+
+
+class CardIdTests(unittest.TestCase):
+    """The card `id` (first spec, Requirement 8, criterion 4): epic file, `#`, name."""
+
+    def test_epic_card_with_and_without_a_spec(self):
+        groups, _ = build_plan(Memory({
+            ".kiro/specs/s/tasks.md": "- [ ] 1\n",
+            "docs/epics/epic-board.md": "# Epic Board\n## Stories\n- [Start a story](../../.kiro/specs/s/) — planned\n- Later idea — planned\n",
+        }))
+        self.assertEqual(ids(groups[0]), ["epic-board.md#Start a story", "epic-board.md#Later idea"])
+        self.assertIsNone(groups[0]["cards"][1]["spec"])
+
+    def test_no_epic_cards_start_with_the_hash(self):
+        groups, _ = build_plan(Memory({
+            ".kiro/specs/solo-spec/tasks.md": "- [ ] 1\n",
+            "docs/epics/standalone.md": "## Stories\n- Loose idea — planned\n",
+        }))
+        self.assertIsNone(groups[0]["epic"])
+        self.assertEqual(ids(groups[0]), ["#Loose idea", "#solo-spec"])
+
+    def test_spec_in_two_epics_has_two_ids(self):
+        groups, _ = build_plan(Memory({
+            ".kiro/specs/s/tasks.md": "- [ ] 1\n",
+            "docs/epics/a.md": "# A\n## Stories\n- [S](../../.kiro/specs/s/) — planned\n",
+            "docs/epics/b.md": "# B\n## Stories\n- [S](../../.kiro/specs/s/) — planned\n",
+        }))
+        self.assertEqual((ids(groups[0]), ids(groups[1])), (["a.md#S"], ["b.md#S"]))
+
+    def test_id_is_the_same_before_and_after_the_story_gains_its_spec(self):
+        epic = "# E\n## Stories\n- [Start a story](../../.kiro/specs/start-a-story/) — planned\n"
+        before, _ = build_plan(Memory({"docs/epics/e.md": epic}))
+        after, _ = build_plan(Memory({
+            "docs/epics/e.md": epic,
+            ".kiro/specs/start-a-story/tasks.md": "- [x] 1\n- [ ] 2\n",
+        }))
+        self.assertIsNone(before[0]["cards"][0]["spec"])
+        self.assertEqual(after[0]["cards"][0]["spec"], "start-a-story")
+        self.assertEqual(ids(before[0]), ids(after[0]))
+        self.assertEqual(ids(after[0]), ["e.md#Start a story"])
+
+    def test_every_card_has_an_id(self):
+        groups, _ = build_plan(Memory({
+            ".kiro/specs/a/tasks.md": "- [ ] 1\n",
+            ".kiro/specs/b/design.md": "x",
+            "docs/epics/e.md": "# E\n## Stories\n- [A](../../.kiro/specs/a/) — done\n- Ghost — in progress\n",
+        }))
+        for group in groups:
+            for item in group["cards"]:
+                self.assertIsInstance(item["id"], str)
+                self.assertTrue(item["id"].endswith("#" + item["name"]))
 
 
 if __name__ == "__main__":

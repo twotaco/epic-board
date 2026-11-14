@@ -56,6 +56,80 @@ class LoadRepositoryTests(unittest.TestCase):
             self.assertEqual(error["code"], "repository_not_configured")
 
 
+class LoadFolderTests(unittest.TestCase):
+    def setUp(self):
+        self.dir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.dir, True)
+
+    def write_config(self, text):
+        with open(os.path.join(self.dir, "config.json"), "w") as f:
+            f.write(text)
+
+    def load(self, **env):
+        return server.load_folder(env, self.dir)
+
+    def test_environment_value(self):
+        self.assertEqual(self.load(EPIC_BOARD_FOLDER=" f_8c1 "), ("f_8c1", None))
+
+    def test_file_value(self):
+        self.write_config('{"repository": "/r", "folder_id": "f_file"}')
+        self.assertEqual(self.load(), ("f_file", None))
+
+    def test_environment_wins_over_file(self):
+        self.write_config('{"folder_id": "f_file"}')
+        self.assertEqual(self.load(EPIC_BOARD_FOLDER="f_env"), ("f_env", None))
+
+    def test_empty_environment_uses_file(self):
+        self.write_config('{"folder_id": "f_file"}')
+        self.assertEqual(self.load(EPIC_BOARD_FOLDER=""), ("f_file", None))
+
+    def test_nothing_set_is_not_set_and_not_an_error(self):
+        self.assertEqual(self.load(), (None, None))
+        self.write_config('{"repository": "/r"}')
+        self.assertEqual(self.load(), (None, None))
+
+    def test_blank_environment_does_not_fall_through(self):
+        self.write_config('{"folder_id": "f_file"}')
+        folder, reason = self.load(EPIC_BOARD_FOLDER="   ")
+        self.assertIsNone(folder)
+        self.assertIn("EPIC_BOARD_FOLDER", reason)
+
+    def test_bad_folder_id_in_the_file(self):
+        for text in ('{"folder_id": 3}', '{"folder_id": ""}', '{"folder_id": "  "}', '{"folder_id": null}',
+                     '{"folder_id": ["a"]}', '{"folder_id": "%s"}' % ("x" * 201)):
+            self.write_config(text)
+            folder, reason = self.load()
+            self.assertIsNone(folder, text)
+            self.assertIn("folder_id", reason)
+
+    def test_unreadable_config_gives_no_folder_with_a_reason_and_never_raises(self):
+        for text in ("not json", "[]", '"x"'):
+            self.write_config(text)
+            folder, reason = self.load()
+            self.assertIsNone(folder, text)
+            self.assertIn("config.json", reason)
+
+    def test_does_not_change_the_repository_setting(self):
+        self.write_config('{"repository": "/from/file", "folder_id": 3}')
+        self.assertEqual(server.load_repository({}, self.dir), ("/from/file", None))
+        self.assertIsNone(self.load()[0])
+
+
+class DataDirTests(unittest.TestCase):
+    def test_uses_home_and_app_name(self):
+        self.assertEqual(server.data_dir({"KIROCREW_HOME": "/h", "KIROCREW_APP_NAME": "epic-board"}),
+                         "/h/apps/epic-board/data")
+
+    def test_defaults(self):
+        self.assertEqual(server.data_dir({}), os.path.join(os.path.expanduser("~"), ".kiro", "crew", "apps", "epic-board", "data"))
+        self.assertEqual(server.data_dir({"KIROCREW_HOME": "", "KIROCREW_APP_NAME": ""}), server.data_dir({}))
+
+    def test_a_name_that_could_name_a_path_is_not_used(self):
+        for name in ("..", ".", "a/b", "../x", "a\\b", "a b"):
+            self.assertEqual(server.data_dir({"KIROCREW_HOME": "/h", "KIROCREW_APP_NAME": name}),
+                             "/h/apps/epic-board/data", name)
+
+
 class ServeTests(unittest.TestCase):
     def setUp(self):
         self.root = tempfile.mkdtemp()

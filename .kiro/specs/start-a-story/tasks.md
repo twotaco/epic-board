@@ -10,49 +10,49 @@ Group 1 is all backend and changes nothing the page uses except an added `id` on
 
 ## Tasks
 
-- [ ] 1. Backend: card ids, settings, signature, brief, store and routes
-  - [ ] 1.1 Add `id` to every card in `backend/plan.py`
+- [x] 1. Backend: card ids, settings, signature, brief, store and routes
+  - [x] 1.1 Add `id` to every card in `backend/plan.py`
     - Add `add_ids(groups)` and call it last in `build_plan`: `f"{epic['file']}#{card['name']}"` for a group with an epic, `f"#{card['name']}"` for the "No epic" group
     - Do not change `card()`, `story_card()` or their callers
     - Add cases to `PlanTests` in `tests/test_plan.py`: an epic card, a card with no spec, a "No epic" card, a spec listed in two epics (two different ids), and the same id before and after a story gains its spec (the story's name and epic are unchanged)
     - Check that the existing tests in `tests/test_plan.py` still pass unchanged
     - _Requirements: first spec 8.4_
-  - [ ] 1.2 Write `backend/proxyauth.py` and `tests/test_proxyauth.py`
+  - [x] 1.2 Write `backend/proxyauth.py` and `tests/test_proxyauth.py`
     - `verify(header, *, method, target, body, secret, now)` as the design says: `<digits>:<hex>`, the message `timestamp:method:target:sha256(body)`, HMAC-SHA256, within 60 seconds, `hmac.compare_digest` on bytes encoded with `surrogatepass`; any malformed input gives `False` and never raises
     - Test with signatures computed in the test: valid; one second inside and outside the window, in the past and the future; wrong method; wrong target (with a query); altered body; empty body; empty secret; empty header; no colon; non-digit timestamp; empty signature; a signature with a non-ASCII character or a lone surrogate
     - _Requirements: 5.7_
-  - [ ] 1.3 Add `load_folder` and `data_dir` to `backend/server.py`
+  - [x] 1.3 Add `load_folder` and `data_dir` to `backend/server.py`
     - `load_folder(environ, app_dir)` returns `(folder_id or None, reason or None)` with the first-source-wins rule of Requirement 1.1: `EPIC_BOARD_FOLDER`, then the `folder_id` of `config.json`; a non-text or blank value is "not set" with a reason and does not fall through; it never raises and does not change `load_repository`
     - `data_dir(environ)` returns `<KIROCREW_HOME>/apps/<KIROCREW_APP_NAME>/data` with the defaults `~/.kiro/crew` and `epic-board`
     - Add tests to `tests/test_server.py` in a new class (leave `LoadRepositoryTests` unchanged): each source, both set (environment wins), a bad environment value not falling through, a bad `folder_id`, an unreadable `config.json`, no setting, and the data folder with and without the two environment variables
     - _Requirements: 1.1, 1.2, 1.4_
-  - [ ] 1.4 Write `slugify`, `build_brief` and `find_card` in `backend/chats.py`
+  - [x] 1.4 Write `slugify`, `build_brief` and `find_card` in `backend/chats.py`
     - `slugify(name, taken)` as Requirement 3.5 and the design say
     - `build_brief(card, epic_file, branch)` builds the two templates of the design, with the story's name as `json.dumps(name[:200], ensure_ascii=False)`, the epic line or "none, this story has no epic", the folder name from `slugify` for a card with no spec (`taken` is passed in), and the shared rules
     - `find_card(plan, card_id)` returns the epic file (or none) and the card
     - Write `tests/test_chats.py` with cases for the templates: the no-spec text and the with-spec text each hold the lines of Requirement 3 (branch, one pull request, never merge, never push to the main branch, no auto-merge, report the address and stop, ask when blocked); no epic omits the epic-page step; a story name with quotes, a line break, non-ASCII text and 500 characters; a card with `description` text that must not appear; the length of each template measured and every inserted name at 255 characters staying under 6,000; `slugify` cases (spaces, punctuation, non-ASCII only, 80 characters, a taken name once and twice); `find_card` for an epic card, a "No epic" card and a missing id
     - _Requirements: 3.1, 3.2, 3.3, 3.4, 3.5_
-  - [ ] 1.5 Write property tests for the brief and the folder name in `tests/test_chats_properties.py`
+  - [x] 1.5 Write property tests for the brief and the folder name in `tests/test_chats_properties.py`
     - **Property 4: The brief depends only on its inputs and always says never to merge**
     - **Property 5: A spec folder name is well formed and unused**
     - Seeded `random.Random` generators for cards (names with any characters, with and without a spec and a description), epic files and branches; at least 100 iterations each; print the seed on failure
     - **Validates: Requirements 3.1, 3.2, 3.3, 3.4, 3.5**
-  - [ ] 1.6 Write `ChatStore` in `backend/chats.py`
+  - [x] 1.6 Write `ChatStore` in `backend/chats.py`
     - `ChatStore(data_dir, new_name, clock)` with `started()`, `reserve(card_id)`, `mark_started(name, key)` and `remove(name)`, one lock, load and validate on every call, write through a temporary file in the data folder with `flush`, `os.fsync` and `os.replace`, create the folder on the first write only, `ChatError` with the codes and statuses of the design; `default_new_name()` is `epic-board-` and `secrets.token_hex(4)`, redrawn while the name is in the file
     - `reserve` returns the existing record for a card with a `reserved` record, raises `chat_exists` for a `started` one; `mark_started` is idempotent for the same key and raises `chat_exists` for another key and `chat_not_found` for an unknown name
     - Tests in `tests/test_chats.py` on a temporary folder: the record fields; a missing file; one record per card; a restart (a new store on the same folder); an unreadable file (not JSON, wrong shape, duplicate `card_id`, duplicate `name`, a `started` record with no key) raises `chats_unreadable` on every call and is left byte for byte as it was; a leftover temporary file does not matter; the folder is not created by a read; a failure to write leaves the old file
     - _Requirements: 5.1, 5.2, 5.3, 5.5, 5.8_
-  - [ ] 1.7 Write property test for the store in `tests/test_chats_properties.py`
+  - [x] 1.7 Write property test for the store in `tests/test_chats_properties.py`
     - **Property 3: The store never holds two records for a card or a name, and survives a reload**
     - Seeded sequences of `reserve`, `mark_started`, `remove` and restart, against a model; check the invariants after every step
     - **Validates: Requirements 5.1, 5.2, 5.3**
-  - [ ] 1.8 Add `ChatService` and the `/chats` routes to `backend/server.py`
+  - [x] 1.8 Add `ChatService` and the `/chats` routes to `backend/server.py`
     - `ChatService(store, folder, reason, secret, holder, clock)` with `handle(method, path, headers, body_bytes)` doing, in this order, the secret check (503), the signature check against the raw body (401), the body size and form (400), then the route; the four routes, the answers and the codes of the design's tables; the order of the checks in `POST /chats`: folder, store, plan, card, status, reservation
     - `do_GET`, `do_POST` and `do_DELETE` hand a path that matches `/chats(/<name>(/started)?)?$` to `ChatService`; `do_POST` answers 400 at once for a missing, non-numeric or oversized `Content-Length`; `plan`, `health` and the 404 do not change; `make_server(port, holder, error, config_path, chats=None)` takes the service
     - In `__main__`, read the folder and the secret (`KIROCREW_PROXY_SECRET`), build the store from `data_dir`, and pass the service to `make_server`; when there is a configuration error, build the service with no holder, so that `GET /chats`, `DELETE` and `started` still work on the records and `POST /chats` answers `plan_not_ready`; no git runs
     - Tests in `tests/test_chats.py`: a signing helper; every code of the table; a reserve for each card state (unknown, Done, with a started chat, with a reserved record, planned with no spec, in progress with a spec); the check order; a refusal changing no record; the body limit; unknown fields; `started` and `DELETE` for known and unknown names; `plan_not_ready` for a pending and an error holder; no secret; one HTTP test on port 0 with `GET`, `POST` and `DELETE` through `make_server`, `plan` and `health` unsigned and unchanged, and no git command run
     - _Requirements: 1.1, 4.2, 5.4, 5.5, 5.6, 5.7, 5.8, 5.9_
-  - [ ] 1.9 Run the tests
+  - [x] 1.9 Run the tests
     - Run `python3 -m unittest discover -s tests -t .` and report the counts run, passed and skipped
     - _Requirements: 1.1, 1.2, 1.4, 3.1, 3.2, 3.3, 3.4, 3.5, 4.2, 5.1, 5.2, 5.3, 5.4, 5.5, 5.6, 5.7, 5.8, 5.9_
 
