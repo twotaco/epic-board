@@ -131,6 +131,115 @@ export function viewOf(state) {
   }
 }
 
+// ---- Polling ----
+
+const REQUEST_TIMEOUT_MS = 10000
+
+// The plan request loop. Everything it touches is injected:
+//   request(signal)   -> promise of {status, body}; rejects on a connection failure or invalid JSON
+//   hidden()          -> true while the page is hidden
+//   setTimer(fn, ms)  -> handle; clearTimer(handle) clears it (used for both the 10-second abort
+//                        timer and the next-request timer)
+//   onResult(result)  -> receives what `classify` returns, or {kind: 'failure'} for a rejected,
+//                        malformed or aborted request
+//   createAbortController() -> optional; defaults to `new AbortController()`
+// At most one request is in flight. Returns {start, visible, stop}.
+export function createPoller({
+  request,
+  hidden,
+  setTimer,
+  clearTimer,
+  onResult,
+  createAbortController = () => new AbortController(),
+}) {
+  let stopped = false
+  let inflight = null // {controller, abortTimer, settled}
+  let nextTimer = null
+
+  function clearNext() {
+    if (nextTimer !== null) {
+      clearTimer(nextTimer)
+      nextTimer = null
+    }
+  }
+
+  // Ends `current` with `result`. Anything that settles after the request ended, or after
+  // `stop()`, is ignored.
+  function settle(current, result) {
+    if (current.settled || stopped) return
+    current.settled = true
+    clearTimer(current.abortTimer)
+    inflight = null
+    try {
+      onResult(result)
+    } finally {
+      if (!stopped) nextTimer = setTimer(onNextTimer, nextDelay(result))
+    }
+  }
+
+  function send() {
+    const controller = createAbortController()
+    const current = { controller, abortTimer: null, settled: false }
+    inflight = current
+    current.abortTimer = setTimer(() => {
+      if (current.settled || stopped) return
+      controller.abort()
+      settle(current, { kind: 'failure' })
+    }, REQUEST_TIMEOUT_MS)
+    let pending
+    try {
+      pending = Promise.resolve(request(controller.signal))
+    } catch {
+      pending = Promise.reject(new Error('request failed'))
+    }
+    pending.then(
+      (answer) => {
+        let result
+        try {
+          result = classify(answer.status, answer.body)
+        } catch {
+          result = { kind: 'failure' }
+        }
+        settle(current, result)
+      },
+      () => settle(current, { kind: 'failure' }),
+    )
+  }
+
+  function onNextTimer() {
+    nextTimer = null
+    if (stopped || inflight !== null || hidden()) return
+    send()
+  }
+
+  return {
+    start() {
+      if (stopped || inflight !== null) return
+      clearNext()
+      if (hidden()) return
+      send()
+    },
+    visible() {
+      if (stopped) return
+      clearNext()
+      if (inflight !== null) return
+      send()
+    },
+    stop() {
+      if (stopped) return
+      stopped = true
+      clearNext()
+      if (inflight !== null) {
+        const current = inflight
+        inflight = null
+        current.settled = true
+        clearTimer(current.abortTimer)
+        current.controller.abort()
+      }
+    },
+  }
+}
+
 // ---- The page ----
 
 // The level of the page title. Column headings are one level below it and group
