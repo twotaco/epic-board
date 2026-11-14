@@ -143,7 +143,7 @@ const httpError = (status, error = null) => Object.assign(new Error(`API ${statu
 // dependencies changed; unmount runs every cleanup. `fetch` is routed by URL: the plan route to
 // `page.fetch` (what the plan tests use), the backend's chats routes to `page.chatFetch`. Crew's client
 // is `page.gateway`, or none with `api: null`.
-function mount({ hidden = false, api } = {}) {
+function mount({ hidden = false, api, storage } = {}) {
   const clock = makeClock()
   const planFetch = makeFetch()
   const chatFetch = makeFetch()
@@ -175,6 +175,20 @@ function mount({ hidden = false, api } = {}) {
       hooks[index].reducer = reducer
       return [hooks[index].state, hooks[index].dispatch]
     },
+    useState(initial) {
+      const index = cursor
+      cursor += 1
+      if (hooks[index] === undefined) {
+        const slot = { state: typeof initial === 'function' ? initial() : initial }
+        slot.set = (value) => {
+          if (unmounted) return
+          slot.state = value
+          render()
+        }
+        hooks[index] = slot
+      }
+      return [hooks[index].state, hooks[index].set]
+    },
     useRef(initial) {
       const index = cursor
       cursor += 1
@@ -198,6 +212,8 @@ function mount({ hidden = false, api } = {}) {
     clearTimeout: clock.clearTimeout,
     now: () => clock.now(),
     useAppApi: () => (api === undefined ? gateway : api),
+    storage,
+    Select: null,
   })
   function render() {
     if (rendering) {
@@ -978,6 +994,127 @@ test('a start that finishes after the page is gone changes nothing', async () =>
   await flush()
   assert.equal(page.instance.renders, rendersBefore)
   assert.equal(page.chatFetch.calls.length, 2)
+})
+
+// ---- The epic filter ----
+
+const TWO = plan({
+  groups: [
+    PLAN.groups[0],
+    { epic: { file: 'two.md', name: 'Epic Two' }, cards: [{ id: 'two.md#Card Gamma', name: 'Card Gamma', description: '', status: 'planned', spec: 'gamma', tasks: { done: 0, total: 1 } }] },
+  ],
+})
+const ONLY_TWO = plan({ groups: [TWO.groups[1]] })
+const memoryStorage = (initial) => {
+  const map = new Map(initial ? [['epic-board.filter', initial]] : [])
+  const writes = []
+  return { map, writes, getItem: (k) => (map.has(k) ? map.get(k) : null), setItem: (k, v) => { writes.push(v); map.set(k, v) } }
+}
+const selectOf = (page) => findAll(page.tree(), (n) => n.type === 'select' && n.props['aria-label'] === 'Epic')[0]
+const choose = (page, key) => selectOf(page).props.onChange({ target: { value: key } })
+const pageWith = async (storage, body = TWO) => {
+  const page = mount({ storage })
+  page.fetch.answer(0, 200, body)
+  await flush()
+  return page
+}
+
+test('board: choosing an epic saves it', async () => {
+  const storage = memoryStorage()
+  const page = await pageWith(storage)
+  assert.match(page.text(), /Card Alpha/)
+  assert.match(page.text(), /Card Gamma/)
+  choose(page, 'two.md')
+  assert.doesNotMatch(page.text(), /Card Alpha/)
+  assert.match(page.text(), /Card Gamma/)
+  assert.equal(selectOf(page).props.value, 'two.md')
+  assert.deepEqual(storage.writes, ['two.md'])
+  choose(page, 'all')
+  assert.match(page.text(), /Card Alpha/)
+  assert.equal(storage.map.get('epic-board.filter'), 'all')
+})
+
+test('board: a saved epic is restored on load', async () => {
+  const storage = memoryStorage('two.md')
+  const page = await pageWith(storage)
+  assert.doesNotMatch(page.text(), /Card Alpha/)
+  assert.match(page.text(), /Card Gamma/)
+  assert.deepEqual(storage.writes, [], 'restoring writes nothing')
+})
+
+test('board: a missing saved epic falls back to all epics', async () => {
+  const storage = memoryStorage('gone.md')
+  const page = await pageWith(storage)
+  assert.match(page.text(), /Card Alpha/)
+  assert.equal(selectOf(page).props.value, 'all')
+  assert.deepEqual(storage.writes, ['all'])
+})
+
+test('board: nothing is drawn or reset before the first plan', async () => {
+  const storage = memoryStorage('two.md')
+  const page = mount({ storage })
+  assert.equal(selectOf(page), undefined)
+  assert.deepEqual(storage.writes, [])
+  page.fetch.answer(0, 200, TWO)
+  await flush()
+  assert.equal(selectOf(page).props.value, 'two.md')
+})
+
+test('board: a new plan keeps the choice; one without the epic goes to all and stays there', async () => {
+  const storage = memoryStorage()
+  const page = await pageWith(storage)
+  choose(page, 'two.md')
+  page.clock.advance(15000)
+  page.fetch.answer(1, 200, TWO)
+  await flush()
+  assert.equal(selectOf(page).props.value, 'two.md')
+  page.clock.advance(15000)
+  page.fetch.answer(2, 200, plan())
+  await flush()
+  assert.equal(selectOf(page).props.value, 'all')
+  assert.equal(storage.map.get('epic-board.filter'), 'all')
+  page.clock.advance(15000)
+  page.fetch.answer(3, 200, TWO)
+  await flush()
+  assert.equal(selectOf(page).props.value, 'all', 'the epic coming back does not reselect itself')
+})
+
+test('board: a failed plan poll keeps the filter working', async () => {
+  const page = await pageWith(memoryStorage())
+  page.clock.advance(15000)
+  page.fetch.fail(1)
+  await flush()
+  assert.match(page.text(), /Showing the plan from the last update/)
+  choose(page, 'two.md')
+  assert.doesNotMatch(page.text(), /Card Alpha/)
+  assert.match(page.text(), /Card Gamma/)
+})
+
+test('board: a chat poll leaves the choice alone and makes no write', async () => {
+  const storage = memoryStorage()
+  const page = await pageWith(storage)
+  choose(page, 'two.md')
+  const writes = storage.writes.length
+  page.chatFetch.answer(0, 200, chatsAnswer([]))
+  await flush()
+  assert.equal(selectOf(page).props.value, 'two.md')
+  assert.equal(storage.writes.length, writes)
+})
+
+test('board: a storage that throws still filters in memory', async () => {
+  const storage = { getItem() { throw new Error('blocked') }, setItem() { throw new Error('full') } }
+  const page = await pageWith(storage)
+  assert.equal(selectOf(page).props.value, 'all')
+  choose(page, 'two.md')
+  assert.doesNotMatch(page.text(), /Card Alpha/)
+  assert.equal(selectOf(page).props.value, 'two.md')
+})
+
+test('board: a plan with only epic two is shown with no reset when the saved epic is there', async () => {
+  const storage = memoryStorage('two.md')
+  const page = await pageWith(storage, ONLY_TWO)
+  assert.equal(selectOf(page).props.value, 'two.md')
+  assert.deepEqual(storage.writes, [])
 })
 
 // ---- The default export ----

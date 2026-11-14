@@ -60,7 +60,7 @@ function hostKit() {
 }
 ```
 
-`isComponent` is the test the chat design's `isChatPanel` uses, and the implementation has one function for both. `createBoard` reads `env.kit ?? hostKit()` inside the component on every render, as it reads `useAppApi` and `ChatPanel`, so importing the module needs no `window`. A `Btn` is a `forwardRef` object, which is why an object with `$$typeof` counts.
+`isComponent` is the test the chat design's `isChatPanel` uses, and the implementation has one function for both. The Filter by epic story (`.kiro/specs/filter-by-epic/`) already looks up `Select` in the same module, in its own `try`, with a native `select` as the fallback (its Requirement 1, criterion 5). That rule stays in that spec. The implementation makes its lookup go through `isComponent` and `hostKit`, so the page reads the module in one place, and `Select` is not one of this story's seven names. `createBoard` reads `env.kit ?? hostKit()` inside the component on every render, as it reads `useAppApi` and `ChatPanel`, so importing the module needs no `window`. A `Btn` is a `forwardRef` object, which is why an object with `$$typeof` counts.
 
 `renderBoard(h, view, actions, kit = {})` stays pure: it takes the kit as an argument, calls no hook, and with an empty kit draws exactly what the earlier specs draw, so the existing page tests keep testing the fallback path unchanged. The one icon, for the empty state, is looked up in `createBoard` as `window.__kirocrew_modules['lucide-react']?.Kanban` and passed in `view.icon` (`h(Kanban, {size: 40, 'aria-hidden': 'true'})`, the 40 pixels of `EmptyState`'s own icon box), or left out.
 
@@ -161,6 +161,7 @@ Edited in place, as the earlier stories did, because the rule moved. A requireme
 | Board spec, Requirement 8, criterion 3 | "Checking for updates…" is in the header with the plan age, not "next to" it |
 | Board spec, Requirement 10, criterion 1 | Colours are `currentColor`, `inherit` or a theme token, and the page's own greys live only in the fallbacks |
 | Board design, "Layout and theme", and the start design's paragraph on `STYLE` | The colour sentences say that the greys belong to the fallbacks and that colours are `currentColor` and theme tokens (task 3.5) |
+| Filter by epic spec, Requirement 1, criterion 1 | The dropdown is placed between the header and the columns, because the header is now `PageHeader` and no longer a "header line" |
 | Chat design, "Drawing" and "Styles" | The panel's "Close" is a `Btn` when the page has one, and the rule `.eb-panel-head button` applies only to the fallback; the mark of the open card is a ring and no padding change, because `Card`'s inset is in Tailwind classes the page cannot override |
 | Epic page | The story's line, linked, with its new description |
 

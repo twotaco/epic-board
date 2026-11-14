@@ -12,7 +12,7 @@ Group 1 is the kit lookup and the fallback marker, with no change to what the pa
 
 - [ ] 1. Page: the kit, the fallback marker and the style sheet
   - [ ] 1.1 Add the lookup to `ui/index.mjs`
-    - `isComponent(value)`, `pickKit(module)` and `hostKit()` as the design gives them; make `isChatPanel` of the chat story call `isComponent`, so there is one test
+    - `isComponent(value)`, `pickKit(module)` and `hostKit()` as the design gives them; make `isChatPanel` of the chat story and the lookup of `Select` of the Filter by epic story go through `isComponent` and `hostKit`, so there is one test and one reading of the module, with the rule of the Filter by epic spec unchanged
     - `renderBoard(h, view, actions, kit = {})` takes the kit and passes it down to the functions that draw a part; with an empty kit the tree is what it is today
     - `createBoard` reads `env.kit ?? hostKit()` on every render and passes it to `renderBoard`; it also looks up `window.__kirocrew_modules['lucide-react']?.Kanban` and passes the icon in the view
     - Nothing else in the file changes
