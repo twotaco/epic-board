@@ -2,7 +2,7 @@
 
 ## Overview
 
-The work is five task groups. Each group is one pull request on branch `story/show-the-board`, cut from the latest main after the previous group's pull request is merged. Each group lands green on its own and leaves the app working. Every group ends with a sub-task that runs the tests and reports the counts run, passed and skipped. Tick each task in this file in the same branch, and tick nothing in the earlier spec (`.kiro/specs/read-the-plan-from-main/`). The backend adds no dependency.
+The work is five task groups. Each group is one pull request on its own branch, named `story/show-the-board-g1` to `story/show-the-board-g5`, cut from the latest main after the previous group's pull request is merged. Each group lands green on its own and leaves the app working. Every group ends with a sub-task that runs the tests and reports the counts run, passed and skipped. Tick each task in this file in the same branch, and tick nothing in the earlier spec (`.kiro/specs/read-the-plan-from-main/`). The backend adds no dependency.
 
 The placeholder page (`ui/index.mjs`) stays in place until group 4 replaces it. Group 2 changes the backend answer (202 while nothing is held), so it also makes the smallest change that keeps the placeholder working. Group 3 only makes the module importable under Node and keeps the placeholder as its default export.
 
@@ -160,7 +160,7 @@ The placeholder page (`ui/index.mjs`) stays in place until group 4 replaces it. 
 - [x] 4. Page component
   - [x] 4.1 Add `createBoard(React)` to `ui/index.mjs`
     - Use `useReducer(reduce, initialState)` and `useEffect`; render a `<style>` element with `STYLE` and `renderBoard(h, viewOf(state))` inside one root element
-    - In the effect, create the poller with `request` as a GET of `/apps/epic-board/api/plan` (same origin, no cache, with the abort signal) resolving `{status, body}` and rejecting on a connection failure or invalid JSON, `hidden` as `() => document.hidden`, `setTimer` and `clearTimer` as `setTimeout` and `clearTimeout`, and `onResult` as `dispatch(classify(...))`
+    - In the effect, create the poller with `request` as a GET of `/apps/epic-board/api/plan` (same origin, no cache, with the abort signal) resolving `{status, body}` and rejecting on a connection failure or invalid JSON, `hidden` as `() => document.hidden`, `setTimer` and `clearTimer` as `setTimeout` and `clearTimeout`, and `onResult` as `dispatch(result)` (the poller has already classified the answer)
     - Add a `visibilitychange` listener that calls `visible()` when `document.hidden` is false; the cleanup calls `stop()` and removes the listener
     - Make no request other than reads of the plan route; use no added dependency or build step
     - _Requirements: 1.2, 7.1, 7.2, 7.3, 7.4, 9.1, 9.3, 9.4, 9.5_
@@ -178,7 +178,7 @@ The placeholder page (`ui/index.mjs`) stays in place until group 4 replaces it. 
     - _Requirements: 1.1, 1.2, 1.3, 1.4, 7.1, 7.2, 7.3, 7.4_
 
 - [ ] 5. Check it works end to end
-  - [ ] 5.1 Run the backend on this repository and on throwaway checkouts
+  - [x] 5.1 Run the backend on this repository and on throwaway checkouts
     - Start `backend/server.py` with a `PORT` and `EPIC_BOARD_REPOSITORY` set to this repository and request `/health` and `/plan`; the first answer is 202 `{"pending": true}` or a first-read plan with `fetch` `{"ok": null}` and `age_seconds` null; later answers have `fetch` `{"ok": true}`, `age_seconds` of 0 or more and `refreshing`
     - Compare the cards with the epic and spec files on main: each story line's description appears on its card, a card with no description has `""`, and the spec counts match `tasks.md`
     - On a throwaway clone, push a commit to its origin, wait 60 seconds, request `/plan` and see a second plan with the new commit; break the throwaway origin (rename it) and see a plan that keeps its groups with `fetch.ok` false, the reason and an unchanged `age_seconds`
@@ -196,7 +196,7 @@ The placeholder page (`ui/index.mjs`) stays in place until group 4 replaces it. 
 - Each group is one pull request and is merged by the owner; start the next group from the updated main
 - Group 2 is the one that makes the first story's code and tests match the edited criteria of the earlier spec; no file of the earlier spec is edited
 - No task is optional: every task checks a requirement of this spec
-- The design's open questions (Node as a prerequisite and `AGENTS.md`, a property-testing library, the heading level and named exports) are for the owner; no task edits `AGENTS.md`
+- The owner answered the Node question by asking group 1 to add a line to `AGENTS.md` saying the page tests need Node and run through `tests/test_ui.py`; the other open questions (a property-testing library, the heading level and named exports) are for the owner
 
 ## Task Dependency Graph
 
