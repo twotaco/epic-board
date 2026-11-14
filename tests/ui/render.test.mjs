@@ -8,7 +8,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 
 import {
-  STYLE, TITLE_LEVEL, classify, columnsOf, initialState, progressOf, reduce, renderBoard, viewOf,
+  STYLE, TITLE_LEVEL, chatHref, classify, columnsOf, initialChats, initialState, progressOf, reduce, renderBoard, viewOf,
 } from '../../ui/index.mjs'
 import { baseSeed, findAll, forSeeds, h, textOf, walk } from './support.mjs'
 
@@ -176,15 +176,18 @@ const withText = (tree, text) => findAll(tree, (node) => node.children.length ==
 const rolesOf = (tree) => findAll(tree, (node) => node.props.role !== undefined).map((node) => node.props.role)
 
 // Checks that hold for every view: no control, one disclosure at most, heading levels, no raw HTML.
-function assertStructure(tree, label) {
-  // 1.3: nothing responds to a click or key but the one summary.
+function assertStructure(tree, label, { cardControls = false } = {}) {
+  // 1.3 (as start-a-story edited it): nothing responds to a click or key but the one summary and the
+  // controls of Requirements 2, 7 and 8, which all sit inside a card. A view with no chats has none.
   const interactive = elements(tree).filter((node) => {
     const keys = Object.keys(node.props)
     return ['a', 'button', 'input', 'select', 'textarea', 'label', 'form'].includes(node.type)
       || keys.some((key) => /^on[A-Z]/.test(key) || key === 'href' || key === 'tabIndex' || key === 'contentEditable')
       || ['button', 'link', 'checkbox', 'menuitem', 'tab', 'switch'].includes(node.props.role)
   })
-  assert.deepEqual(interactive, [], `${label}: interactive element`)
+  const insideCards = new Set(findAll(tree, (node) => node.type === 'li' && node.props.className === 'eb-card').flatMap((li) => elements(li)))
+  assert.deepEqual(interactive.filter((node) => !insideCards.has(node)), [], `${label}: interactive element outside a card`)
+  if (!cardControls) assert.deepEqual(interactive, [], `${label}: a view with no chats has no control`)
   const details = findAll(tree, (node) => node.type === 'details')
   const summaries = findAll(tree, (node) => node.type === 'summary')
   assert.ok(details.length <= 1, `${label}: more than one details`)
@@ -823,4 +826,292 @@ test('generated plans: each card renders once for each group it is in, and the l
     assert.equal(findAll(tree, (node) => node.type === `h${TITLE_LEVEL + 2}`).length, columns.reduce((sum, column) => sum + column.groups.length, 0))
     assert.equal(withText(tree, 'Checking for updates…')[0].props.style.visibility, plan.refreshing ? 'visible' : 'hidden')
   })
+})
+// ---- Cards with chats (start-a-story Requirements 2, 4, 6, 7, 8 and 9) ----
+// Validates: Requirements 2.1, 2.2, 2.3, 2.4, 2.6, 4.6, 6.4, 6.8, 7.1, 7.2, 7.3, 7.4, 8.3, 8.4, 9.1, 9.2, 9.3, 9.4, 9.5
+const CARD_ID = 'e.md#Story'
+const chatCard = (extra = {}) => ({ id: CARD_ID, name: 'Story', status: 'planned', spec: null, tasks: null, epic: 'E', description: '', ...extra })
+function chatsView({ card: cardOver = {}, chats = {}, ui = {}, failed = false, extraCards = [] } = {}) {
+  const groups = [{ epic: { name: 'E', file: 'e.md' }, cards: [chatCard(cardOver), ...extraCards] }]
+  const view = planView(planBody({ groups }))
+  return {
+    ...view,
+    chats: { ...initialChats, folder: { id: 'f_1', reason: null }, loaded: true, at: 100000, failed, ...chats },
+    ui,
+  }
+}
+const withChat = (key = 'k1', entry = { state: 'idle' }, over = {}) => ({
+  records: [{ card_id: CARD_ID, name: key, key, created: 't' }], byKey: { [key]: entry }, ...over,
+})
+const missing = (at, since = 0, key = 'k1') => withChat(key, { state: 'missing' }, { missingSince: { [key]: since }, at })
+// Records what the controls call.
+function recorder() {
+  const calls = []
+  const actions = Object.fromEntries(['ask', 'cancel', 'start', 'close', 'resume', 'startAgain'].map((name) => [name, (...args) => calls.push([name, ...args])]))
+  return { calls, actions }
+}
+const renderWith = (view, actions) => renderBoard(h, view, actions)
+const theCard = (tree) => findAll(tree, (node) => node.type === 'li' && node.props.className === 'eb-card')[0]
+const buttons = (node) => findAll(node, (n) => n.type === 'button')
+const links = (node) => findAll(node, (n) => n.type === 'a')
+const labelOf = (node) => textOf(node)
+const byLabel = (node, text) => buttons(node).find((button) => labelOf(button) === text)
+
+test('a startable card has its name as the one button, with the card id, and nothing else to press', () => {
+  const { calls, actions } = recorder()
+  const li = theCard(renderWith(chatsView(), actions))
+  assert.equal(li.props['data-mode'], 'startable')
+  const main = findAll(li, (n) => n.props.className === 'eb-card-main')
+  assert.equal(main.length, 1)
+  assert.equal(main[0].type, 'button')
+  assert.equal(main[0].props.type, 'button')
+  assert.equal(main[0].props['data-card-id'], CARD_ID)
+  assert.equal(textOf(main[0]), 'Story')
+  assert.deepEqual([buttons(li).length, links(li).length], [1, 0])
+  assert.equal(findAll(li, (n) => n.props.role !== undefined).length, 0)
+  main[0].props.onClick()
+  assert.deepEqual(calls, [['ask', CARD_ID]])
+})
+
+test('the question: the text, a Start and a Cancel button, a group with a label, and Escape cancels', () => {
+  const { calls, actions } = recorder()
+  const li = theCard(renderWith(chatsView({ ui: { asking: CARD_ID } }), actions))
+  assert.equal(li.props['data-mode'], 'question')
+  const group = findAll(li, (n) => n.props.role === 'group')
+  assert.equal(group.length, 1)
+  assert.equal(typeof group[0].props['aria-label'], 'string')
+  assert.ok(group[0].props['aria-label'].length > 0)
+  assert.ok(textOf(group[0]).includes('Start a conductor on this story?'))
+  assert.deepEqual(buttons(group[0]).map(labelOf), ['Start', 'Cancel'])
+  assert.equal(buttons(li).length, 3, 'the card button, Start and Cancel')
+  byLabel(group[0], 'Start').props.onClick()
+  byLabel(group[0], 'Cancel').props.onClick()
+  group[0].props.onKeyDown({ key: 'Escape' })
+  group[0].props.onKeyDown({ key: 'Enter' })
+  group[0].props.onKeyDown({ key: 'a' })
+  assert.deepEqual(calls, [['start', CARD_ID], ['cancel', CARD_ID], ['cancel', CARD_ID]])
+})
+
+test('a failed start shows the step and the reason, with a status role, above the question', () => {
+  const steps = { reserve: 'Could not reserve the chat', create: 'Could not create the chat', send: 'Could not send the brief', save: 'Could not save the chat' }
+  for (const [step, text] of Object.entries(steps)) {
+    const ui = { asking: CARD_ID, flows: { [CARD_ID]: { kind: 'failed', step, reason: 'API 500: boom' } } }
+    const li = theCard(renderWith(chatsView({ ui })))
+    const note = findAll(li, (n) => n.props.role === 'status')
+    assert.equal(note.length, 1, step)
+    assert.equal(textOf(note[0]), `${text}: API 500: boom`)
+    assert.deepEqual(buttons(findAll(li, (n) => n.props.role === 'group')[0]).map(labelOf), ['Start', 'Cancel'], 'the question is offered again')
+  }
+})
+
+test('a start in progress shows Starting… with a status role and no button or link', () => {
+  const ui = { asking: CARD_ID, flows: { [CARD_ID]: { kind: 'starting', step: 'create' } } }
+  const li = theCard(renderWith(chatsView({ ui })))
+  assert.equal(li.props['data-mode'], 'starting')
+  assert.deepEqual([buttons(li).length, links(li).length], [0, 0])
+  const status = findAll(li, (n) => n.props.role === 'status')
+  assert.deepEqual(status.map(textOf), ['Starting…'])
+})
+
+test('with no Crew folder the question is replaced by the text, the two setting names as code, and Close', () => {
+  const { calls, actions } = recorder()
+  const view = chatsView({ ui: { asking: CARD_ID }, chats: { folder: { id: null, reason: 'folder_id must be text and not empty.' } } })
+  const li = theCard(renderWith(view, actions))
+  assert.equal(li.props['data-mode'], 'blocked')
+  const group = findAll(li, (n) => n.props.role === 'group')[0]
+  const text = textOf(group)
+  assert.ok(text.includes('No Crew folder is set for this project.'))
+  assert.ok(text.includes('folder_id must be text and not empty.'))
+  assert.deepEqual(findAll(group, (n) => n.type === 'code').map(textOf), ['EPIC_BOARD_FOLDER', 'folder_id'])
+  assert.ok(!text.includes('Start a conductor on this story?'))
+  assert.deepEqual(buttons(group).map(labelOf), ['Close'])
+  buttons(group)[0].props.onClick()
+  group.props.onKeyDown({ key: 'Escape' })
+  assert.deepEqual(calls, [['close', CARD_ID], ['close', CARD_ID]])
+})
+
+test('with no Crew folder and no reason the text still shows, and an unreadable file shows the backend message', () => {
+  const none = theCard(renderWith(chatsView({ ui: { asking: CARD_ID }, chats: { folder: { id: null, reason: null } } })))
+  assert.ok(textOf(none).includes('No Crew folder is set for this project.'))
+  const records = { recordsError: { code: 'chats_unreadable', message: '/x/chats.json cannot be read as the board\'s file of chats.' }, folder: { id: null, reason: null } }
+  const li = theCard(renderWith(chatsView({ ui: { asking: CARD_ID }, chats: records })))
+  const group = findAll(li, (n) => n.props.role === 'group')[0]
+  assert.ok(textOf(group).includes('/x/chats.json cannot be read as the board\'s file of chats.'))
+  assert.equal(findAll(group, (n) => n.type === 'code').length, 0)
+  assert.deepEqual(buttons(group).map(labelOf), ['Close'])
+})
+
+test('a card with a started chat is a link with the chat address, in every column, and offers no question', () => {
+  for (const status of STATUSES) {
+    const { calls, actions } = recorder()
+    const view = chatsView({ card: { status }, chats: withChat('epic-board-3fa91c0e', { state: 'needs-you' }), ui: { asking: CARD_ID } })
+    const li = theCard(renderWith(view, actions))
+    assert.equal(li.props['data-mode'], 'chat', status)
+    const anchors = links(li)
+    assert.equal(anchors.length, 1)
+    assert.equal(anchors[0].props.href, '/chat?sid=epic-board-3fa91c0e')
+    assert.equal(anchors[0].props.className, 'eb-card-main')
+    assert.equal(anchors[0].props['data-card-id'], CARD_ID)
+    assert.equal(textOf(anchors[0]), 'Story')
+    assert.equal(buttons(li).length, 0, 'the link is the only control')
+    assert.deepEqual(findAll(li, (n) => n.props.role === 'group'), [])
+    assert.deepEqual(calls, [])
+  }
+})
+
+test('the state word is shown for each state, with the state in an attribute, and not before it has been read', () => {
+  const words = { 'needs-you': 'Needs you', working: 'Working', interrupted: 'Interrupted', idle: 'Idle' }
+  for (const [state, word] of Object.entries(words)) {
+    const li = theCard(renderWith(chatsView({ chats: withChat('k1', { state }) })))
+    const marks = findAll(li, (n) => n.props.className === 'eb-chat-state')
+    assert.equal(marks.length, 1, state)
+    assert.equal(textOf(marks[0]), word)
+    assert.equal(marks[0].props['data-state'], state)
+  }
+  const unread = theCard(renderWith(chatsView({ chats: withChat('k1', undefined, { byKey: {} }) })))
+  assert.equal(findAll(unread, (n) => n.props.className === 'eb-chat-state').length, 0)
+  assert.equal(links(unread).length, 1, 'the link shows before the state is known')
+})
+
+test('the link is built only from the percent-encoded key', () => {
+  for (const key of ['a b/c', 'é日?#', 'x&token=1', 'k"><b>']) {
+    const li = theCard(renderWith(chatsView({ chats: withChat(key) })))
+    const href = links(li)[0].props.href
+    assert.equal(href, chatHref(key))
+    assert.ok(/^\/chat\?sid=[A-Za-z0-9%._~-]*$/.test(href), href)
+    assert.ok(!/token|&/.test(href.slice('/chat?sid='.length)) || /%26/.test(href))
+  }
+})
+
+test('restoring: the text with a status role, and no link or button', () => {
+  const li = theCard(renderWith(chatsView({ chats: missing(30000) })))
+  assert.equal(li.props['data-mode'], 'restoring')
+  assert.deepEqual(findAll(li, (n) => n.props.role === 'status').map(textOf), ['Restoring chat…'])
+  assert.deepEqual([buttons(li).length, links(li).length], [0, 0])
+})
+
+test('not open: the text and Resume chat, which resumes by key; still no link', () => {
+  const { calls, actions } = recorder()
+  const li = theCard(renderWith(chatsView({ chats: missing(60000) }), actions))
+  assert.equal(li.props['data-mode'], 'not-open')
+  assert.deepEqual(findAll(li, (n) => n.props.role === 'status').map(textOf), ['This chat is not open.'])
+  assert.deepEqual(buttons(li).map(labelOf), ['Resume chat'])
+  assert.equal(links(li).length, 0)
+  buttons(li)[0].props.onClick()
+  assert.deepEqual(calls, [['resume', 'k1']])
+})
+
+test('resuming and a failed resume: the texts, the reason, and Start again by record name', () => {
+  const { calls, actions } = recorder()
+  const resuming = theCard(renderWith(chatsView({ chats: missing(60000), ui: { resumes: { k1: { kind: 'resuming' } } } }), actions))
+  assert.deepEqual(findAll(resuming, (n) => n.props.role === 'status').map(textOf), ['Resuming…'])
+  assert.equal(buttons(resuming).length, 0)
+  const failed = theCard(renderWith(chatsView({ chats: missing(60000), ui: { resumes: { k1: { kind: 'failed', reason: 'API 404: gone' } } } }), actions))
+  assert.deepEqual(findAll(failed, (n) => n.props.role === 'status').map(textOf), ['The chat could not be resumed.'])
+  assert.ok(textOf(failed).includes('API 404: gone'))
+  assert.deepEqual(buttons(failed).map(labelOf), ['Start again'])
+  buttons(failed)[0].props.onClick()
+  assert.deepEqual(calls, [['startAgain', 'k1', CARD_ID]])
+})
+
+test('a Done card with no chat has no button, no link and no role', () => {
+  const li = theCard(renderWith(chatsView({ card: { status: 'done' }, ui: { asking: CARD_ID } })))
+  assert.equal(li.props['data-mode'], 'plain')
+  assert.deepEqual([buttons(li).length, links(li).length], [0, 0])
+  assert.deepEqual(findAll(li, (n) => n.props.role !== undefined), [])
+  assert.deepEqual(findAll(li, (n) => n.props['data-card-id'] !== undefined), [])
+})
+
+test('a card has at most one main control, and it is the label of the name', () => {
+  const everyMode = [
+    chatsView(), chatsView({ ui: { asking: CARD_ID } }), chatsView({ chats: withChat() }), chatsView({ card: { status: 'done' } }),
+    chatsView({ chats: missing(0) }), chatsView({ chats: missing(60000) }),
+    chatsView({ ui: { asking: CARD_ID }, chats: { folder: { id: null, reason: null } } }),
+    chatsView({ ui: { flows: { [CARD_ID]: { kind: 'starting', step: 'send' } } } }),
+  ]
+  for (const view of everyMode) {
+    const li = theCard(renderWith(view))
+    const main = findAll(li, (n) => n.props.className === 'eb-card-main')
+    assert.ok(main.length <= 1)
+    const name = findAll(li, (n) => n.props.className === 'eb-card-name')[0]
+    for (const node of main) assert.ok(findAll(name, (n) => n === node).length === 1, 'the main control is in the name')
+  }
+})
+
+test('every mode keeps the board\'s structure: one title, no heading added, levels unbroken, only status and group roles', () => {
+  const views = [
+    chatsView(), chatsView({ ui: { asking: CARD_ID } }), chatsView({ chats: withChat('k1', { state: 'working' }) }),
+    chatsView({ card: { status: 'done' } }), chatsView({ chats: missing(0) }), chatsView({ chats: missing(60000) }),
+    chatsView({ ui: { asking: CARD_ID, flows: { [CARD_ID]: { kind: 'failed', step: 'send', reason: 'x' } } } }),
+    chatsView({ ui: { flows: { [CARD_ID]: { kind: 'starting', step: 'create' } } } }),
+    chatsView({ ui: { asking: CARD_ID }, chats: { folder: { id: null, reason: null } } }),
+    chatsView({ chats: missing(60000), ui: { resumes: { k1: { kind: 'failed', reason: 'x' } } } }),
+    chatsView({ failed: true, chats: withChat() }),
+  ]
+  for (const view of views) {
+    const without = headingLevels(renderBoard(h, { ...view, chats: undefined, ui: undefined }))
+    const tree = renderWith(view)
+    assertStructure(tree, view.chats.failed ? 'chats failed' : theCard(tree).props['data-mode'], { cardControls: true })
+    assert.deepEqual(headingLevels(tree), without, 'no heading is added')
+    for (const role of rolesOf(tree)) assert.ok(['status', 'group'].includes(role), `role ${role}`)
+    assert.ok(!rolesOf(tree).includes('alert'))
+  }
+})
+
+test('the notice for a failed chat read has a status role, the board stays, and it is gone after a good read', () => {
+  const notice = 'Could not read chat status. Showing the last known states.'
+  const failed = renderWith(chatsView({ failed: true, chats: withChat('k1', { state: 'working' }) }))
+  const found = findAll(failed, (n) => n.props.role === 'status' && textOf(n).includes(notice))
+  assert.equal(found.length, 1)
+  assert.equal(found[0].props.className, 'eb-notice')
+  assert.equal(findAll(failed, (n) => n.props.className === 'eb-chat-state').length, 1, 'the last known states stay')
+  assert.equal(findAll(failed, (n) => n.props.className === 'eb-columns').length, 1, 'the columns stay')
+  const ok = renderWith(chatsView({ failed: false }))
+  assert.equal(findAll(ok, (n) => textOf(n).includes(notice) && n.props.role === 'status').length, 0)
+})
+
+test('texts from the plan, the backend and Crew are literal children, never HTML', () => {
+  const markup = '<img src=x onerror=alert(1)> **bold** &amp;'
+  const views = [
+    chatsView({ card: { name: markup, description: markup } }),
+    chatsView({ card: { name: markup }, ui: { asking: CARD_ID, flows: { [CARD_ID]: { kind: 'failed', step: 'create', reason: markup } } } }),
+    chatsView({ card: { name: markup }, ui: { asking: CARD_ID }, chats: { folder: { id: null, reason: markup } } }),
+    chatsView({ card: { name: markup }, ui: { asking: CARD_ID }, chats: { folder: { id: null, reason: null }, recordsError: { code: 'chats_unreadable', message: markup } } }),
+    chatsView({ card: { name: markup }, chats: missing(60000), ui: { resumes: { k1: { kind: 'failed', reason: markup } } } }),
+    chatsView({ card: { name: markup }, chats: withChat('k1') }),
+  ]
+  for (const view of views) {
+    const tree = renderWith(view)
+    for (const node of elements(tree)) {
+      assert.equal(node.props.dangerouslySetInnerHTML, undefined)
+      assert.equal(node.props.innerHTML, undefined)
+    }
+    const li = theCard(tree)
+    assert.ok(textOf(li).includes(markup), 'the text is there as written')
+    assert.equal(findAll(li, (n) => n.type === 'img' || n.type === 'script' || n.type === 'b').length, 0)
+  }
+})
+
+test('without actions the controls still exist and do nothing when used', () => {
+  const view = chatsView({ ui: { asking: CARD_ID } })
+  const li = theCard(renderBoard(h, view))
+  for (const button of buttons(li)) assert.doesNotThrow(() => button.props.onClick())
+  assert.doesNotThrow(() => findAll(li, (n) => n.props.role === 'group')[0].props.onKeyDown({ key: 'Escape' }))
+})
+
+test('a view with no chats draws the board as before: no control, no data-mode other than plain', () => {
+  const tree = render(planView(planBody()))
+  assert.deepEqual(buttons(tree).concat(links(tree)), [])
+  for (const li of cardItems(tree)) assert.equal(li.props['data-mode'], 'plain')
+})
+
+test('the new classes have rules in STYLE, and the stretched control sits under the controls', () => {
+  for (const name of ['eb-card-main', 'eb-chat-state', 'eb-chat-note', 'eb-chat-line', 'eb-question', 'eb-chat-controls']) {
+    assert.match(STYLE, new RegExp(`\\.${name}(?![\\w-])`), `${name} has a rule`)
+  }
+  assert.match(STYLE, /\.eb-card\s*\{[^}]*position:\s*relative/)
+  assert.match(STYLE, /\.eb-card-main::after\s*\{[^}]*position:\s*absolute[^}]*inset:\s*0/)
+  assert.match(STYLE, /\.eb-question,\s*\.eb-chat-controls\s*\{[^}]*position:\s*relative[^}]*z-index:\s*1/)
+  assert.match(STYLE, /\.eb-card-main:focus-visible\s*\{[^}]*outline:\s*2px solid currentColor/)
+  assert.ok(!/outline\s*:\s*(none|0)/i.test(STYLE))
 })

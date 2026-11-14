@@ -98,33 +98,33 @@ Group 1 is all backend and changes nothing the page uses except an added `id` on
     - Run `python3 -m unittest discover -s tests -t .` and `node --test tests/ui/*.test.mjs` and report the counts run, passed and skipped for each; a skipped page test is reported as skipped, not as passed
     - _Requirements: 2.1, 4.1, 4.3, 4.4, 4.5, 4.6, 6.1, 6.2, 6.3, 6.7, 8.1, 8.2, 8.3_
 
-- [ ] 3. Page: controls, second poller and permissions
-  - [ ] 3.1 Draw the card modes in `ui/index.mjs`
+- [x] 3. Page: controls, second poller and permissions
+  - [x] 3.1 Draw the card modes in `ui/index.mjs`
     - `renderBoard(h, view, actions)` with `actions` `{ask, cancel, start, close, resume, startAgain}` defaulting to no-ops; `renderCard` draws each `mode` of `cardViewOf`: a `button` (class `eb-card-main`) for `startable`, an `a` with `chatHref` for `chat`, plain text for `plain`, `restoring`, `not-open`, `resuming` and `resume-failed` (with their controls); the question as a `div` with `role="group"` and an `aria-label`, its text, "Start" and "Cancel", Escape calling `cancel`; progress, failure and blocked texts with `role="status"` and no `alert`; the state word in a `span` with the class `eb-chat-state`; a `data-card-id` on the main control; the "Could not read chat status. Showing the last known states." notice above the columns; no heading added
     - Add the new rules to `STYLE`: `position: relative` on the card, the stretched `::after` on `.eb-card-main`, `position: relative` and a `z-index` on the controls, the pointer cursor, the hover and focus-within tint, the state word; only `currentColor` and greys with an alpha between 0 and 1, no named, hex or `rgb()` colour, no `outline: none`
     - Pass every text as a child; build the link only from `chatHref`
     - _Requirements: 2.1, 2.2, 2.3, 2.4, 2.6, 4.6, 6.4, 6.8, 7.1, 7.2, 7.3, 8.3, 8.4, 9.1, 9.2, 9.3, 9.4, 9.5_
-  - [ ] 3.2 Check the markup in `tests/ui/render.test.mjs`
+  - [x] 3.2 Check the markup in `tests/ui/render.test.mjs`
     - For each `mode`: the elements, the roles, the labels and the classes; one `a` or `button` as the card's main control; the question's buttons and `aria-label`; no `alert` role anywhere but the two of the board design; no new heading and the same heading levels with a question open; literal text for a story name, a failure reason and a Crew error containing markup; the `data-card-id` attribute; actions called with the right id or key (a recording `actions`)
     - Update the interactive-element check (from line 183): the only interactive elements are the `summary` and the controls of Requirements 2, 7 and 8; the board's other checks stay as they are
     - Extend the `STYLE` scans for the new rules
     - _Requirements: 2.1, 2.2, 2.3, 2.4, 6.4, 7.1, 7.2, 8.3, 8.4, 9.1, 9.2, 9.3, 9.4, 9.5_
-  - [ ] 3.3 Wire the chat poller and the start flow in `createBoard`
+  - [x] 3.3 Wire the chat poller and the start flow in `createBoard`
     - A second reducer for `chats` and `ui` (the question open on at most one card, flows per card id, resumes per key), `env.useAppApi` defaulting to the host's `window.__kirocrew_modules['@kirocrew/app-sdk'].useAppApi` looked up inside the component, `backend` and `gateway` clients as the design describes (the backend's with `credentials: 'same-origin'`, the signal and a JSON body)
     - A second effect builds the chat poller with `readChats`, `classifyChats` and `chatDelay`, the same `hidden`, timers and `visibilitychange` handling as the plan poller, and `stop()` on unmount; the plan poller and its tests do not change
     - Start, Cancel, Close, Resume and Start again run the flows of the design; a successful start adds the record at once and calls the chat poller's `visible()`; a successful resume does the same; a second activation of a running start is ignored; after Cancel an effect puts focus on the card's button found by `data-card-id`
     - A failure of a chat request does not touch the plan state, and a failure of a plan request does not touch the chat state
     - _Requirements: 2.2, 2.3, 4.1, 4.6, 4.7, 6.7, 6.8, 6.9, 8.4, 8.5, 8.6, 9.6_
-  - [ ] 3.4 Declare the permissions in `app.json` and bring `tests/test_ui.py` in line
+  - [x] 3.4 Declare the permissions in `app.json` and bring `tests/test_ui.py` in line
     - Add `"permissions": {"api": ["/api/chat", "/api/chat/slots"]}` and nothing else; keep the name, route, backend and platform declarations
     - In `tests/test_ui.py` replace the assertion that there is no `permissions.api` (lines 77 to 79) with one that `permissions.api` is exactly those two entries and that `app.json` has none of `sessionApproval`, `chatSlots`, `spawn`, `agentTurns`, `network` or `storage`
     - _Requirements: 1.3_
-  - [ ] 3.5 Check the wiring in `tests/ui/board.test.mjs`
+  - [x] 3.5 Check the wiring in `tests/ui/board.test.mjs`
     - Update "opening the page sends one GET of the plan route and nothing else" (line 195): on open, the requests are one GET of the plan route and one GET of the chats route, and no Crew request while there are no started chats
     - Add tests with a fake `useAppApi`: with started chats, the list is read after the chats route; a hidden page sends no chat request; becoming visible reads at once; a start sends the requests of the design in order and then reads again; Cancel closes the question and restores focus; unmounting stops both pollers and removes the listener; a gateway failure shows the notice and keeps the board; a plan failure keeps the chat states; the default export still builds the component once and needs no `window` at import
     - Scan `ui/index.mjs` for `innerHTML` and `dangerouslySetInnerHTML`, and for any call to a path containing `approve`, `question` or `approvals`, `DELETE` of a Crew chat, `stop` or `close`
     - _Requirements: 4.6, 4.7, 6.6, 6.7, 6.8, 6.9, 8.6, 9.4, 9.6_
-  - [ ] 3.6 Run the tests
+  - [x] 3.6 Run the tests
     - Run `python3 -m unittest discover -s tests -t .` and `node --test tests/ui/*.test.mjs` and report the counts run, passed and skipped for each
     - _Requirements: 1.3, 2.1, 2.2, 2.3, 2.4, 4.6, 6.7, 6.8, 7.1, 8.4, 9.1, 9.2, 9.3, 9.4, 9.5, 9.6_
 
