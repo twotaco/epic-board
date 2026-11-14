@@ -447,7 +447,20 @@ test('the page source has no innerHTML, script injection, other network paths or
   assert.equal(calls.length, 1)
   assert.equal(/\bfetchFn\s*\(\s*PLAN_URL\s*,/.test(source), true, 'the one call is on PLAN_URL')
 
+  // The paths the page may use: the plan route, the backend's chats route, and the chat paths of
+  // start-a-story (Requirements 4, 6 and 8). Quoted paths first, then the ones built in a template.
+  const allowed = new Set([PLAN_URL, '/chats', '/api/chat/slots', '/api/chat'])
   const urls = source.match(/['"`](?:https?:)?\/[A-Za-z0-9_\-./]*['"`]/g) ?? []
-  assert.deepEqual(urls.map((url) => url.slice(1, -1)), [PLAN_URL])
+  assert.deepEqual([...new Set(urls.map((url) => url.slice(1, -1)))].sort(), [...allowed].sort())
   assert.equal(/https?:\/\//.test(source), false)
+  // Requirement 6, criterion 6: the page never sends a request that approves, rejects or answers
+  // anything for a chat, and never stops or closes one. Nothing in Crew stops it, so this scan does.
+  const starts = [...source.matchAll(/[`'"](\/(?:api|chats)[^`'"$]*)/g)].map((match) => match[1])
+  assert.ok(starts.length >= 4, 'the scan found the page\'s paths')
+  for (const start of starts) {
+    assert.ok(['/api/chat/slots', '/api/chat', '/chats', PLAN_URL].some((prefix) => start.startsWith(prefix)), `unexpected path ${start}`)
+    assert.doesNotMatch(start, /approve|question|approvals|stop|close|steer|note|context|delete/i, `forbidden path ${start}`)
+  }
+  assert.equal(/\/api\/approvals/.test(source), false)
+  assert.equal(/slots\/\$\{[^}]*\}\/(?!resume)/.test(source), false, 'the only per-chat route built in a template is resume')
 })

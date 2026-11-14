@@ -56,45 +56,45 @@ Group 1 is all backend and changes nothing the page uses except an added `id` on
     - Run `python3 -m unittest discover -s tests -t .` and report the counts run, passed and skipped
     - _Requirements: 1.1, 1.2, 1.4, 3.1, 3.2, 3.3, 3.4, 3.5, 4.2, 5.1, 5.2, 5.3, 5.4, 5.5, 5.6, 5.7, 5.8, 5.9_
 
-- [ ] 2. Page logic
-  - [ ] 2.1 Let `createPoller` take a different answer reader and delay in `ui/index.mjs`
+- [x] 2. Page logic
+  - [x] 2.1 Let `createPoller` take a different answer reader and delay in `ui/index.mjs`
     - Add optional `classifyAnswer` (default `classify`) and `delay` (default `nextDelay`); with neither given it behaves exactly as before
     - Add two cases to `tests/ui/poller.test.mjs` that pass them; leave every other test in that file unchanged
     - _Requirements: 6.7_
-  - [ ] 2.2 Add the small chat functions to `ui/index.mjs`
+  - [x] 2.2 Add the small chat functions to `ui/index.mjs`
     - `stateOf(row, lastRole)` and `STATE_WORDS` ("Needs you", "Working", "Interrupted", "Idle") as in the design; `chatHref(key)` is `/chat?sid=` and `encodeURIComponent(key)`; `classifyChats(status, body)` gives `{kind: 'chats', read}` or `{kind: 'failure'}`; `chatDelay(result)` gives 5000 when any state is `working`, `needs-you` or the chat is missing under 60 seconds, otherwise 15000, and 15000 for a failure
     - Write `tests/ui/chats.test.mjs` with examples: each flag alone and in pairs, missing fields, a key with `/`, `?`, `#`, space and non-ASCII in `chatHref`, and each delay
     - _Requirements: 6.2, 6.4, 6.7, 7.1_
-  - [ ] 2.3 Write property test for the state rule in `tests/ui/chats.test.mjs`
+  - [x] 2.3 Write property test for the state rule in `tests/ui/chats.test.mjs`
     - **Property 1: One state, by precedence**
     - **Validates: Requirements 6.2**
-  - [ ] 2.4 Add `readChats` to `ui/index.mjs`
+  - [x] 2.4 Add `readChats` to `ui/index.mjs`
     - The cycle of the design, with `backend`, `gateway`, `previous`, `now` and `signal` injected: records, then the list, then the due detail reads and the 404 reads, one shared signal; a `chats_unreadable` answer ends the cycle with no gateway request; no records means no gateway request; a non-array list, a non-404 rejection and a rejected backend request reject the cycle
     - Tests in `tests/ui/chats.test.mjs` with a fake backend and a fake gateway that record the requests: the requests made for each shape of input, no detail read when `last_ts` and `messages` are unchanged, a read when either changes, a 404 giving `missing`, a 200 detail for a chat absent from the list giving the state of Requirement 8.1, other rows ignored
     - _Requirements: 6.1, 6.3, 6.8, 8.1_
-  - [ ] 2.5 Write property test for our own keys in `tests/ui/chats.test.mjs`
+  - [x] 2.5 Write property test for our own keys in `tests/ui/chats.test.mjs`
     - **Property 2: Only our own keys count**
     - Generated lists with our rows and other rows, and generated started keys; at least 100 iterations with the seed printed on failure
     - **Validates: Requirements 6.1**
-  - [ ] 2.6 Add `initialChats`, `chatsReduce` and `cardViewOf` to `ui/index.mjs`
+  - [x] 2.6 Add `initialChats`, `chatsReduce` and `cardViewOf` to `ui/index.mjs`
     - `chatsReduce` handles the read, the failed read, the started record added at once, and the removed record; it keeps `missingSince`, `lastRead` and the notice flag as the design says; a failed read keeps the shown states
     - `cardViewOf(card, chats, ui, nowMs)` returns the `mode` of the design's table and its fields (state word, link address, texts)
     - Tests in `tests/ui/chats.test.mjs`: every mode, including a Done card with a chat (a link and a state, no question), a Planned card with only a `reserved` record, the blocked texts, and the notice after a failed read and its removal after a good one
     - _Requirements: 2.1, 2.4, 2.5, 2.6, 6.4, 6.5, 6.8, 6.9, 7.1, 7.2, 7.3, 7.4, 8.2, 8.3_
-  - [ ] 2.7 Write property test for the restoring clock in `tests/ui/chats.test.mjs`
+  - [x] 2.7 Write property test for the restoring clock in `tests/ui/chats.test.mjs`
     - **Property 6: The restoring clock**
     - Generated sequences of reads with times, each finding the chat present or missing; check the mode at each read against the 60-second rule and the restart after a present read
     - **Validates: Requirements 8.2, 8.3**
-  - [ ] 2.8 Add `startStory` and `resumeChat` to `ui/index.mjs`
+  - [x] 2.8 Add `startStory` and `resumeChat` to `ui/index.mjs`
     - `startStory({cardId, backend, gateway, onStep})` as in the design: reserve, create with the three fields, send unless `messages > 0` (an error that only says `accepted the request` counts as sent), save with the key from the create answer; a failure is `{step, reason}` with the reason cut to 300 characters; a create answer with no text `key` fails the `create` step
     - `resumeChat({key, gateway})` posts the resume with no body; "Start again" uses `backend.del`
     - Write `tests/ui/start.test.mjs` with fakes: the order and bodies of the requests (the create body has exactly `name`, `agent` and `folder_id`), each step failing, the `accepted the request` case, a create that returns an existing chat with messages, a refused reservation with each code of Requirement 4.2, resume success and failure
     - _Requirements: 4.1, 4.3, 4.4, 4.5, 4.6, 8.4, 8.5_
-  - [ ] 2.9 Write property test for repeated starts in `tests/ui/start.test.mjs`
+  - [x] 2.9 Write property test for repeated starts in `tests/ui/start.test.mjs`
     - **Property 7: A repeated start never sends the brief twice and never makes a second chat**
     - A fake backend (stable reservation, started and reserved records) and a fake Crew (a create of a known name returns the same row with its message count, a send adds a message) with generated failures at each step across repeated attempts; at least 100 iterations with the seed printed on failure
     - **Validates: Requirements 4.3, 4.4, 4.5, 4.6**
-  - [ ] 2.10 Run the tests
+  - [x] 2.10 Run the tests
     - Run `python3 -m unittest discover -s tests -t .` and `node --test tests/ui/*.test.mjs` and report the counts run, passed and skipped for each; a skipped page test is reported as skipped, not as passed
     - _Requirements: 2.1, 4.1, 4.3, 4.4, 4.5, 4.6, 6.1, 6.2, 6.3, 6.7, 8.1, 8.2, 8.3_
 
