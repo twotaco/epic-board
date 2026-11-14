@@ -1,6 +1,6 @@
 # Implementation Plan
 
-- [ ] 1. Create the app package
+- [x] 1. Create the app package
   - Create `app.json` as described in the design's "App package" table: name `epic-board`, backend `entryPoint` `backend/server.py` with `type: python`, `port: auto`, `healthCheck: /health`, `routes: /api/apps/epic-board`, one UI page at `/apps/epic-board` with `entry: index.mjs` and icon `Kanban`, `platform.os` of `macos` and `linux`, and no `permissions.api` entries
   - Create `.gitignore` listing `config.json`, `__pycache__/` and `*.pyc`
   - _Requirements: 1.1, 1.5_
