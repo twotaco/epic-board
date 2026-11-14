@@ -150,31 +150,31 @@ The placeholder page (`ui/index.mjs`) stays in place until group 4 replaces it. 
     - Scan `STYLE` for colour literals and `outline: none`, and check that it holds the 720px container query and its `@supports` fallback
     - _Requirements: 1.3, 1.4, 2.3, 2.4, 2.5, 3.1, 3.2, 3.3, 3.4, 3.5, 8.1, 8.3, 9.1, 9.2, 9.3, 9.4, 9.5, 9.6, 10.1, 10.2, 10.3, 10.4_
   - [x] 3.12 Write `tests/test_ui.py`
-    - Run `node --test tests/ui/` as a subprocess and fail with node's output if it fails; skip with a stated reason when `node` is not on the path
+    - Run `node --test` as a subprocess from the repository root with the sorted list of `tests/ui/*.test.mjs` files, built in Python (Node 22 rejects the directory form `tests/ui/`), and fail with node's output if it fails; skip with a stated reason when `node` is not on the path
     - Check that `app.json` keeps its route and backend declarations (name `epic-board`, backend entry point `backend/server.py`, health check, routes, the one UI page at `/apps/epic-board` with `index.mjs`) and adds no `permissions.api` entry
     - _Requirements: 1.1_
   - [x] 3.13 Run the tests
-    - Run `python3 -m unittest discover -s tests -t .` and `node --test tests/ui/` and report the counts run, passed and skipped for each; a skipped page test is reported as skipped, not as passed
+    - Run `python3 -m unittest discover -s tests -t .` and `node --test tests/ui/*.test.mjs` and report the counts run, passed and skipped for each; a skipped page test is reported as skipped, not as passed
     - _Requirements: 1.1, 1.2, 1.3, 1.4, 2.1, 2.2, 3.4, 7.1, 7.2, 7.3, 7.4, 8.2, 9.1, 9.5_
 
-- [ ] 4. Page component
-  - [ ] 4.1 Add `createBoard(React)` to `ui/index.mjs`
+- [x] 4. Page component
+  - [x] 4.1 Add `createBoard(React)` to `ui/index.mjs`
     - Use `useReducer(reduce, initialState)` and `useEffect`; render a `<style>` element with `STYLE` and `renderBoard(h, viewOf(state))` inside one root element
     - In the effect, create the poller with `request` as a GET of `/apps/epic-board/api/plan` (same origin, no cache, with the abort signal) resolving `{status, body}` and rejecting on a connection failure or invalid JSON, `hidden` as `() => document.hidden`, `setTimer` and `clearTimer` as `setTimeout` and `clearTimeout`, and `onResult` as `dispatch(classify(...))`
     - Add a `visibilitychange` listener that calls `visible()` when `document.hidden` is false; the cleanup calls `stop()` and removes the listener
     - Make no request other than reads of the plan route; use no added dependency or build step
     - _Requirements: 1.2, 7.1, 7.2, 7.3, 7.4, 9.1, 9.3, 9.4, 9.5_
-  - [ ] 4.2 Replace the placeholder with the board as the default export
+  - [x] 4.2 Replace the placeholder with the board as the default export
     - The default export reads `window.__kirocrew_modules.react` on first call, builds the component once with `createBoard`, and returns `createElement(Board, props)`; remove the placeholder component and its request code
     - Leave `app.json` unchanged
     - _Requirements: 1.1, 1.2_
-  - [ ] 4.3 Check the component wiring in `tests/ui/board.test.mjs`
+  - [x] 4.3 Check the component wiring in `tests/ui/board.test.mjs`
     - Use a fake React (`useReducer`, `useEffect` with cleanup, `createElement`), a fake `document` and a fake `fetch`
     - Opening the page sends one GET of the plan route and no other request; a hidden page sends none; becoming visible requests at once; unmounting stops the poller and removes the listener; the default export builds the component once; importing the module needs no `window`
     - Scan `ui/index.mjs` for `innerHTML` and `dangerouslySetInnerHTML`
     - _Requirements: 1.1, 1.2, 1.4, 7.1, 7.2_
-  - [ ] 4.4 Run the tests
-    - Run `python3 -m unittest discover -s tests -t .` and `node --test tests/ui/` and report the counts run, passed and skipped for each
+  - [x] 4.4 Run the tests
+    - Run `python3 -m unittest discover -s tests -t .` and `node --test tests/ui/*.test.mjs` and report the counts run, passed and skipped for each
     - _Requirements: 1.1, 1.2, 1.3, 1.4, 7.1, 7.2, 7.3, 7.4_
 
 - [ ] 5. Check it works end to end
