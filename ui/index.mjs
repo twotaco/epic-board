@@ -878,9 +878,11 @@ function renderFilter(h, filter, actions, Select) {
     ? h(Select, {
       'aria-label': 'Epic',
       value: filter.key,
-      options: filter.options.map((option) => ({ value: option.key, label: option.label })),
-      // shortcut: the host Select's onChange shape was not seen; takes a value or an event. Fix here if a host differs.
-      onChange: (arg) => actions.filter(typeof arg === 'string' ? arg : arg?.target?.value),
+      // Crew's Select (kirocrew-ui/Select.tsx, 0.12.2): `options` are the values as strings, `optionLabels`
+      // the labels in the same order, and `onChange` receives the chosen value.
+      options: filter.options.map((option) => option.key),
+      optionLabels: filter.options.map((option) => option.label),
+      onChange: (value) => actions.filter(value),
     })
     : h('select', {
       'aria-label': 'Epic',
