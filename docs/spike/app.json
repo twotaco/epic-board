@@ -1,0 +1,30 @@
+{
+  "name": "epic-board-spike",
+  "version": "0.0.3",
+  "displayName": "Epic Board (spike)",
+  "description": "Throwaway test: reads epics and stories from a repository checkout and opens a conductor chat from a card.",
+  "author": "twotaco",
+  "ui": {
+    "entry": "index.mjs",
+    "pages": [
+      {
+        "route": "/apps/epic-board-spike",
+        "label": "Epic Board (spike)",
+        "icon": "Kanban"
+      }
+    ]
+  },
+  "backend": {
+    "entryPoint": "backend/server.py",
+    "type": "python",
+    "port": "auto",
+    "healthCheck": "/health",
+    "routes": "/api/apps/epic-board-spike"
+  },
+  "permissions": {
+    "api": [
+      "/api/chat",
+      "/api/chat/slots"
+    ]
+  }
+}

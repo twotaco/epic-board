@@ -1,0 +1,87 @@
+# Implementation Plan
+
+- [ ] 1. Create the app package
+  - Create `app.json` as described in the design's "App package" table: name `epic-board`, backend `entryPoint` `backend/server.py` with `type: python`, `port: auto`, `healthCheck: /health`, `routes: /api/apps/epic-board`, one UI page at `/apps/epic-board` with `entry: index.mjs` and icon `Kanban`, `platform.os` of `macos` and `linux`, and no `permissions.api` entries
+  - Create `.gitignore` listing `config.json`, `__pycache__/` and `*.pyc`
+  - _Requirements: 1.1, 1.5_
+
+- [ ] 2. Parse tasks and epic pages
+  - [ ] 2.1 Write `backend/parse.py` task counting
+    - `parse_tasks(text)` returns done, under-way and total counts from checkbox items at any nesting depth
+    - Skip optional tasks (`*` directly after the checkbox) in every count; count `[x]` and `[X]` as done and `[-]` as under way
+    - _Requirements: 4.1, 4.2_
+  - [ ] 2.2 Add epic and story parsing to `backend/parse.py`
+    - `parse_epic(text, file)` returns the name from the first level-one heading, or the file name
+    - `parse_stories(text, whole_file)` reads the `## Stories` section, or the whole file when asked, taking only list items at the first column in whole-file mode
+    - Match `- [Name](link) — status` and `- Name — status`; skip lines that do not fit without reporting them
+    - Normalize the status (trim, lowercase, drop one trailing full stop) and keep it only if it is `planned`, `in progress` or `done`
+    - Pull the spec folder name from a link with the `.kiro/specs/<folder>` pattern
+    - _Requirements: 5.2, 5.3, 5.4, 5.9, 7.3_
+  - [ ]* 2.3 Check the parsers with example text
+    - Cover optional and nested tasks, `[-]`, unknown status words, a missing em dash, links to spec folders, and whole-file mode
+
+- [ ] 3. Build the plan from a source
+  - [ ] 3.1 Write spec cards and statuses in `backend/plan.py`
+    - Define the source interface (`list_files(*prefixes)`, `read_file(path)`) and the card, group and problem shapes from the design's data model
+    - Find spec folders from the file list; give a spec with no `tasks.md` status `planned` and counts of 0 of 0
+    - Derive status: `done` when there is at least one task and all are done, `in progress` when any task is done or under way, otherwise `planned`
+    - When `tasks.md` cannot be read, add a problem naming the file and the reason, and give the card `planned` with no counts
+    - _Requirements: 3.1, 3.2, 3.4, 4.3, 4.4, 4.5, 4.6, 7.1, 7.2, 7.4_
+  - [ ] 3.2 Add epic groups in `backend/plan.py`
+    - Read the epic files in `docs/epics/` except `README.md` and `standalone.md`, in file-name order; a file that cannot be read adds a problem and is skipped
+    - Turn each story into a card: a story whose spec folder exists takes the spec's counts and its status from tasks, except `done` in the epic line, which wins; any other story takes its epic status or `planned`
+    - Record every spec folder used, and let the same spec appear under several epics
+    - Keep an epic with no stories as a group with no cards
+    - _Requirements: 5.1, 5.5, 5.6, 5.7, 5.8, 6.1, 6.2, 6.3, 8.1_
+  - [ ] 3.3 Add the "No epic" group in `backend/plan.py`
+    - Read `standalone.md` when it exists; drop its stories whose spec an epic already uses, and use a spec folder at most once
+    - Add a card named after the folder for every spec folder that no epic and no standalone story uses
+    - Sort the group by name ignoring case, put it after the epics, and leave it out when it has no cards
+    - _Requirements: 3.3, 5.9, 5.10, 8.2, 8.3, 8.4_
+  - [ ]* 3.4 Check the plan rules with an in-memory source
+    - Cover specs with no epics at all, a spec in two epics, `done` overriding open tasks, a story with a missing spec, `standalone.md` with and without a `## Stories` section, an unreadable file, and an empty plan
+
+- [ ] 4. Read from git
+  - [ ] 4.1 Write the git runner in `backend/gitsource.py`
+    - Run git as an argument list with no shell, with `-C <repository>`, `stdin` closed, `GIT_TERMINAL_PROMPT=0` and `start_new_session=True`
+    - Stop a command after 30 seconds by killing its process group, and report that as a failed command with git's trimmed error text
+    - Serialize fetches with a lock
+    - _Requirements: 9.2, 9.3, 9.4_
+  - [ ] 4.2 Open a snapshot in `backend/gitsource.py`
+    - Check that the path is a directory and a git checkout; otherwise raise `SourceError` with code `not_a_checkout`
+    - Find the main branch from `origin/HEAD`, falling back to `main`
+    - Fetch `+refs/heads/<branch>:refs/remotes/origin/<branch>`; resolve the ref to a commit
+    - When the fetch fails but the ref resolves, return a snapshot carrying the fetch error; when the ref does not resolve, raise `SourceError` with code `ref_unreadable`
+    - _Requirements: 1.4, 2.1, 2.2, 2.4, 2.5, 2.6, 9.1_
+  - [ ] 4.3 Add file access to the snapshot
+    - `list_files(*prefixes)` uses `ls-tree -r -z --name-only` on the commit; `read_file(path)` uses `show <commit>:<path>`; both read only the commit, never the working tree
+    - Turn a failed read into `SourceError` with code `read_failed`
+    - _Requirements: 2.3, 9.1_
+  - [ ]* 4.4 Check the git access against throwaway repositories
+    - Use temporary repositories with a bare `origin`: `origin/HEAD` set and unset, a failed fetch with and without an earlier copy, files read from the commit while the working tree differs, a repository path with spaces, and a command that times out
+
+- [ ] 5. Serve the plan
+  - [ ] 5.1 Add `load_repository()` to `backend/server.py`
+    - Use `EPIC_BOARD_REPOSITORY` when it is set and not empty; otherwise `config.json` in the app's own folder, which must be an object with a text `repository`; a bad value in the first source found is an error and does not fall through
+    - Expand `~`, make the path absolute, and build an error that names both the variable and the full path of `config.json`
+    - _Requirements: 1.2, 1.4_
+  - [ ] 5.2 Add the routes to `backend/server.py`
+    - Run `ThreadingHTTPServer` on `127.0.0.1` and the `PORT` from the environment; match GET paths on their end: `/health` and `/plan`; answer anything else with 404
+    - `/health` answers `{"ok": true}` whatever the configuration
+    - `/plan` never reads the query or body; it opens a snapshot, builds the plan, and answers with the repository, branch, ref, commit, fetch result, groups and problems
+    - Answer errors as in the design's table (`repository_not_configured` and `repository_not_a_checkout` with 409, `ref_unreadable` and `read_failed` with 502, `internal` with 500 and no repository path in the message)
+    - _Requirements: 1.1, 1.3, 1.4, 2.4, 2.6, 7.4_
+
+- [ ] 6. Add the placeholder page
+  - Create `ui/index.mjs` using the host's React as the spike's page did; it fetches `/apps/epic-board/api/plan` and prints the repository, branch, commit, the number of cards per group, any problems, and any error
+  - _Requirements: 1.1_
+
+- [ ] 7. Check it works end to end
+  - [ ] 7.1 Run the backend on this repository
+    - Start `backend/server.py` with a `PORT` and `EPIC_BOARD_REPOSITORY` set, request `/health` and `/plan`, and compare the answer with the epic and spec files on the main branch
+    - Try the error cases: no setting, a path that is not a checkout, a `config.json` with a bad value, and a query string carrying another `repo` path
+    - _Requirements: 1.1, 1.2, 1.3, 1.4, 2.6_
+  - [ ] 7.2 Install the app in Kiro Crew (done by you in the app)
+    - Install the app, set `config.json` or the environment variable, and confirm the placeholder page shows the plan
+    - Confirm the page can call its own backend with no permission entry; if the host refuses, add entries for the app's own routes
+    - _Requirements: 1.1_
