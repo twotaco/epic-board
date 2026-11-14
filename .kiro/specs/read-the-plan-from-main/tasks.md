@@ -72,7 +72,7 @@
     - Answer errors as in the design's table (`repository_not_configured` and `repository_not_a_checkout` with 409, `ref_unreadable` and `read_failed` with 502, `internal` with 500 and no repository path in the message)
     - _Requirements: 1.1, 1.3, 1.4, 2.4, 2.6, 7.4_
 
-- [ ] 6. Add the placeholder page
+- [x] 6. Add the placeholder page
   - Create `ui/index.mjs` using the host's React as the spike's page did; it fetches `/apps/epic-board/api/plan` and prints the repository, branch, commit, the number of cards per group, any problems, and any error
   - _Requirements: 1.1_
 
