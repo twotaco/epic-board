@@ -22,4 +22,4 @@ It matters now because the plan already lives in files on main, and nothing show
 - [Start a story](../../.kiro/specs/start-a-story/) — in progress. Click a card to start a conductor on it, see the state of its chat on the card, and open the chat from the card.
 - [Work in the chat](../../.kiro/specs/work-in-the-chat/) — in progress. Click a card to open its conductor's chat beside the board, and approve, answer and steer it without leaving the board. Built after the fix to starting a story.
 - [Filter by epic](../../.kiro/specs/filter-by-epic/) — in progress. A dropdown at the top of the board shows one epic or all of them.
-- Board design — planned. A clearer type scale, bold column and card titles, quieter meta lines, and descriptions cut to three lines.
+- [Board design](../../.kiro/specs/board-design/) — in progress. The board looks like part of Kiro Crew: Crew's own buttons, cards, badges, header and notices, column headers like Crew's Sessions board, bold card titles, quieter meta lines, and descriptions cut to three lines. Built after "Work in the chat".

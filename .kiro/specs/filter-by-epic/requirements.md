@@ -21,7 +21,7 @@ The filter is a view on the page. The backend, the `plan` route, `app.json` and 
 
 #### Acceptance Criteria
 
-1. WHEN the board shows a plan THEN the page SHALL show one dropdown with the accessible name "Epic" (`aria-label`), placed between the header line (branch, commit, age) and the columns.
+1. WHEN the board shows a plan THEN the page SHALL show one dropdown with the accessible name "Epic" (`aria-label`), placed between the header and the columns.
 2. THE first option SHALL be "All epics", with the Filter_Key `all`. It SHALL be selected when the page loads and nothing is saved (Requirement 3).
 3. AFTER the first option, there SHALL be one option per Plan_Group that has at least one card, in the plan's order, labelled with the epic's name and keyed by its `file`. The "No epic" group, when it has cards, SHALL be the last option, labelled "No epic" and keyed `no-epic`.
 4. THE page SHALL NOT show the dropdown while it has no plan to show: while loading, on an error, when the backend cannot be reached before a first plan, and when the plan has no cards at all (the empty board of the board spec).
