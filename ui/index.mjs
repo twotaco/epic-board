@@ -751,6 +751,8 @@ export const STYLE = `
 .eb-card-main:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
 .eb-card[data-mode='startable']:hover, .eb-card[data-mode='question']:hover, .eb-card[data-mode='blocked']:hover, .eb-card[data-mode='chat']:hover { background: rgba(128, 128, 128, 0.2); }
 .eb-card:focus-within { border-color: currentColor; }
+.eb-card[data-open='true'] { border-color: currentColor; box-shadow: 0 0 0 1px currentColor; }
+.eb-chat-open { margin-left: 8px; font-size: 0.85em; font-weight: 600; }
 .eb-chat-line { margin-top: 6px; }
 .eb-chat-state { display: inline-block; border: 1px solid currentColor; border-radius: 10px; padding: 0 8px; font-size: 0.85em; }
 .eb-chat-state[data-state='needs-you'] { font-weight: 600; }
@@ -771,6 +773,27 @@ export const STYLE = `
     .eb-columns { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   }
 }
+.eb-shell { container: eb-shell / inline-size; height: 100%; }
+.eb-split { position: relative; height: 100%; }
+.eb-panel { display: flex; flex-direction: column; min-width: 0; min-height: 0; height: 100%; }
+.eb-panel-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 12px; border-bottom: 1px solid currentColor; }
+.eb-panel-title { font-weight: 600; overflow-wrap: anywhere; }
+.eb-panel-head button { font: inherit; cursor: pointer; }
+.eb-panel-body { flex: 1 1 0; min-height: 0; }
+.eb-shell[data-panel='open'] .eb-panel { position: absolute; inset: 0; }
+.eb-shell[data-panel='open'] .eb-root { visibility: hidden; }
+@container eb-shell (min-width: 1000px) {
+  .eb-shell[data-panel='open'] .eb-split { display: flex; }
+  .eb-shell[data-panel='open'] .eb-root { visibility: visible; flex: 1 1 0; min-width: 0; }
+  .eb-shell[data-panel='open'] .eb-panel { position: static; flex: 0 0 clamp(380px, 40%, 640px); border-left: 1px solid currentColor; }
+}
+@supports not (container-type: inline-size) {
+  @media (min-width: 1000px) {
+    .eb-shell[data-panel='open'] .eb-split { display: flex; }
+    .eb-shell[data-panel='open'] .eb-root { visibility: visible; flex: 1 1 0; min-width: 0; }
+    .eb-shell[data-panel='open'] .eb-panel { position: static; flex: 0 0 clamp(380px, 40%, 640px); border-left: 1px solid currentColor; }
+  }
+}
 `
 
 const EMPTY_PLAN_HINT = 'Specs are read from .kiro/specs/ and epics from docs/epics/.'
@@ -784,7 +807,7 @@ const STEP_TEXT = {
 }
 
 const NO_ACTIONS = Object.freeze({
-  ask() {}, cancel() {}, start() {}, close() {}, sendBrief() {}, resume() {}, startAgain() {}, filter() {},
+  ask() {}, cancel() {}, start() {}, close() {}, sendBrief() {}, resume() {}, startAgain() {}, filter() {}, openChat() {},
 })
 
 // The part of a card below its progress that belongs to the chat: the state word, the question,
@@ -793,9 +816,10 @@ function renderChatPart(h, card, view, actions) {
   switch (view.mode) {
     case 'chat': {
       const parts = []
-      if (view.state) {
+      if (view.state || view.open) {
         parts.push(h('div', { className: 'eb-chat-line', key: 'state' },
-          h('span', { className: 'eb-chat-state', 'data-state': view.state }, view.stateWord)))
+          view.state ? h('span', { className: 'eb-chat-state', 'data-state': view.state }, view.stateWord) : null,
+          view.open ? h('span', { className: 'eb-chat-open' }, 'Chat open') : null))
       }
       if (view.brief?.kind === 'sending') {
         parts.push(h('p', { className: 'eb-chat-note', role: 'status', key: 'brief' }, 'Sending the brief…'))
@@ -854,7 +878,9 @@ function renderChatPart(h, card, view, actions) {
 function renderCard(h, card, index, view, actions) {
   const progress = progressOf(card)
   // Without the chats state a card has no controls: the board as the board spec drew it.
-  const chat = view.chats ? cardViewOf(card, view.chats, view.ui ?? {}) : { mode: 'plain' }
+  const seen = view.chats ? cardViewOf(card, view.chats, view.ui ?? {}) : { mode: 'plain' }
+  // A host with no chat panel shows no Panel, so no card is marked.
+  const chat = seen.open && !view.panelAvailable ? { ...seen, open: false } : seen
   const main = { className: 'eb-card-main', 'data-card-id': card.id }
   // The card's name is the label of its one main control. It stays a button while the question is open,
   // so a keyboard user's focus is not lost, and it is plain text whenever there is nothing to do.
@@ -862,9 +888,18 @@ function renderCard(h, card, index, view, actions) {
   if (chat.mode === 'startable' || chat.mode === 'question' || chat.mode === 'blocked') {
     name = h('button', { ...main, type: 'button', onClick: () => actions.ask(card.id) }, card.name)
   } else if (chat.mode === 'chat') {
-    name = h('a', { ...main, href: chat.href }, card.name)
+    name = h('a', {
+      ...main,
+      href: chat.href,
+      ...(chat.open ? { 'aria-current': 'true' } : {}),
+      onClick: (event) => {
+        if (!view.panelAvailable || !isPlainClick(event)) return // the browser follows the link
+        event.preventDefault()
+        actions.openChat({ cardId: card.id, key: chat.key })
+      },
+    }, card.name)
   }
-  return h('li', { className: 'eb-card', 'data-mode': chat.mode, key: index },
+  return h('li', { className: 'eb-card', 'data-mode': chat.mode, ...(chat.open ? { 'data-open': 'true' } : {}), key: index },
     h('div', { className: 'eb-card-name' }, name),
     card.description ? h('div', { className: 'eb-card-description' }, card.description) : null,
     card.spec != null ? h('div', { className: 'eb-card-spec' }, card.spec) : null,
@@ -979,6 +1014,22 @@ export function renderBoard(h, view, actions = {}, parts = {}) {
     h('style', null, STYLE),
     h(`h${TITLE_LEVEL}`, { className: 'eb-title' }, 'Epic Board'),
     renderBody(h, view, { ...NO_ACTIONS, ...actions }, parts))
+}
+
+// The Panel: a titled region with a Close button around `content` (the Chat_Panel). `panel` is {title}.
+export function renderPanel(h, panel, content, actions = {}) {
+  return h('aside', { className: 'eb-panel', 'data-eb-panel': 'true', tabIndex: -1, 'aria-label': `Chat: ${panel.title}` },
+    h('div', { className: 'eb-panel-head' },
+      h('span', { className: 'eb-panel-title' }, panel.title),
+      h('button', { type: 'button', onClick: () => actions.closeChat?.() }, 'Close')),
+    h('div', { className: 'eb-panel-body' }, content))
+}
+
+// The page: the board, and beside or over it the Panel's tree (null when no chat is open). The board
+// keeps its place in the tree either way, so it stays mounted.
+export function renderShell(h, board, panelTree) {
+  return h('div', { className: 'eb-shell', 'data-panel': panelTree ? 'open' : 'closed' },
+    h('div', { className: 'eb-split' }, board, panelTree))
 }
 
 const PLAN_URL = '/apps/epic-board/api/plan'
@@ -1098,6 +1149,11 @@ export function hostSelect() {
   }
 }
 
+// The host's ChatPanel, or undefined when there is none.
+function hostChatPanel() {
+  return typeof window !== 'undefined' ? window.__kirocrew_modules?.['@kirocrew/app-sdk']?.ChatPanel : undefined
+}
+
 // The browser's localStorage, or undefined when there is none or reading it throws.
 function hostStorage() {
   try {
@@ -1116,6 +1172,34 @@ const NO_CLIENT = 'The host has no app client, so Crew cannot be reached.'
 export function createBoard(React, env = {}) {
   const { useReducer, useState, useEffect, useRef, createElement: h } = React
 
+  // Shows the Chat_Panel, or the failure text and a link to the chat when it throws; tries again when the
+  // `slotKey` changes. Built on first use, so a React with no `Component` costs nothing until a Panel opens.
+  let Boundary = null
+  const boundary = () => {
+    if (Boundary === null) {
+      Boundary = class PanelBoundary extends React.Component {
+        constructor(props) {
+          super(props)
+          this.state = { failed: false }
+        }
+        static getDerivedStateFromError() {
+          return { failed: true }
+        }
+        componentDidUpdate(previous) {
+          if (this.state.failed && previous.slotKey !== this.props.slotKey) this.setState({ failed: false })
+        }
+        render() {
+          if (!this.state.failed) return this.props.children
+          return [
+            h('p', { role: 'status', key: 'text' }, 'The chat could not be shown here.'),
+            h('a', { href: chatHref(this.props.slotKey), key: 'link' }, 'Open the chat in Crew'),
+          ]
+        }
+      }
+    }
+    return Boundary
+  }
+
   return function Board() {
     const [state, dispatch] = useReducer(reduce, initialState)
     const [chats, chatsDispatch] = useReducer(chatsReduce, initialChats)
@@ -1124,6 +1208,8 @@ export function createBoard(React, env = {}) {
     const storage = env.storage !== undefined ? env.storage : hostStorage()
     const Select = env.Select !== undefined ? env.Select : hostSelect()
     const [filterKey, setFilterKey] = useState(() => loadChoice(storage))
+    const ChatPanel = env.ChatPanel ?? hostChatPanel()
+    const hasPanel = isChatPanel(ChatPanel)
 
     // What the handlers and the chat poller read. Refs, so they always see the latest render.
     const latest = useRef(null)
@@ -1134,6 +1220,7 @@ export function createBoard(React, env = {}) {
     }
     latest.current.chats = chats
     latest.current.api = api
+    latest.current.hasPanel = hasPanel
 
     useEffect(() => {
       const doc = env.document ?? document
@@ -1236,6 +1323,15 @@ export function createBoard(React, env = {}) {
       if (target && typeof target.focus === 'function') target.focus()
     }, [ui.focus])
 
+    // When a Panel opens or shows another chat, put focus on its container.
+    const panelKey = hasPanel && ui.open ? ui.open.key : null
+    useEffect(() => {
+      if (panelKey === null) return
+      const doc = env.document ?? document
+      const target = doc.querySelector('[data-eb-panel]')
+      if (target && typeof target.focus === 'function') target.focus()
+    }, [panelKey])
+
     const refresh = () => latest.current.poller?.visible()
     const live = (fn) => (...args) => { if (latest.current.alive) fn(...args) }
     const ownUi = live(uiDispatch)
@@ -1250,6 +1346,13 @@ export function createBoard(React, env = {}) {
       ask: (cardId) => ownUi({ kind: 'ask', cardId }),
       cancel: (cardId) => ownUi({ kind: 'cancel', cardId }),
       close: (cardId) => ownUi({ kind: 'cancel', cardId }),
+      // Only a chat the page holds a record for is opened.
+      openChat: ({ cardId, key }) => {
+        if (latest.current.chats.records.some((record) => record.key === key && record.card_id === cardId)) {
+          ownUi({ kind: 'open-chat', cardId, key })
+        }
+      },
+      closeChat: () => ownUi({ kind: 'close-chat', focus: true }),
       async start(cardId) {
         const { starts, backend, gateway } = latest.current
         if (starts.has(cardId)) return // a start is already running for this card
@@ -1265,6 +1368,7 @@ export function createBoard(React, env = {}) {
               latest.current.briefs.set(saved.key, saved.brief)
               ownChats({ kind: 'started', record: { card_id: cardId, name: saved.name, key: saved.key } })
               ownUi({ kind: 'started', cardId })
+              if (latest.current.hasPanel) ownUi({ kind: 'open-chat', cardId, key: saved.key })
               ownUi({ kind: 'brief-sending', key: saved.key })
               refresh()
             },
@@ -1316,7 +1420,10 @@ export function createBoard(React, env = {}) {
         try {
           await startAgain({ name, backend: latest.current.backend })
           ownChats({ kind: 'removed', name })
-          if (record) ownUi({ kind: 'resumed', key: record.key })
+          if (record) {
+            ownUi({ kind: 'resumed', key: record.key })
+            ownUi({ kind: 'close-chat', key: record.key })
+          }
           ownUi({ kind: 'ask', cardId })
         } catch (error) {
           if (record) ownUi({ kind: 'resume-failed', key: record.key, reason: error.reason ?? String(error?.message ?? error) })
@@ -1334,7 +1441,12 @@ export function createBoard(React, env = {}) {
       }
     }, [effectiveKey, filterKey])
 
-    return renderBoard(h, { ...view, chats, ui }, { ...actions, filter }, { Select })
+    const board = renderBoard(h, { ...view, chats, ui, panelAvailable: hasPanel }, { ...actions, filter }, { Select })
+    const panel = panelViewOf(view, ui, hasPanel)
+    const panelTree = panel
+      ? renderPanel(h, panel, h(boundary(), { slotKey: panel.key }, h(ChatPanel, { slotKey: panel.key, conversationOnly: true })), actions)
+      : null
+    return renderShell(h, board, panelTree)
   }
 }
 

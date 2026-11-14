@@ -29,22 +29,22 @@ Group 1 is the page's pure logic. Group 2 draws the panel and its styles. Group 
     - Run `python3 -m unittest discover -s tests -t .` and `node --test tests/ui/*.test.mjs` and report the counts run, passed and skipped for each
     - _Requirements: 1.1, 1.3, 1.4, 2.1, 2.2, 2.3, 2.6_
 
-- [ ] 2. Page: the panel, the mark and the layout
-  - [ ] 2.1 Draw them in `ui/index.mjs`
+- [x] 2. Page: the panel, the mark and the layout
+  - [x] 2.1 Draw them in `ui/index.mjs`
     - `renderPanel` and `renderShell` as the design gives them; `renderBoard` is not changed except that the card's `a` gets the `onClick` of the design, `view.panelAvailable` and an `openChat` action defaulting to a no-op, and an Open_Card gets `data-open`, `aria-current` on its link and `span.eb-chat-open` "Chat open"
     - Add the rules of the design to `STYLE`: the container, the panel, the mark, the narrow rules, the wide rules in a container query named `eb-shell` at 1,000 pixels, and the same wide rules in a media query under `@supports not (container-type: inline-size)`; only `currentColor` and greys with an alpha between 0 and 1, no `outline: none`
     - The failure text is `p[role=status]` and the failure link is built only from `chatHref`; no heading is added; every text from the plan is a child or a text attribute
     - _Requirements: 2.4, 2.5, 3.1, 3.2, 3.3, 3.5, 4.1, 6.1, 6.2, 6.3, 6.4_
-  - [ ] 2.2 Check the markup in `tests/ui/render.test.mjs`
+  - [x] 2.2 Check the markup in `tests/ui/render.test.mjs`
     - The panel's `aside`, `aria-label`, `tabindex`, `data-eb-panel`, title and "Close" button; the mark on the Open_Card and on no other; no panel, no mark and an unchanged link when the host has none; the click handler (plain click calls `preventDefault` and `openChat` with the card id and key; a modifier click, a secondary button, a handled event and a missing host panel do neither); no heading added and the same heading levels; literal text for a name with markup in the title and the label; `STYLE` scans for colour and outline and for the narrow and wide rules in both forms
     - Update the interactive-element check: the only interactive elements are the `summary`, the controls of the start spec's Requirements 2, 4, 7 and 8, the Panel's "Close" button and the failure link, and no element drawn inside the panel's body by a fake component
     - Update the root checks: the page's first element is `eb-shell`, then `eb-split`, then `eb-root`
     - _Requirements: 1.5, 1.6, 2.4, 2.5, 3.1, 3.2, 3.3, 3.5, 4.1, 6.1, 6.2, 6.3, 6.4_
-  - [ ] 2.3 Write property test for the agreement of the mark and the panel in `tests/ui/panel.test.mjs`
+  - [x] 2.3 Write property test for the agreement of the mark and the panel in `tests/ui/panel.test.mjs`
     - **Property 2: The mark, the Panel and the chat agree**
     - Seeded views, chats states and `ui` with and without a host panel; at least 100 iterations with the seed printed on failure
     - **Validates: Requirements 1.2, 1.5, 2.4, 2.5, 3.5**
-  - [ ] 2.4 Run the tests
+  - [x] 2.4 Run the tests
     - Run `python3 -m unittest discover -s tests -t .` and `node --test tests/ui/*.test.mjs` and report the counts run, passed and skipped for each
     - _Requirements: 1.2, 1.5, 1.6, 2.4, 2.5, 3.1, 3.2, 3.3, 3.5, 4.1, 6.1, 6.2, 6.3, 6.4_
 

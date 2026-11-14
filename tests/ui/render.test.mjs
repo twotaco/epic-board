@@ -8,7 +8,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 
 import {
-  STYLE, TITLE_LEVEL, chatHref, classify, columnsOf, initialChats, initialState, progressOf, reduce, renderBoard, viewOf,
+  STYLE, TITLE_LEVEL, chatHref, classify, columnsOf, initialChats, initialState, progressOf, reduce, renderBoard, renderPanel, renderShell, viewOf,
 } from '../../ui/index.mjs'
 import { baseSeed, findAll, forSeeds, h, textOf, walk } from './support.mjs'
 
@@ -188,8 +188,12 @@ function assertStructure(tree, label, { cardControls = false } = {}) {
   const insideCards = new Set(findAll(tree, (node) => node.type === 'li' && node.props.className === 'eb-card').flatMap((li) => elements(li)))
   // The epic dropdown (epic filter, Requirement 1.1) is the one control outside a card.
   const insideFilter = new Set(findAll(tree, (node) => node.props.className === 'eb-filter').flatMap((box) => elements(box)))
-  assert.deepEqual(interactive.filter((node) => !insideCards.has(node) && !insideFilter.has(node)), [], `${label}: interactive element outside a card`)
-  if (!cardControls) assert.deepEqual(interactive.filter((node) => !insideFilter.has(node)), [], `${label}: a view with no chats has no control`)
+  // The Panel's header holds its "Close" button (work-in-the-chat). Nothing else in the Panel is the page's own control.
+  // The Panel's own container is focusable by script only (tabindex -1) and does nothing when used.
+  const insidePanelHead = new Set(findAll(tree, (node) => node.props.className === 'eb-panel-head' || node.props['data-eb-panel'] !== undefined)
+    .flatMap((box) => (box.props['data-eb-panel'] !== undefined ? [box] : elements(box))))
+  assert.deepEqual(interactive.filter((node) => !insideCards.has(node) && !insideFilter.has(node) && !insidePanelHead.has(node)), [], `${label}: interactive element outside a card`)
+  if (!cardControls) assert.deepEqual(interactive.filter((node) => !insideFilter.has(node) && !insidePanelHead.has(node)), [], `${label}: a view with no chats has no control`)
   const details = findAll(tree, (node) => node.type === 'details')
   const summaries = findAll(tree, (node) => node.type === 'summary')
   assert.ok(details.length <= 1, `${label}: more than one details`)
@@ -730,8 +734,9 @@ test('STYLE stacks the columns, puts them side by side from 720px in a container
   // The wide rules come after the base rule, so they win.
   assert.ok(STYLE.indexOf('@container (min-width: 720px)') > STYLE.indexOf('.eb-columns {'))
   assert.ok(STYLE.indexOf('@supports not') > STYLE.indexOf('.eb-columns {'))
-  // The media query is only inside the fallback.
-  assert.equal(STYLE.split('@media').length - 1, 1)
+  // The media queries are only inside fallbacks: the columns' (720px) and the panel's (1000px, work-in-the-chat).
+  assert.equal(STYLE.split('@media').length - 1, 2)
+  assert.equal(STYLE.split('@supports not (container-type: inline-size)').length - 1, 2)
 })
 
 test('STYLE lets grid items shrink and card text wrap', () => {
@@ -849,7 +854,7 @@ const missing = (at, since = 0, key = 'k1') => withChat(key, { state: 'missing' 
 // Records what the controls call.
 function recorder() {
   const calls = []
-  const actions = Object.fromEntries(['ask', 'cancel', 'start', 'close', 'sendBrief', 'resume', 'startAgain'].map((name) => [name, (...args) => calls.push([name, ...args])]))
+  const actions = Object.fromEntries(['ask', 'cancel', 'start', 'close', 'sendBrief', 'resume', 'startAgain', 'openChat'].map((name) => [name, (...args) => calls.push([name, ...args])]))
   return { calls, actions }
 }
 const renderWith = (view, actions) => renderBoard(h, view, actions)
@@ -1282,5 +1287,134 @@ test('host: hostSelect gives null when the module has no Select or the lookup th
     assert.equal(hostSelect(), null)
   } finally {
     delete globalThis.window
+  }
+})
+
+// ---- The chat panel, the mark and the layout (work-in-the-chat, Requirements 1.5, 1.6, 2.4, 2.5, 3, 4.1, 6) ----
+const FakeChat = () => null
+const panelOf = (tree) => findAll(tree, (n) => n.type === 'aside')
+const openView = (over = {}) => chatsView({
+  chats: withChat('k1', { state: 'idle' }), ui: { open: { cardId: CARD_ID, key: 'k1' } }, ...over,
+})
+const withPanel = (view) => ({ ...view, panelAvailable: true })
+const clickEvent = (over = {}) => {
+  const event = { button: 0, defaultPrevented: false, prevented: 0, preventDefault() { this.prevented += 1 }, ...over }
+  return event
+}
+
+test('the Panel is an aside with a label, a tabindex, the title, a Close button and the content in its body', () => {
+  const closed = []
+  const content = h(FakeChat, { slotKey: 'k1', conversationOnly: true })
+  const tree = renderPanel(h, { title: 'Story', key: 'k1' }, content, { closeChat: () => closed.push(1) })
+  assert.equal(tree.type, 'aside')
+  assert.equal(tree.props['aria-label'], 'Chat: Story')
+  assert.equal(tree.props.tabIndex, -1)
+  assert.equal(tree.props['data-eb-panel'], 'true')
+  assert.equal(textOf(findAll(tree, (n) => n.props.className === 'eb-panel-title')[0]), 'Story')
+  const close = buttons(tree)
+  assert.deepEqual(close.map(labelOf), ['Close'])
+  assert.equal(close[0].props.type, 'button')
+  close[0].props.onClick()
+  assert.deepEqual(closed, [1])
+  assert.deepEqual(findAll(tree, (n) => n.props.className === 'eb-panel-body')[0].children, [content])
+  assert.deepEqual(findAll(tree, (n) => /^h[1-6]$/.test(String(n.type))), [], 'no heading')
+  assert.doesNotThrow(() => renderPanel(h, { title: 'T', key: 'k' }, null).props)
+})
+
+test('the shell wraps the board in eb-shell > eb-split, in the same place with or without a Panel', () => {
+  const board = render(loadingView())
+  const closed = renderShell(h, board, null)
+  assert.deepEqual([closed.props.className, closed.props['data-panel']], ['eb-shell', 'closed'])
+  assert.equal(closed.children[0].props.className, 'eb-split')
+  assert.equal(closed.children[0].children[0], board)
+  assert.equal(closed.children[0].children.length, 1, 'no space kept for a Panel')
+  const panel = renderPanel(h, { title: 'S', key: 'k' }, null)
+  const open = renderShell(h, board, panel)
+  assert.equal(open.props['data-panel'], 'open')
+  assert.deepEqual(open.children[0].children, [board, panel])
+})
+
+test('the Open_Card, and only it, shows "Chat open", aria-current and data-open', () => {
+  const other = { id: 'e.md#Other', name: 'Other', status: 'planned', spec: null, tasks: null, epic: 'E', description: '' }
+  const chats = withChat('k1', { state: 'idle' }, { records: [
+    { card_id: CARD_ID, name: 'k1', key: 'k1', created: 't' }, { card_id: other.id, name: 'k2', key: 'k2', created: 't' },
+  ], byKey: { k1: { state: 'idle' }, k2: { state: 'idle' } } })
+  const tree = renderWith(withPanel(chatsView({ chats, extraCards: [other], ui: { open: { cardId: CARD_ID, key: 'k1' } } })))
+  const [first, second] = findAll(tree, (n) => n.type === 'li' && n.props.className === 'eb-card')
+  assert.equal(first.props['data-open'], 'true')
+  assert.equal(links(first)[0].props['aria-current'], 'true')
+  assert.equal(findAll(first, (n) => n.props.className === 'eb-chat-open').map(labelOf).join(), 'Chat open')
+  assert.equal('data-open' in second.props, false)
+  assert.equal('aria-current' in links(second)[0].props, false)
+  assert.doesNotMatch(textOf(second), /Chat open/)
+  const closed = renderWith(withPanel(chatsView({ chats })))
+  assert.doesNotMatch(textOf(closed), /Chat open/)
+  assert.equal(findAll(closed, (n) => 'data-open' in n.props).length, 0)
+})
+
+test('a plain click on the link opens the chat; anything else is left to the browser', () => {
+  const { calls, actions } = recorder()
+  const link = links(theCard(renderWith(withPanel(chatsView({ chats: withChat('k1') })), actions)))[0]
+  const plain = clickEvent()
+  link.props.onClick(plain)
+  assert.equal(plain.prevented, 1)
+  assert.deepEqual(calls, [['openChat', { cardId: CARD_ID, key: 'k1' }]])
+  calls.length = 0
+  for (const over of [{ ctrlKey: true }, { metaKey: true }, { shiftKey: true }, { altKey: true }, { button: 1 }, { button: 2 }, { defaultPrevented: true }]) {
+    const event = clickEvent(over)
+    link.props.onClick(event)
+    assert.equal(event.prevented, 0, JSON.stringify(over))
+  }
+  assert.deepEqual(calls, [])
+  // No host panel: the click is left alone and the link is unchanged.
+  const bare = links(theCard(renderWith(chatsView({ chats: withChat('k1') }), actions)))[0]
+  const event = clickEvent()
+  bare.props.onClick(event)
+  assert.deepEqual([event.prevented, calls], [0, []])
+  assert.equal(bare.props.href, '/chat?sid=k1')
+})
+
+test('with no host panel nothing of the panel shows, and the card is as before', () => {
+  const tree = renderWith(openView())
+  assert.doesNotMatch(visibleText(tree), /Chat open|Close/)
+  assert.equal(findAll(tree, (n) => n.type === 'aside' || 'data-open' in n.props || 'aria-current' in n.props).length, 0)
+})
+
+test('the panel adds no heading and keeps the heading levels', () => {
+  const plain = headingLevels(renderWith(withPanel(chatsView({ chats: withChat('k1') }))))
+  const shell = renderShell(h, renderWith(withPanel(openView())), renderPanel(h, { title: 'Story', key: 'k1' }, h(FakeChat, {})))
+  assert.deepEqual(headingLevels(shell), plain)
+  assertStructure(shell, 'with a panel', { cardControls: true })
+})
+
+test('a name with markup is literal text in the Panel and its label', () => {
+  const name = '<img src=x onerror=alert(1)> **bold**'
+  const tree = renderPanel(h, { title: name, key: 'k' }, null)
+  assert.equal(tree.props['aria-label'], `Chat: ${name}`)
+  assert.equal(findAll(tree, (n) => n.props.className === 'eb-panel-title')[0].children[0], name)
+  assert.equal(findAll(tree, (n) => n.type === 'img').length, 0)
+  const card = renderWith(withPanel(chatsView({ card: { name }, chats: withChat('k1'), ui: { open: { cardId: CARD_ID, key: 'k1' } } })))
+  assert.equal(links(theCard(card))[0].children[0], name)
+})
+
+test('STYLE: the panel rules use no colour of their own, and the mark is currentColor', () => {
+  assert.deepEqual(themeProblems(STYLE), [])
+  assert.match(STYLE, /\.eb-card\[data-open='true'\]\s*\{[^}]*border-color:\s*currentColor[^}]*box-shadow:\s*0 0 0 1px currentColor/)
+  assert.doesNotMatch(STYLE, /outline:\s*none/)
+})
+
+test('STYLE: narrow covers the board with visibility hidden, wide sits beside it, in a container query and a media fallback', () => {
+  assert.match(STYLE, /\.eb-shell\s*\{[^}]*container:\s*eb-shell \/ inline-size/)
+  assert.match(STYLE, /\.eb-shell\[data-panel='open'\] \.eb-panel\s*\{\s*position:\s*absolute;\s*inset:\s*0/)
+  assert.match(STYLE, /\.eb-shell\[data-panel='open'\] \.eb-root\s*\{\s*visibility:\s*hidden/)
+  const wide = blockBody(STYLE, '@container eb-shell (min-width: 1000px)')
+  assert.ok(wide !== null, 'the container query')
+  const supports = blockBody(STYLE.slice(STYLE.lastIndexOf('@supports not')), '@supports not (container-type: inline-size)')
+  const fallback = blockBody(supports, '@media (min-width: 1000px)')
+  assert.ok(fallback !== null, 'the media fallback')
+  for (const body of [wide, fallback]) {
+    assert.match(body, /\.eb-split\s*\{[^}]*display:\s*flex/)
+    assert.match(body, /\.eb-root\s*\{[^}]*visibility:\s*visible/)
+    assert.match(body, /\.eb-panel\s*\{[^}]*position:\s*static[^}]*clamp\(380px, 40%, 640px\)/)
   }
 })
