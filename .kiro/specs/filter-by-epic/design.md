@@ -33,11 +33,15 @@ The columns are then built by `columnsOf(filtered)`, which keeps the three colum
 
 ### `renderFilter(h, filter, actions)` and `renderPlanView`
 
-`renderFilter` returns a `div.eb-filter` holding a `label` (`htmlFor="eb-epic-filter"`, text "Epic") and a `select` (`id="eb-epic-filter"`, `value` the key, `onChange` calling `actions.filter(event.target.value)`) with one `option` per entry. `renderPlanView` puts it directly after `eb-header`, and only when `view.empty` is false. `NO_ACTIONS` gains `filter: () => {}`. `STYLE` gains a few lines for `.eb-filter`. All text is passed as children, as the board design requires.
+`renderFilter(h, filter, actions, Select)` returns a `div.eb-filter` holding the control. When `Select` is a component it draws Crew's `Select` with `aria-label="Epic"`, `value` the key, `options` (`{value, label}` per entry) and an `onChange` that passes the chosen key to `actions.filter`. Otherwise it draws a native `select` with `aria-label="Epic"`, `value` the key, one `option` per entry and an `onChange` calling `actions.filter(event.target.value)`. Both carry the accessible name "Epic" and neither draws a visible label, so there is no `htmlFor` tie. The `onChange` of the host `Select` is adapted to take either the chosen value or an event (`typeof arg === 'string' ? arg : arg?.target?.value`), because the host's signature was not seen (Open Questions). `renderPlanView` puts it directly after `eb-header`, and only when `view.empty` is false. `renderBoard(h, view, actions, parts = {})` gains a fourth argument whose `Select` goes to `renderFilter`; it defaults to none, so every existing call is unchanged. `NO_ACTIONS` gains `filter: () => {}`. `STYLE` gains a few lines for `.eb-filter`. All text is passed as children, as the board design requires.
 
 ### `loadChoice(storage)` and `saveChoice(storage, key)`
 
 `FILTER_STORAGE_KEY = 'epic-board.filter'`. `loadChoice(storage)` returns the saved text, or `'all'` when `storage` is undefined, the read throws, or the value is not a non-empty string. `saveChoice(storage, key)` writes the key and swallows any throw, returning whether it worked. Neither throws, and neither reads `window`: the page passes `env.storage ?? window.localStorage`, looked up inside a `try` (reading `window.localStorage` can itself throw), so importing the module and the tests need no `window`. Requirement 3.5, 3.6, 3.8.
+
+### `hostSelect()`
+
+Next to `hostApiHook`, and read the same way: `hostSelect()` returns `window.__kirocrew_modules?.['@kirocrew/ui']?.Select` when it is a function or an object (a React component), inside a `try` and behind `typeof window !== 'undefined'`, and `null` otherwise. It never throws and needs no `window`. `createBoard` calls `(env.Select !== undefined ? env.Select : hostSelect())` inside the component, as it does for `useAppApi`, and passes the result as `parts.Select`. Tests pass `env.Select` or `parts.Select`, so they need no `window`. Requirement 1.5.
 
 ### The page
 
@@ -66,11 +70,13 @@ Page tests (Node's test runner, `tests/ui/*.test.mjs`):
   - `save: saveChoice writes the key under epic-board.filter`, `save: all is saved too`, `save: a throwing setItem does not throw`
   - `restore: loadChoice returns the saved key`, `restore: nothing saved gives all`, `restore: no storage gives all`, `restore: a throwing getItem gives all`, `restore: a non-text value gives all`
   - `fallback: a saved epic missing from the plan shows all epics and resets the Saved_Choice`
-- `tests/ui/render.test.mjs` (extended): the dropdown is drawn with a label tied to the select, "All epics" first, selected value, one option per entry, an `onChange` that calls `actions.filter` with the value; it is not drawn while loading, on an error or on the empty board; the problems list and notices stay under a filter.
+- `tests/ui/render.test.mjs` (extended): `render: host Select used when present` (given a fake `Select`, it is the element drawn, with the key as `value`, "All epics" first, one option per entry, and its `onChange` calls `actions.filter` with the key, given a string or an event), `render: native select when the ui module is missing`, `render: native select when Select is missing from the module`, `render: aria-label Epic on the host Select`, `render: aria-label Epic on the native select`, and for the native one the selected value and an `onChange` that calls `actions.filter` with the value; `hostSelect` tests (`host: hostSelect finds Select`, `host: hostSelect gives null with no window`, `host: hostSelect gives null when the lookup throws`); it is not drawn while loading, on an error or on the empty board; the problems list and notices stay under a filter.
 - `tests/ui/board.test.mjs` (extended): with the fake React and a fake `storage` in `env`, choosing an epic shows only its cards and saves its key (`board: choosing an epic saves it`); a board built with a saved key starts on that epic, with no write (`board: a saved epic is restored on load`); a saved epic that the first plan lacks shows all epics and writes `all` (`board: a missing saved epic falls back to all epics`); no board is drawn and nothing is reset before the first plan; a new plan keeps the choice; a new plan without the epic goes back to all and stays there when the epic returns; a failed poll keeps the filter working; a chat poll or a start does not change the choice; a board with a throwing storage still filters in memory.
 
 Python tests: none are added, because the backend does not change. `python3 -m unittest discover -s tests -t .` still runs in full, and `tests/test_ui.py` runs the page tests through Node.
 
 ## Open Questions
+
+- The props of Crew's `Select` (`options`, `value`, `onChange`, `aria-label`) were not seen in the Crew source available here. The app-development guide lists the `@kirocrew/ui` components but not `Select`'s props. The design follows the usual shape and adapts `onChange`; the manual check (task 2.4) confirms the control on a real host, and a wrong shape is fixed in `renderFilter` alone, since the native fallback does not depend on it.
 
 - Whether the host's page sandbox allows `localStorage`. The manual check in the last task group reads it on a real host. The page works without it (Requirement 3.8).
