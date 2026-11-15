@@ -353,11 +353,17 @@ Backend tests are `unittest`, standard library only, in `tests/`. Page tests run
 ## Open Questions
 
 1. **A renamed project loses its records file.** The Id comes from the name, so renaming a project in `config.json` (other than the project that owns `chats.json`) points it at a new empty `chats-<new-id>.json`, and the old file stays unread. An optional `id` field would fix that. The request lists three fields only, so it is not added. Is this acceptable, or should `id` be allowed?
+   **Answer:** No `id` field. Keep as designed.
 2. **A project that has the legacy repository, once the top-level `repository` is removed.** `chats.json` then belongs to no project and its chats do not show. The story does not move files. Should the person be told, for example in the `GET /chats` answer?
+   **Answer:** No notice when `repository` is removed. Keep as designed.
 3. **Do the environment variables still mean anything when `projects` is listed?** This design ignores `EPIC_BOARD_FOLDER` and uses `EPIC_BOARD_REPOSITORY` only to find the legacy file. Is that what the owner expects, or should `projects` and the variables not be allowed together?
+   **Answer:** `EPIC_BOARD_FOLDER` ignored when `projects` is listed, `EPIC_BOARD_REPOSITORY` only finds the old file. Keep as designed.
 4. **Does the gateway forward the query?** The backend checks the signature over the whole target, and the page puts `project=` in the target. If the gateway drops or re-orders the query before signing, every `chats` call of a second project would answer 401 or reach the wrong project. The manual check settles it. If it fails, the fallback is a path segment for the project and a change to the routes' matching.
+   **Answer:** Settled. Crew's gateway signs `target_url.raw_path_qs` (the path with its query string), so `?project=` is covered. The path-segment fallback is dropped from the design. The manual check note in task 5.1 stays.
 5. **A start during a switch.** The brief may be sent to a chat the page no longer shows, and a "The brief was not sent" note is dropped with the switch. The chat is saved and shows when the person comes back, but the note does not. Is that acceptable?
+   **Answer:** A Start running during a project switch finishes but shows nothing. Acceptable; no change.
 6. **The chat state change may rename the parts this design names.** `story/chat-state` is in progress. If it changes the chats state or the poller's shape, group 3 adjusts the names and checks the properties again.
 7. **Where the panel's open chat is kept.** The design assumes the panel's `open` lives in `ui`, as "Work in the chat" has it. If it moves, the reset of Requirement 5, criterion 1 must still close the panel.
 8. **How many projects.** The limit of 20 and the name limit of 100 characters are judgements to bound the threads and the dropdown. Change them in Requirement 1 if they are wrong.
+   **Answer:** Limits of 20 projects and 100-character names are fine as designed.
 9. **Which project opens on a first visit.** The first in the config. There is no "last used" across browsers, only the saved choice of this browser.

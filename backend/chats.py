@@ -171,11 +171,11 @@ def _check_records(path, data):
 
 
 class ChatStore:
-    """The records of `chats.json`. One lock serializes every call; each call reads the file afresh."""
+    """The records of a chats file. One lock serializes every call; each call reads the file afresh."""
 
-    def __init__(self, data_dir, new_name=default_new_name, clock=utc_now):
+    def __init__(self, data_dir, filename=CHATS_FILE, new_name=default_new_name, clock=utc_now):
         self.data_dir, self.new_name, self.clock = data_dir, new_name, clock
-        self.path = os.path.join(data_dir, CHATS_FILE)
+        self.path = os.path.join(data_dir, filename)
         self._lock = threading.Lock()
 
     def _load(self):

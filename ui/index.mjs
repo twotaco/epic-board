@@ -98,6 +98,8 @@ export function reduce(state, result) {
       return { content: state.content, unreachable: false }
     case 'failure':
       return { content: state.content, unreachable: true }
+    case 'reset':
+      return initialState
     default:
       return state
   }
@@ -563,6 +565,8 @@ export function chatsReduce(state, result) {
       const { [gone.key]: _since, ...missingSince } = state.missingSince
       return { ...state, records: state.records.filter((record) => record !== gone), byKey, missingSince }
     }
+    case 'reset':
+      return initialChats
     default:
       return state
   }
@@ -787,7 +791,8 @@ export const STYLE = `
 .eb-notice, .eb-error { border: 1px solid currentColor; border-radius: 6px; margin: 0 0 16px 0; padding: 8px 12px; overflow-wrap: anywhere; }
 .eb-notice p, .eb-error p { margin: 0; }
 .eb-error ul { margin: 8px 0 0 0; padding-left: 20px; }
-.eb-filter { margin: 0 0 16px 0; }
+.eb-filters { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 0 0 16px 0; }
+.eb-filter { margin: 0; }
 .eb-filter select { font: inherit; padding: 4px 8px; }
 .eb-columns { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
 .eb-column { min-width: 0; }
@@ -856,6 +861,89 @@ export const STYLE = `
 
 const EMPTY_PLAN_HINT = 'Specs are read from .kiro/specs/ and epics from docs/epics/.'
 
+// ---- Projects: list, choice and query ----
+
+export const PROJECT_STORAGE_KEY = 'epic-board.project'
+const ID_PATTERN = /^[a-z0-9-]{1,64}$/
+
+// The Project_List from a `GET /projects` body, or null when it is not a list of valid {id, name} pairs.
+export function readProjects(body) {
+  if (!Array.isArray(body)) return null
+  const ids = new Set()
+  const result = []
+  for (const item of body) {
+    if (item === null || typeof item !== 'object' || Array.isArray(item)) return null
+    if (typeof item.id !== 'string' || typeof item.name !== 'string') return null
+    if (!ID_PATTERN.test(item.id) || ids.has(item.id)) return null
+    ids.add(item.id)
+    result.push({ id: item.id, name: item.name })
+  }
+  return result
+}
+
+// The project to show: the saved one when it is in the list, else the first. null for an empty list.
+export function resolveProject(projects, savedId) {
+  if (!Array.isArray(projects) || projects.length === 0) return null
+  if (typeof savedId === 'string') {
+    const found = projects.find((p) => p.id === savedId)
+    if (found) return found
+  }
+  return projects[0]
+}
+
+// The dropdown options when there are 2 or more projects, else null.
+export function projectOptions(projects) {
+  if (!Array.isArray(projects) || projects.length < 2) return null
+  return projects.map((p) => ({ key: p.id, label: p.name }))
+}
+
+// The saved Project_Id, or null when nothing is saved, the storage is absent or throws.
+export function loadProject(storage) {
+  try {
+    const value = storage?.getItem(PROJECT_STORAGE_KEY)
+    return typeof value === 'string' && value !== '' ? value : null
+  } catch {
+    return null
+  }
+}
+
+// Saves the Project_Id. Returns false when the storage is absent or the write throws.
+export function saveProject(storage, id) {
+  try {
+    storage.setItem(PROJECT_STORAGE_KEY, id)
+    return true
+  } catch {
+    return false
+  }
+}
+
+// The query string for a project id, or '' when id is null/undefined.
+export function projectQuery(id) {
+  if (id == null) return ''
+  return '?project=' + encodeURIComponent(id)
+}
+
+// The projects state. `phase` is 'loading' | 'ready' | 'failed'; `projects` is null until ready.
+export const initialProjects = Object.freeze({ phase: 'loading', projects: null, currentId: null })
+
+export function projectsReduce(state, action) {
+  switch (action?.kind) {
+    case 'projects-read': {
+      const project = resolveProject(action.projects, action.savedId)
+      return { phase: 'ready', projects: action.projects, currentId: project?.id ?? null }
+    }
+    case 'projects-failed':
+      return { ...state, phase: 'failed' }
+    case 'switch': {
+      if (!state.projects?.some((p) => p.id === action.id)) return state
+      if (state.currentId === action.id) return state
+      return { ...state, currentId: action.id }
+    }
+    default:
+      return state
+  }
+}
+
 // What each step of a start says when it fails.
 const STEP_TEXT = {
   reserve: 'Could not reserve the chat',
@@ -865,7 +953,7 @@ const STEP_TEXT = {
 }
 
 const NO_ACTIONS = Object.freeze({
-  ask() {}, cancel() {}, start() {}, close() {}, sendBrief() {}, resume() {}, startAgain() {}, filter() {}, openChat() {},
+  ask() {}, cancel() {}, start() {}, close() {}, sendBrief() {}, resume() {}, startAgain() {}, filter() {}, openChat() {}, switchProject() {},
 })
 
 // The part of a card below its progress that belongs to the chat: the state word, the question,
@@ -992,6 +1080,26 @@ function renderProblems(h, problems) {
       h('div', null, problem.reason)))))
 }
 
+// The project dropdown: the host's Select when there is one, else a native select. Both are named "Project".
+// `view` is {options: [{key, label}], currentId}.
+function renderProjects(h, view, actions, Select) {
+  const { options, currentId } = view
+  const control = Select
+    ? h(Select, {
+      'aria-label': 'Project',
+      value: currentId,
+      options: options.map((o) => o.key),
+      optionLabels: options.map((o) => o.label),
+      onChange: (value) => actions.switchProject(value),
+    })
+    : h('select', {
+      'aria-label': 'Project',
+      value: currentId,
+      onChange: (event) => actions.switchProject(event.target.value),
+    }, options.map((o) => h('option', { key: o.key, value: o.key }, o.label)))
+  return h('div', { className: 'eb-filter', key: 'project' }, control)
+}
+
 // The epic dropdown: the host's Select when there is one, else a native select. Both are named "Epic".
 function renderFilter(h, filter, actions, Select) {
   const control = Select
@@ -1012,6 +1120,14 @@ function renderFilter(h, filter, actions, Select) {
   return h('div', { className: 'eb-filter', key: 'filter' }, control)
 }
 
+// The project and epic dropdowns together in one flex row; null when neither applies.
+function renderFilters(h, view, actions, parts) {
+  const projectEl = view.projects ? renderProjects(h, view.projects, actions, parts.Select) : null
+  const epicEl = view.empty || !view.filter ? null : renderFilter(h, view.filter, actions, parts.Select)
+  if (!projectEl && !epicEl) return null
+  return h('div', { className: 'eb-filters', key: 'filters' }, projectEl, epicEl)
+}
+
 function renderPlanView(h, view, actions, parts = {}) {
   return [
     h('div', { className: 'eb-header', key: 'header' },
@@ -1020,7 +1136,8 @@ function renderPlanView(h, view, actions, parts = {}) {
       h('span', { className: 'eb-age' }, view.ageText),
       h('span', { className: 'eb-checking', style: { visibility: view.refreshing ? 'visible' : 'hidden' } },
         'Checking for updates…')),
-    view.empty || !view.filter ? null : renderFilter(h, view.filter, actions, parts.Select),
+    renderFilters(h, view, actions, parts),
+    view.projectsNotice ? h('div', { className: 'eb-notice', role: 'status', key: 'projects-notice' }, h('p', null, 'Could not read the list of projects.')) : null,
     view.failedFetch
       ? h('div', { className: 'eb-notice', role: 'status', key: 'failed-fetch' },
         h('p', null, 'Could not fetch from origin. Showing an earlier copy of the plan.'),
@@ -1045,18 +1162,32 @@ function renderPlanView(h, view, actions, parts = {}) {
 }
 
 function renderBody(h, view, actions, parts) {
+  const projectsBar = view.projects
+    ? h('div', { className: 'eb-filters', key: 'filters' }, renderProjects(h, view.projects, actions, parts.Select))
+    : null
+  const projectsNoticeEl = view.projectsNotice
+    ? h('div', { className: 'eb-notice', role: 'status', key: 'projects-notice' }, h('p', null, 'Could not read the list of projects.'))
+    : null
   switch (view.kind) {
     case 'loading':
       return h('p', { role: 'status' }, 'Loading…')
     case 'unreachable':
-      return h('p', { className: 'eb-error', role: 'alert' }, 'Could not reach the backend.')
+      return [
+        projectsBar,
+        projectsNoticeEl,
+        h('p', { className: 'eb-error', role: 'alert', key: 'error' }, 'Could not reach the backend.'),
+      ]
     case 'error':
-      return h('div', { className: 'eb-error', role: 'alert' },
-        h('p', null, view.message),
-        h('p', null, view.code),
-        view.settings.length > 0
-          ? h('ul', null, view.settings.map((setting, index) => h('li', { key: index }, h('code', null, setting))))
-          : null)
+      return [
+        projectsBar,
+        projectsNoticeEl,
+        h('div', { className: 'eb-error', role: 'alert', key: 'error' },
+          h('p', null, view.message),
+          h('p', null, view.code),
+          view.settings.length > 0
+            ? h('ul', null, view.settings.map((setting, index) => h('li', { key: index }, h('code', null, setting))))
+            : null),
+      ]
     default:
       return renderPlanView(h, view, actions, parts)
   }
@@ -1160,6 +1291,8 @@ export function uiReduce(state, action) {
       if (!state.open || (action.key !== undefined && state.open.key !== action.key)) return state
       return { ...state, open: null, focus: action.focus === true ? { cardId: state.open.cardId } : state.focus }
     }
+    case 'reset':
+      return initialUi
     default:
       return state
   }
@@ -1168,14 +1301,15 @@ export function uiReduce(state, action) {
 // The app's own backend, through `fetch`. Resolves with the parsed body; a non-2xx answer rejects with an
 // error that has `status` and `error` (the body's {code, message}). Like the plan request, it carries no
 // credential of its own: the host signs it on its way to the backend.
-export function makeBackend(fetchFn) {
+export function makeBackend(fetchFn, projectId = null) {
+  const query = projectQuery(projectId)
   const call = async (method, path, body, init = {}) => {
     const options = { method, credentials: 'same-origin', cache: 'no-store', signal: init.signal }
     if (body !== undefined) {
       options.headers = { 'Content-Type': 'application/json' }
       options.body = JSON.stringify(body)
     }
-    const response = await fetchFn(BACKEND_BASE + path, options)
+    const response = await fetchFn(BACKEND_BASE + path + query, options)
     let data = null
     try {
       data = await response.json()
@@ -1263,69 +1397,111 @@ export function createBoard(React, env = {}) {
     const [state, dispatch] = useReducer(reduce, initialState)
     const [chats, chatsDispatch] = useReducer(chatsReduce, initialChats)
     const [ui, uiDispatch] = useReducer(uiReduce, initialUi)
+    const [projectsState, projectsDispatch] = useReducer(projectsReduce, initialProjects)
     const api = (env.useAppApi ?? hostApiHook())()
     const storage = env.storage !== undefined ? env.storage : hostStorage()
     const Select = env.Select !== undefined ? env.Select : hostSelect()
     const [filterKey, setFilterKey] = useState(() => loadChoice(storage))
     const ChatPanel = env.ChatPanel ?? hostChatPanel()
     const hasPanel = isChatPanel(ChatPanel)
+    const { phase: projectsPhase, projects, currentId } = projectsState
 
-    // What the handlers and the chat poller read. Refs, so they always see the latest render.
+    // What the handlers and the pollers read. Refs, so they always see the latest render.
+    // `projectId` tracks the project of the active effect run; old callbacks compare against it.
     const latest = useRef(null)
     if (latest.current === null) {
-      // `briefs` holds the text of a brief that was saved but not sent, by chat key, for "Send the brief again";
-      // `sending` the keys whose brief is on its way; `timers` the send timers, to clear them on unmount.
-      latest.current = { starts: new Set(), briefs: new Map(), sending: new Set(), timers: new Set(), poller: null, alive: true }
+      latest.current = { starts: new Set(), briefs: new Map(), sending: new Set(), timers: new Set(), poller: null, alive: false, projectId: null }
     }
     latest.current.chats = chats
     latest.current.api = api
     latest.current.hasPanel = hasPanel
 
+    // Read the Project_List once. No plan or chat poller starts until this ends.
     useEffect(() => {
       const doc = env.document ?? document
       const fetchFn = env.fetch ?? fetch
       const setTimer = env.setTimeout ?? setTimeout
       const clearTimer = env.clearTimeout ?? clearTimeout
+      let done = false
+      let timer = null
 
-      // A GET of the plan route. A body that is not JSON rejects, which the poller counts
-      // as a failure.
+      const doFetch = () => {
+        if (done) return
+        if (timer !== null) { clearTimer(timer); timer = null }
+        makeBackend(fetchFn).get('/projects').then(
+          (body) => {
+            if (done) return
+            const list = readProjects(body)
+            if (list !== null) {
+              done = true
+              projectsDispatch({ kind: 'projects-read', projects: list, savedId: loadProject(storage) })
+            } else {
+              projectsDispatch({ kind: 'projects-failed' })
+              timer = setTimer(doFetch, 15000)
+            }
+          },
+          () => {
+            if (done) return
+            projectsDispatch({ kind: 'projects-failed' })
+            timer = setTimer(doFetch, 15000)
+          },
+        )
+      }
+
+      const onVisibility = () => { if (!doc.hidden) doFetch() }
+      doc.addEventListener('visibilitychange', onVisibility)
+      if (!doc.hidden) doFetch()
+      return () => {
+        done = true
+        if (timer !== null) { clearTimer(timer); timer = null }
+        doc.removeEventListener('visibilitychange', onVisibility)
+      }
+    }, [])
+
+    // Plan poller: starts (or restarts on project switch) once the project list is known.
+    useEffect(() => {
+      if (projectsPhase === 'loading') return
+      const doc = env.document ?? document
+      const fetchFn = env.fetch ?? fetch
+      const setTimer = env.setTimeout ?? setTimeout
+      const clearTimer = env.clearTimeout ?? clearTimeout
+      const projectId = projectsPhase === 'ready' ? currentId : null
+      latest.current.projectId = projectId
+
+      const planUrl = PLAN_URL + projectQuery(projectId)
       const request = async (signal) => {
-        const response = await fetchFn(PLAN_URL, {
-          method: 'GET',
-          credentials: 'same-origin',
-          cache: 'no-store',
-          signal,
-        })
+        const response = await fetchFn(planUrl, { method: 'GET', credentials: 'same-origin', cache: 'no-store', signal })
         const body = await response.json()
         return { status: response.status, body }
       }
 
+      const live = () => latest.current.projectId === projectId && latest.current.alive
       const poller = createPoller({
         request,
         hidden: () => doc.hidden,
         setTimer: (fn, ms) => setTimer(fn, ms),
         clearTimer: (handle) => clearTimer(handle),
-        onResult: (result) => dispatch(result),
+        onResult: (result) => { if (live()) dispatch(result) },
       })
-      const onVisibility = () => {
-        if (!doc.hidden) poller.visible()
-      }
+      const onVisibility = () => { if (!doc.hidden) poller.visible() }
       doc.addEventListener('visibilitychange', onVisibility)
       poller.start()
       return () => {
         poller.stop()
         doc.removeEventListener('visibilitychange', onVisibility)
       }
-    }, [])
+    }, [currentId, projectsPhase])
 
-    // The chat poller: the backend's records and, when there are started chats, their states in Crew.
+    // Chat poller: starts (or restarts on project switch) once the project list is known.
     useEffect(() => {
+      if (projectsPhase === 'loading') return
       const doc = env.document ?? document
       const fetchFn = env.fetch ?? fetch
       const setTimer = env.setTimeout ?? setTimeout
       const clearTimer = env.clearTimeout ?? clearTimeout
       const now = env.now ?? Date.now
-      const backend = makeBackend(fetchFn)
+      const projectId = projectsPhase === 'ready' ? currentId : null
+      const backend = makeBackend(fetchFn, projectId)
       const gateway = {
         get: (path, init) => (latest.current.api ? latest.current.api.get(path, init) : Promise.reject(new Error(NO_CLIENT))),
         post: (path, ...rest) => (latest.current.api ? latest.current.api.post(path, ...rest) : Promise.reject(new Error(NO_CLIENT))),
@@ -1342,26 +1518,25 @@ export function createBoard(React, env = {}) {
         clearTimer(handle)
       }
 
+      const live = () => latest.current.projectId === projectId && latest.current.alive
       const poller = createPoller({
         request: async (signal) => ({
           status: 200,
           body: await readChats({
             backend, gateway, previous: latest.current.chats, now, signal,
-            onRecords: (records) => { if (latest.current.alive) chatsDispatch({ kind: 'records', ...records }) },
+            onRecords: (records) => { if (live()) chatsDispatch({ kind: 'records', ...records }) },
           }),
         }),
         hidden: () => doc.hidden,
         setTimer: (fn, ms) => setTimer(fn, ms),
         clearTimer: (handle) => clearTimer(handle),
-        onResult: (result) => chatsDispatch(result),
+        onResult: (result) => { if (live()) chatsDispatch(result) },
         classifyAnswer: classifyChats,
         delay: chatDelay,
       })
       latest.current.poller = poller
       latest.current.alive = true
-      const onVisibility = () => {
-        if (!doc.hidden) poller.visible()
-      }
+      const onVisibility = () => { if (!doc.hidden) poller.visible() }
       doc.addEventListener('visibilitychange', onVisibility)
       poller.start()
       return () => {
@@ -1372,7 +1547,7 @@ export function createBoard(React, env = {}) {
         poller.stop()
         doc.removeEventListener('visibilitychange', onVisibility)
       }
-    }, [])
+    }, [currentId, projectsPhase])
 
     // After Cancel or Close, put focus back on the card's button.
     useEffect(() => {
@@ -1401,6 +1576,17 @@ export function createBoard(React, env = {}) {
       saveChoice(storage, key)
     }
 
+    const switchProject = (id) => {
+      if (!projects?.some((p) => p.id === id)) return
+      dispatch({ kind: 'reset' })
+      chatsDispatch({ kind: 'reset' })
+      uiDispatch({ kind: 'reset' })
+      setFilterKey('all')
+      saveChoice(storage, 'all')
+      saveProject(storage, id)
+      projectsDispatch({ kind: 'switch', id })
+    }
+
     const actions = {
       ask: (cardId) => ownUi({ kind: 'ask', cardId }),
       cancel: (cardId) => ownUi({ kind: 'cancel', cardId }),
@@ -1414,16 +1600,19 @@ export function createBoard(React, env = {}) {
       closeChat: () => ownUi({ kind: 'close-chat', focus: true }),
       async start(cardId) {
         const { starts, backend, gateway } = latest.current
+        const startProjectId = latest.current.projectId
+        const liveStart = () => latest.current.projectId === startProjectId && latest.current.alive
         if (starts.has(cardId)) return // a start is already running for this card
         starts.add(cardId)
-        ownUi({ kind: 'step', cardId, step: 'reserve' })
+        liveStart() && ownUi({ kind: 'step', cardId, step: 'reserve' })
         try {
           const result = await startStory({
             cardId, backend, gateway,
             setTimer: latest.current.setTimer, clearTimer: latest.current.clearTimer,
-            onStep: (step) => { if (step !== 'send') ownUi({ kind: 'step', cardId, step }) },
+            onStep: (step) => { if (step !== 'send' && liveStart()) ownUi({ kind: 'step', cardId, step }) },
             // The chat is saved: its link and its state appear now, while the brief is on its way.
             onSaved: (saved) => {
+              if (!liveStart()) return
               latest.current.briefs.set(saved.key, saved.brief)
               ownChats({ kind: 'started', record: { card_id: cardId, name: saved.name, key: saved.key } })
               ownUi({ kind: 'started', cardId })
@@ -1432,16 +1621,20 @@ export function createBoard(React, env = {}) {
               refresh()
             },
           })
-          // The brief is sent (Crew accepted it, or 10 seconds passed with no error): forget its text.
-          latest.current.briefs.delete(result.key)
-          ownUi({ kind: 'brief-sent', key: result.key })
+          if (liveStart()) {
+            // The brief is sent (Crew accepted it, or 10 seconds passed with no error): forget its text.
+            latest.current.briefs.delete(result.key)
+            ownUi({ kind: 'brief-sent', key: result.key })
+          }
         } catch (error) {
-          if (error.saved) {
-            // The chat exists and is saved; only the brief was not sent. The card keeps its link.
-            ownUi({ kind: 'brief-failed', key: error.saved.key, reason: error.reason ?? String(error?.message ?? error) })
-          } else {
-            ownUi({ kind: 'failed', cardId, step: error.step ?? 'reserve', reason: error.reason ?? String(error?.message ?? error) })
-            if (error.code === 'chat_exists') refresh() // another page started it: read the records again
+          if (liveStart()) {
+            if (error.saved) {
+              // The chat exists and is saved; only the brief was not sent. The card keeps its link.
+              ownUi({ kind: 'brief-failed', key: error.saved.key, reason: error.reason ?? String(error?.message ?? error) })
+            } else {
+              ownUi({ kind: 'failed', cardId, step: error.step ?? 'reserve', reason: error.reason ?? String(error?.message ?? error) })
+              if (error.code === 'chat_exists') refresh() // another page started it: read the records again
+            }
           }
         } finally {
           starts.delete(cardId)
@@ -1500,7 +1693,12 @@ export function createBoard(React, env = {}) {
       }
     }, [effectiveKey, filterKey])
 
-    const board = renderBoard(h, { ...view, chats, ui, panelAvailable: hasPanel }, { ...actions, filter }, { Select })
+    // Project dropdown shown only when the list is ready and has 2 or more projects.
+    const projectsOptions = projectsPhase === 'ready' ? projectOptions(projects) : null
+    const projectsView = projectsOptions ? { options: projectsOptions, currentId } : null
+    const projectsNotice = projectsPhase === 'failed'
+
+    const board = renderBoard(h, { ...view, chats, ui, panelAvailable: hasPanel, projects: projectsView, projectsNotice }, { ...actions, filter, switchProject }, { Select })
     const panel = panelViewOf(view, ui, hasPanel)
     const panelTree = panel
       ? renderPanel(h, panel, h(boundary(), { slotKey: panel.key }, h(ChatPanel, { slotKey: panel.key, conversationOnly: true })), actions)
