@@ -7,6 +7,7 @@ import json
 import os
 import re
 import sys
+import threading
 import time
 import traceback
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -20,6 +21,7 @@ from held import Holder  # noqa: E402
 from plan import build_plan  # noqa: E402
 from projects import check_folder, load_projects, ENV_NAME, FOLDER_ENV_NAME, FOLDER_MAX_CHARS  # noqa: E402
 from proxyauth import verify  # noqa: E402
+from setup import validate_setup_entry, save_setup  # noqa: E402
 
 APP_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 STATUS = {"repository_not_configured": 409, "repository_not_a_checkout": 409,
@@ -160,6 +162,35 @@ def pick_project(projects, query):
     return None, chat_refusal("project_not_found", "No project has that id.")
 
 
+class RuntimeState:
+    """Thread-safe container for the running project list and metadata."""
+
+    def __init__(self, running_projects, error, source, config_has_projects, config_path, data_dir, secret,
+                 clock=None):
+        self._lock = threading.Lock()
+        self._running = running_projects  # list of RunningProject, or [] on error
+        self.error = error
+        self.source = source  # 'saved' | 'config' | 'legacy' | 'unconfigured'
+        self.config_has_projects = config_has_projects
+        self.config_path = config_path
+        self.data_dir = data_dir
+        self.secret = secret
+        self.clock = clock if clock is not None else time.time
+
+    def snapshot(self):
+        """Return a copy of the running list."""
+        with self._lock:
+            return list(self._running)
+
+    def rebuild(self, new_running, new_source):
+        """Swap the running list atomically; return the old list."""
+        with self._lock:
+            old = self._running
+            self._running = new_running
+            self.source = new_source
+            return old
+
+
 class RunningProject:
     """A project's running parts: its plan holder (or None) and its chat service."""
 
@@ -275,11 +306,10 @@ class ChatRouter:
         return rp.chats.handle_verified(method, path, body)
 
 
-def make_handler(running_projects, error, config_path, router=None):
+def make_handler(state, router=None):
     """Build the HTTP handler class.
 
-    `running_projects` is a list of RunningProject; `error` is the config error or None;
-    `router` is a ChatRouter (or None when no projects are running).
+    `state` is a RuntimeState; `router` is a ChatRouter (or None when no projects are running).
     """
     class Handler(BaseHTTPRequestHandler):
         def _send(self, code, body):
@@ -292,6 +322,18 @@ def make_handler(running_projects, error, config_path, router=None):
 
         def _not_found(self):
             return self._send(404, {"error": {"code": "not_found", "message": "Not found."}})
+
+        def _read_body(self):
+            """Read request body up to MAX_BODY_BYTES. Returns (body, error_response) where
+            error_response is None on success or a (status, body) pair on failure."""
+            raw = self.headers.get("Content-Length")
+            if raw is None:
+                raw = ""
+            length = 0 if raw == "" else (int(raw) if raw.isascii() and raw.isdigit() and len(raw) <= 9 else -1)
+            if length < 0 or length > MAX_BODY_BYTES:
+                self.close_connection = True
+                return None, chat_refusal("invalid_request", "The body is missing, not a number or too large.")
+            return self.rfile.read(length) if length else b"", None
 
         def _chats(self, method):
             if router is None or not CHATS_ROUTE.search(urlparse(self.path).path):
@@ -307,30 +349,109 @@ def make_handler(running_projects, error, config_path, router=None):
             return self._send(*router.handle(method, self.path, self.headers.get("X-KiroCrew-Proxy", ""), body))
 
         def do_GET(self):
+            running = state.snapshot()
             path = urlparse(self.path).path
             if path.endswith("/health"):
                 return self._send(200, {"ok": True})
+            if path.endswith("/setup"):
+                return self._send(200, {
+                    "source": state.source,
+                    "config_has_projects": state.config_has_projects,
+                    "projects": [{"id": rp.id, "name": rp.name,
+                                  "folder_id": rp.settings.folder if rp.settings.folder else None}
+                                 for rp in running],
+                })
             if path.endswith("/projects"):
-                if running_projects is None:
-                    return self._send(200, [])
-                return self._send(200, [{"id": rp.id, "name": rp.name} for rp in running_projects])
+                return self._send(200, [{"id": rp.id, "name": rp.name} for rp in running])
             if path.endswith("/plan"):
                 query = parse_qs(urlparse(self.path).query, keep_blank_values=True)
-                if error or not running_projects:
-                    return self._send(*plan_response(None, error, config_path))
-                project, refusal = pick_project([rp.settings for rp in running_projects], query)
+                if state.error or not running:
+                    return self._send(*plan_response(None, state.error, state.config_path))
+                project, refusal = pick_project([rp.settings for rp in running], query)
                 if refusal is not None:
                     return self._send(*refusal)
                 if project is None:
-                    return self._send(*plan_response(None, error, config_path))
-                rp = next(rp for rp in running_projects if rp.id == project.id)
-                return self._send(*plan_response(rp.holder, None, config_path))
+                    return self._send(*plan_response(None, state.error, state.config_path))
+                rp = next(rp for rp in running if rp.id == project.id)
+                return self._send(*plan_response(rp.holder, None, state.config_path))
             return self._chats("GET")
 
         def do_POST(self):
-            if urlparse(self.path).path.endswith("/projects"):
+            path = urlparse(self.path).path
+            if path.endswith("/projects"):
                 return self._not_found()
+            if path.endswith("/setup"):
+                return self._handle_post_setup()
             return self._chats("POST")
+
+        def _handle_post_setup(self):
+            body, err = self._read_body()
+            if err is not None:
+                return self._send(*err)
+            # Verify gateway signature.
+            if not state.secret:
+                return self._send(*chat_refusal("proxy_secret_missing", "The app has no proxy secret."))
+            if not verify(self.headers.get("X-KiroCrew-Proxy", ""), method="POST",
+                          target=self.path, body=body, secret=state.secret, now=state.clock()):
+                return self._send(*chat_refusal("unauthorized", "The request is not signed by the gateway."))
+            # Parse body.
+            try:
+                data = json.loads(body.decode("utf-8"))
+            except (ValueError, UnicodeDecodeError):
+                return self._send(400, error_body("invalid_request", "The body must be a JSON object."))
+            if not isinstance(data, dict) or set(data) != {"projects"}:
+                return self._send(400, error_body("invalid_request",
+                    "The body must be a JSON object with exactly: projects."))
+            projects_value = data["projects"]
+            if not isinstance(projects_value, list) or len(projects_value) < 1 or len(projects_value) > 20:
+                return self._send(400, error_body("invalid_request",
+                    "projects must be a list of 1 to 20 entries."))
+            for item in projects_value:
+                if not isinstance(item, dict) or set(item) != {"folder_id", "name", "repository"}:
+                    return self._send(400, error_body("invalid_request",
+                        "Each entry must be an object with exactly: folder_id, name, repository."))
+            # Validate entries.
+            for i, entry in enumerate(projects_value):
+                msg = validate_setup_entry(entry, i)
+                if msg is not None:
+                    return self._send(400, error_body("invalid_request", msg))
+            # Save.
+            try:
+                save_setup(state.data_dir, projects_value)
+            except OSError as e:
+                return self._send(500, error_body("internal", f"Could not save setup: {e}"))
+            # Rebuild project list.
+            new_projects, _, new_source, new_config_has = load_projects(data_dir=state.data_dir)
+            old_running = state.snapshot()
+            old_by_id = {rp.id: rp for rp in old_running}
+            new_running = []
+            dd = state.data_dir
+            for project in new_projects:
+                if project.id in old_by_id:
+                    new_running.append(old_by_id[project.id])
+                else:
+                    held = Holder(project.repository, None, None, None)
+                    store = ChatStore(dd, filename=project.records_file)
+                    service = ChatService(store, project.folder, project.folder_reason, state.secret, held)
+                    rp = RunningProject(project, held, service)
+                    new_running.append(rp)
+            old_list = state.rebuild(new_running, new_source)
+            state.config_has_projects = new_config_has
+            new_ids = {rp.id for rp in new_running}
+            for rp in old_list:
+                if rp.id not in new_ids:
+                    if rp.holder is not None and hasattr(rp.holder, 'stop'):
+                        rp.holder.stop()
+            # Start holders for new projects.
+            new_ids_set = {rp.id for rp in old_running}
+            for rp in new_running:
+                if rp.id not in new_ids_set and rp.holder is not None:
+                    try:
+                        rp.holder.start()
+                    except Exception:
+                        pass
+            return self._send(200, {"projects": [{"id": rp.id, "name": rp.name} for rp in new_running],
+                                    "source": new_source})
 
         def do_DELETE(self):
             return self._chats("DELETE")
@@ -341,24 +462,25 @@ def make_handler(running_projects, error, config_path, router=None):
     return Handler
 
 
-def make_server(port, running_projects, error, config_path, router=None):
+def make_server(port, state, router=None):
     """Bind the port. Starts no thread and runs no git."""
-    return ThreadingHTTPServer(("127.0.0.1", port), make_handler(running_projects, error, config_path, router))
+    return ThreadingHTTPServer(("127.0.0.1", port), make_handler(state, router))
 
 
 if __name__ == "__main__":
-    projects, problem = load_projects()
     config_path = os.path.join(APP_DIR, "config.json")
     secret = os.environ.get("KIROCREW_PROXY_SECRET", "")
     dd = data_dir()
+    projects, problem, source, config_has_projects = load_projects(data_dir=dd)
     running = []
     for project in projects:
         held = Holder(project.repository, read_snapshot, open_snapshot, build_plan)
         store = ChatStore(dd, filename=project.records_file)
         service = ChatService(store, project.folder, project.folder_reason, secret, held)
         running.append(RunningProject(project, held, service))
+    state = RuntimeState(running, problem, source, config_has_projects, config_path, dd, secret)
     router = ChatRouter(running, secret) if running else None
-    server = make_server(int(os.environ["PORT"]), running if running else None, problem, config_path, router)
+    server = make_server(int(os.environ["PORT"]), state, router)
     for rp in running:
         rp.holder.start()
     server.serve_forever()

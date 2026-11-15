@@ -8,14 +8,14 @@ The work has five numbered tasks, each with sub-tasks. Run the full test suite a
 
 ## Tasks
 
-- [ ] 1. Backend: setup.py, projects.py, server.py
-  - [ ] 1.1 Add `backend/setup.py`
+- [x] 1. Backend: setup.py, projects.py, server.py
+  - [x] 1.1 Add `backend/setup.py`
     - `is_git_checkout(path)`: returns True when `path` is an existing directory with a `.git` entry (file or directory); uses `os.path.isdir` and `os.path.exists`; does not follow symlinks
     - `validate_setup_entry(entry, i)`: returns None on success or a human-readable error string; checks `folder_id` (non-empty str ≤ 200 chars), `name` (non-empty str ≤ 100 chars, not only whitespace), `repository` (str that expands via `os.path.abspath`/`expanduser` to an `is_git_checkout` path)
     - `load_setup(data_dir)`: reads `setup.json`; returns `([], None)` when the file is missing; `(entries, None)` on success where entries is a list of `{folder_id, name, repository}` dicts; `([], error_text)` on any parse or I/O failure; never raises
     - `save_setup(data_dir, entries)`: creates `data_dir` if it does not exist; writes `{"projects": entries}` to a temp file in `data_dir`, then renames it to `setup.json` atomically; raises `OSError` on failure
     - _Requirements: 6.1, 6.6, 7.2, 7.3, 7.4, 7.6_
-  - [ ] 1.2 Update `backend/projects.py`
+  - [x] 1.2 Update `backend/projects.py`
     - `load_projects(environ=None, app_dir=None, data_dir=None)` gains `data_dir`
     - When `data_dir` is supplied, call `load_setup(data_dir)` first; if it returns non-empty entries, build a `Project` list from them (same id/name/folder/records_file rules as `_load_multi`); set `source = 'saved'`; skip config.json and env vars for the Project_List (but still read config.json to set `config_has_projects`)
     - When no `data_dir` or `setup.json` is absent, fall through to the existing logic; set `source` to `'config'`, `'legacy'` or `'unconfigured'` as the path taken
@@ -23,7 +23,7 @@ The work has five numbered tasks, each with sub-tasks. Run the full test suite a
     - Return signature becomes `(projects, error, source, config_has_projects)`; callers in `server.py` updated to unpack all four
     - The existing `load_repository` and `load_folder` functions stay as they are
     - _Requirements: 2.1, 2.2, 2.3, 2.4, 2.5, 6.4, 6.5, 6.7_
-  - [ ] 1.3 Update `backend/server.py`
+  - [x] 1.3 Update `backend/server.py`
     - Add `import threading` at the top
     - Add `RuntimeState` class as the design gives it: `snapshot()` returns a copy of the running list under the lock; `rebuild(new_running, new_source)` swaps and returns the old list
     - `RuntimeState` also holds `config_has_projects`, `config_path`, `data_dir` and `secret` for use by `POST .../setup`
@@ -43,7 +43,7 @@ The work has five numbered tasks, each with sub-tasks. Run the full test suite a
     - Update `__main__` to call `load_projects(data_dir=dd)`, unpack all four values, build `RuntimeState` and pass it to `make_handler`
     - `GET .../projects` route updated to read `state.snapshot()` instead of the closed-over `running_projects`
     - _Requirements: 1.3, 6.2, 6.3, 7.1, 8.1_
-  - [ ] 1.4 Tests in `tests/test_setup.py` (new) and `tests/test_server.py` (updated)
+  - [x] 1.4 Tests in `tests/test_setup.py` (new) and `tests/test_server.py` (updated)
     - `tests/test_setup.py`:
       - `is_git_checkout`: True for a real checkout (`.git` dir), True for a worktree (`.git` file), False for a plain dir, False for a missing path
       - `validate_setup_entry`: None for a valid entry; error string for empty `folder_id`, `folder_id` over 200 chars, non-string `folder_id`; empty `name`, whitespace-only `name`, `name` over 100 chars; non-string `repository`, path that is not a checkout, relative path that expands to a checkout
@@ -56,19 +56,19 @@ The work has five numbered tasks, each with sub-tasks. Run the full test suite a
       - `POST .../setup` rebuild: a project id that stays keeps its old `RunningProject`; a new id gets a new `RunningProject`; a removed id's holder is stopped
       - Existing `server.py` tests updated: replace `make_handler(running, error, config_path)` calls with a `RuntimeState` and the new signature; every existing case still passes
     - _Requirements: 2.1, 2.3, 6.1, 6.2, 6.3, 6.4, 6.5, 6.6, 7.1, 7.2, 7.3, 7.4, 7.5, 7.6, 8.1_
-  - [ ] 1.5 Run the tests
+  - [x] 1.5 Run the tests
     - `python3 -m unittest discover -s tests -t .` and report the counts run, passed and skipped
     - _Requirements: all of task 1_
 
-- [ ] 2. Page: pure parts
-  - [ ] 2.1 Add `readFolders(body)` to `ui/index.mjs`
+- [x] 2. Page: pure parts
+  - [x] 2.1 Add `readFolders(body)` to `ui/index.mjs`
     - Returns `null` when `body` is not an array
     - Builds a `Map(id → item)` from body for parent lookup
     - For each item in `body` order: skip items where `hidden === true`, `owner_app` is a non-empty string, or `mate_home === true`; resolve directory by walking `parent_id` chain (following up to 20 hops to guard against cycles; a cycle stops at the hop limit and counts as no directory); skip items with no resolved directory; push `{id, name, project_dir: resolved}` into result
     - When walking the parent chain, skip a parent that is itself excluded (hidden/owner_app/mate_home)
     - `id` and `name` must be strings; skip items where either is not a string
     - _Requirements: 3.2, 3.4, 3.5_
-  - [ ] 2.2 Add `initialSetup` and `setupReduce(state, action)` to `ui/index.mjs`
+  - [x] 2.2 Add `initialSetup` and `setupReduce(state, action)` to `ui/index.mjs`
     - `initialSetup = { phase: 'closed', folders: null, setupInfo: null, checks: {}, names: {}, saveError: null }`
     - Actions and transitions:
       - `'setup-open'` → `{ ...initialSetup, phase: 'opening' }` (clears all prior state)
@@ -80,15 +80,15 @@ The work has five numbered tasks, each with sub-tasks. Run the full test suite a
       - `'setup-save-failed'` (`{message}`) → `phase: 'ready', saveError: message`
       - `'setup-close'` → `initialSetup`
     - _Requirements: 4.2, 4.3, 4.4, 4.5, 4.6, 4.7_
-  - [ ] 2.3 Tests in `tests/ui/setup.test.mjs` (new)
+  - [x] 2.3 Tests in `tests/ui/setup.test.mjs` (new)
     - `readFolders`: null/non-array body → null; empty array → []; item missing id or name → skipped; `hidden: true` → excluded and not an ancestor source; `owner_app: 'x'` → excluded; `mate_home: true` → excluded; item with no `project_dir` and no parent → excluded; item with no `project_dir` but parent has one → included with parent's dir; chain of two parents → resolves to grandparent's dir; cycle (A→B→A) hits hop limit → excluded; item excluded by hidden whose child would otherwise use it → child excluded too
     - `setupReduce`: each action case; `'setup-loaded'` with a matching folder_id pre-ticks and fills name; `'setup-loaded'` with no match leaves folder unticked; `'setup-check'` toggles without clearing the name; `'setup-open'` resets all state
     - _Requirements: 3.2, 3.4, 3.5, 4.2, 4.3, 4.4_
-  - [ ] 2.4 Run the tests
+  - [x] 2.4 Run the tests
     - `python3 -m unittest discover -s tests -t .` and report counts
 
-- [ ] 3. Page: render and wiring
-  - [ ] 3.1 Add `renderSetupView(h, setupState, actions)` to `ui/index.mjs`
+- [x] 3. Page: render and wiring
+  - [x] 3.1 Add `renderSetupView(h, setupState, actions)` to `ui/index.mjs`
     - Returns `null` when `setupState.phase === 'closed'`
     - `'opening'` → spinner or "Loading…" text with `role="status"` and a close control
     - `'error'` → error message with `role="status"` and a "Try again" button and a close control
@@ -100,12 +100,12 @@ The work has five numbered tasks, each with sub-tasks. Run the full test suite a
     - Every control reachable by keyboard; focus indicator not suppressed; Save and Cancel act on Enter/Space
     - No heading element added
     - _Requirements: 3.3, 3.5, 4.3, 4.4, 4.5, 4.6, 4.7, 4.8, 4.9, 9.1, 9.2, 9.3, 9.4, 9.5, 9.6_
-  - [ ] 3.2 Add the Projects button and Unconfigured state to `renderBoard`
+  - [x] 3.2 Add the Projects button and Unconfigured state to `renderBoard`
     - Projects button: always rendered in the header row (or in the filter row); `aria-label="Set up projects"` when icon-only; `aria-expanded="true"` when `setupState.phase !== 'closed'`; fires `actions.openSetup`
     - Unconfigured state: when `view.unconfigured === true`, render the first-run notice ("Choose your projects" text with `role="status"`) and a "Set up projects" button that also fires `actions.openSetup`; no columns rendered in this state
     - `renderBoard` receives `{..., setupState, unconfigured}` in its `view` and `{..., openSetup}` in its `actions`
     - _Requirements: 4.1, 5.1, 5.2, 5.3, 9.3, 9.5_
-  - [ ] 3.3 Wire setup into `createBoard`
+  - [x] 3.3 Wire setup into `createBoard`
     - `const [setupState, setupDispatch] = useReducer(setupReduce, initialSetup)`
     - `openSetup()`: dispatch `'setup-open'`; then fire `Promise.allSettled([api.get('/api/chat/folders'), makeBackend(fetchFn).get('/setup')])` with a 10-second timeout (abort signal); on success dispatch `'setup-loaded'` with `{folders: readFolders(foldersBody) ?? [], setupInfo: setupBody}`; on any failure dispatch `'setup-load-failed'` with the error message
     - `tryAgain()`: same as `openSetup()` but from within the error state; re-dispatch `'setup-open'` and re-fetch
@@ -113,22 +113,22 @@ The work has five numbered tasks, each with sub-tasks. Run the full test suite a
     - `unconfigured` passed to `renderBoard` when `projectsPhase === 'ready' && (!projects || projects.length === 0)`; plan and chats pollers do not start in this state (guard the plan-poller `useEffect` with `!unconfigured`)
     - After a successful save and re-read of `/projects`: dispatch `{kind: 'projects-read', projects, savedId: loadProject(storage)}` so the existing switch-project logic keeps the current project when its id is still in the new list and falls back to the first project when it is not; the epic filter resets to `'all'` (send `{kind: 'filter', value: 'all'}` and `saveChoice(storage, 'all')`), the board state resets as a project switch does
     - _Requirements: 1.2, 3.1, 3.6, 4.5, 4.6, 5.4, 8.2, 8.3, 9.7_
-  - [ ] 3.4 Tests in `tests/ui/board.test.mjs` and `tests/ui/setup.test.mjs`
+  - [x] 3.4 Tests in `tests/ui/board.test.mjs` and `tests/ui/setup.test.mjs`
     - `board.test.mjs`: Projects button is in the render output when `projects.length > 0` (not unconfigured), when `projects.length === 1` (button still present), and when `unconfigured = true` (button still present in the notice); Unconfigured state: notice text present, columns absent
     - `setup.test.mjs`: `renderSetupView` with phase `'closed'` → null; phase `'ready'` with no folders → "No Crew folders" text; phase `'ready'` with two folders → two checkboxes; config.json notice shown when source=saved and config_has_projects; Save button disabled when nothing ticked; Save button disabled when a ticked folder has an empty name; Save button enabled when one ticked folder has a non-empty name; `'saving'` → Save disabled; `saveError` shown; `'error'` → error text and Try again button
     - `createBoard` integration (reuse existing test harness): after `openSetup` resolves with a valid folders + setupInfo response, `setupState.phase === 'ready'`; after a successful `saveSetup`, `setupState.phase === 'closed'` and projects are updated; Unconfigured: plan poller does not fire when `projects = []`
     - _Requirements: 2.4, 3.1, 3.3, 4.1, 4.3, 4.4, 4.5, 4.6, 5.1, 5.2, 5.3, 5.4, 8.2, 8.3_
-  - [ ] 3.5 Run the tests
+  - [x] 3.5 Run the tests
     - `python3 -m unittest discover -s tests -t .` and report counts
 
-- [ ] 4. Plumbing and spec edits
-  - [ ] 4.1 Update `app.json`: add `/api/chat/folders` to `permissions.api` so the list reads `["/api/chat", "/api/chat/slots", "/api/chat/folders"]`
+- [x] 4. Plumbing and spec edits
+  - [x] 4.1 Update `app.json`: add `/api/chat/folders` to `permissions.api` so the list reads `["/api/chat", "/api/chat/slots", "/api/chat/folders"]`
     - _Requirements: 1.1_
-  - [ ] 4.2 Edit `.kiro/specs/start-a-story/requirements.md` Requirement 1, criterion 3 in place
+  - [x] 4.2 Edit `.kiro/specs/start-a-story/requirements.md` Requirement 1, criterion 3 in place
     - Change "SHALL list exactly `/api/chat` and `/api/chat/slots`" to "SHALL list exactly `/api/chat`, `/api/chat/slots` and `/api/chat/folders`"
     - Leave the rest of that criterion unchanged
     - _Requirements: 1.1_
-  - [ ] 4.3 Run all tests and report final counts
+  - [x] 4.3 Run all tests and report final counts
     - `python3 -m unittest discover -s tests -t .`
 
 - [ ] 5. Manual check on a Crew host

@@ -166,8 +166,9 @@ class ServeTests(unittest.TestCase):
             rp = server.RunningProject(settings, holder, None)
             running = [rp]
         else:
-            running = None
-        httpd = server.make_server(0, running, error, "/app/config.json")
+            running = []
+        state = server.RuntimeState(running, error, 'config', False, "/app/config.json", "/tmp/data", "")
+        httpd = server.make_server(0, state)
         self.addCleanup(httpd.server_close)
         threading.Thread(target=httpd.serve_forever, daemon=True).start()
         self.addCleanup(httpd.shutdown)
@@ -372,8 +373,10 @@ class ProjectsRouteTests(unittest.TestCase):
         self.data = os.path.join(self.root, "data")
 
     def _make_server(self, running, error=None):
-        router = server.ChatRouter(running, SECRET, clock=lambda: NOW) if running else None
-        httpd = server.make_server(0, running, error, "/app/config.json", router)
+        rp_list = running if running else []
+        state = server.RuntimeState(rp_list, error, 'config', False, "/app/config.json", self.data, SECRET)
+        router = server.ChatRouter(rp_list, SECRET, clock=lambda: NOW) if rp_list else None
+        httpd = server.make_server(0, state, router)
         threading.Thread(target=httpd.serve_forever, daemon=True).start()
         self.addCleanup(httpd.shutdown)
         self.addCleanup(httpd.server_close)
@@ -433,8 +436,10 @@ class MultiProjectTests(unittest.TestCase):
         os.makedirs(self.data)
 
     def _make_server(self, rps, error=None):
-        router = server.ChatRouter(rps, SECRET, clock=lambda: NOW) if rps else None
-        httpd = server.make_server(0, rps, error, "/app/config.json", router)
+        rp_list = rps if rps else []
+        state = server.RuntimeState(rp_list, error, 'config', False, "/app/config.json", self.data, SECRET)
+        router = server.ChatRouter(rp_list, SECRET, clock=lambda: NOW) if rp_list else None
+        httpd = server.make_server(0, state, router)
         threading.Thread(target=httpd.serve_forever, daemon=True).start()
         self.addCleanup(httpd.shutdown)
         self.addCleanup(httpd.server_close)
@@ -656,6 +661,190 @@ class ServerPropertyTests(unittest.TestCase):
             status_ok, _ = router.handle("GET", path_q0, header, body)
             # 200 (got chats list) or some other non-401 code
             self.assertNotEqual(status_ok, 401, f"seed={seed}: original path must pass sig check")
+
+
+class SetupRouteTests(unittest.TestCase):
+    def setUp(self):
+        self.root = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.root, True)
+        self.data = os.path.join(self.root, "data")
+        os.makedirs(self.data)
+        # A real git checkout for POST /setup tests.
+        import subprocess
+        self.repo = os.path.join(self.root, "repo")
+        subprocess.run(["git", "init", "-q", "-b", "main", self.repo], check=True)
+
+    def _make_state(self, running=None, source='config', config_has_projects=False):
+        rp_list = running or []
+        return server.RuntimeState(rp_list, None, source, config_has_projects,
+                                   "/app/config.json", self.data, SECRET, clock=lambda: NOW)
+
+    def _make_server(self, state):
+        httpd = server.make_server(0, state)
+        threading.Thread(target=httpd.serve_forever, daemon=True).start()
+        self.addCleanup(httpd.shutdown)
+        self.addCleanup(httpd.server_close)
+        return httpd
+
+    def get(self, httpd, path):
+        try:
+            with urlopen(f"http://127.0.0.1:{httpd.server_port}{path}") as r:
+                return r.status, json.load(r)
+        except HTTPError as e:
+            return e.code, json.load(e)
+
+    def post(self, httpd, path, body_dict, header="", signed=False):
+        """Make a POST request. If `signed=True`, sign the body for `path` using SECRET/NOW."""
+        import urllib.request
+        body = json.dumps(body_dict).encode()
+        h = sign("POST", path, body) if signed else header
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{httpd.server_port}{path}",
+            data=body, method="POST",
+            headers={"Content-Type": "application/json", "X-KiroCrew-Proxy": h})
+        try:
+            with urllib.request.urlopen(req) as r:
+                return r.status, json.load(r)
+        except HTTPError as e:
+            return e.code, json.load(e)
+
+    # --- GET /setup ---
+
+    def test_get_setup_returns_source_config_has_projects_and_projects(self):
+        settings = proj.Project(id="p", name="Project", repository="/r/p",
+                                folder="f_1", folder_reason=None, records_file="chats.json")
+        rp = server.RunningProject(settings, None, None)
+        state = self._make_state([rp], source='config', config_has_projects=False)
+        httpd = self._make_server(state)
+        status, body = self.get(httpd, "/api/setup")
+        self.assertEqual(status, 200)
+        self.assertEqual(body["source"], "config")
+        self.assertIs(body["config_has_projects"], False)
+        self.assertEqual(len(body["projects"]), 1)
+        self.assertEqual(body["projects"][0]["id"], "p")
+        self.assertEqual(body["projects"][0]["folder_id"], "f_1")
+
+    def test_get_setup_unconfigured_returns_empty_projects(self):
+        state = self._make_state([], source='unconfigured')
+        httpd = self._make_server(state)
+        status, body = self.get(httpd, "/api/setup")
+        self.assertEqual(status, 200)
+        self.assertEqual(body["source"], "unconfigured")
+        self.assertEqual(body["projects"], [])
+
+    def test_get_setup_no_signature_needed(self):
+        state = self._make_state()
+        httpd = self._make_server(state)
+        status, _ = self.get(httpd, "/setup")
+        self.assertEqual(status, 200)
+
+    # --- POST /setup ---
+
+    def test_post_setup_missing_signature_is_401(self):
+        state = self._make_state()
+        httpd = self._make_server(state)
+        status, body = self.post(httpd, "/api/setup",
+                                 {"projects": [{"folder_id": "f_1", "name": "P",
+                                                "repository": self.repo}]})
+        self.assertEqual(status, 401)
+
+    def test_post_setup_bad_signature_is_401(self):
+        state = self._make_state()
+        httpd = self._make_server(state)
+        status, body = self.post(httpd, "/api/setup",
+                                 {"projects": [{"folder_id": "f_1", "name": "P",
+                                                "repository": self.repo}]},
+                                 header="bad:signature")
+        self.assertEqual(status, 401)
+
+    def test_post_setup_body_not_a_list_is_400(self):
+        state = self._make_state()
+        httpd = self._make_server(state)
+        status, _ = self.post(httpd, "/api/setup", {"projects": "oops"}, signed=True)
+        self.assertEqual(status, 400)
+
+    def test_post_setup_too_many_entries_is_400(self):
+        entries = [{"folder_id": "f_1", "name": f"P{i}", "repository": self.repo} for i in range(21)]
+        state = self._make_state()
+        httpd = self._make_server(state)
+        status, _ = self.post(httpd, "/api/setup", {"projects": entries}, signed=True)
+        self.assertEqual(status, 400)
+
+    def test_post_setup_missing_folder_id_is_400(self):
+        state = self._make_state()
+        httpd = self._make_server(state)
+        status, body = self.post(httpd, "/api/setup",
+                                 {"projects": [{"name": "P", "repository": self.repo}]},
+                                 signed=True)
+        self.assertEqual(status, 400)
+
+    def test_post_setup_name_over_100_chars_is_400(self):
+        state = self._make_state()
+        httpd = self._make_server(state)
+        status, _ = self.post(httpd, "/api/setup",
+                              {"projects": [{"folder_id": "f_1", "name": "x" * 101,
+                                             "repository": self.repo}]},
+                              signed=True)
+        self.assertEqual(status, 400)
+
+    def test_post_setup_repo_not_a_checkout_is_400(self):
+        state = self._make_state()
+        httpd = self._make_server(state)
+        plain = os.path.join(self.root, "plain")
+        os.makedirs(plain)
+        status, _ = self.post(httpd, "/api/setup",
+                              {"projects": [{"folder_id": "f_1", "name": "P",
+                                             "repository": plain}]},
+                              signed=True)
+        self.assertEqual(status, 400)
+
+    def test_post_setup_happy_path_saves_and_returns_200(self):
+        state = self._make_state()
+        httpd = self._make_server(state)
+        status, body = self.post(httpd, "/api/setup",
+                                 {"projects": [{"folder_id": "f_1", "name": "Alpha",
+                                                "repository": self.repo}]},
+                                 signed=True)
+        self.assertEqual(status, 200)
+        self.assertIn("projects", body)
+        setup_path = os.path.join(self.data, "setup.json")
+        self.assertTrue(os.path.exists(setup_path))
+
+    def test_post_setup_400_does_not_write_file(self):
+        state = self._make_state()
+        httpd = self._make_server(state)
+        self.post(httpd, "/api/setup",
+                  {"projects": [{"name": "P", "repository": self.repo}]}, signed=True)
+        self.assertFalse(os.path.exists(os.path.join(self.data, "setup.json")))
+
+    def test_post_setup_snapshot_reflects_new_projects(self):
+        state = self._make_state()
+        httpd = self._make_server(state)
+        self.post(httpd, "/api/setup",
+                  {"projects": [{"folder_id": "f_1", "name": "Alpha",
+                                 "repository": self.repo}]},
+                  signed=True)
+        snap = state.snapshot()
+        self.assertEqual(len(snap), 1)
+        self.assertEqual(snap[0].name, "Alpha")
+
+    def test_post_setup_existing_project_keeps_running_project(self):
+        """A project that stays in the list should reuse the same RunningProject object."""
+        settings = proj.Project(id="alpha", name="Alpha", repository=self.repo,
+                                folder="f_1", folder_reason=None, records_file="chats-alpha.json")
+        from chats import ChatStore
+        store = ChatStore(self.data, filename="chats-alpha.json")
+        rp = server.RunningProject(settings, None, server.ChatService(store, "f_1", None, SECRET, None))
+        state = server.RuntimeState([rp], None, 'saved', False, "/app/config.json", self.data, SECRET)
+        httpd = self._make_server(state)
+        self.post(httpd, "/api/setup",
+                  {"projects": [{"folder_id": "f_1", "name": "Alpha",
+                                 "repository": self.repo}]},
+                  signed=True)
+        snap = state.snapshot()
+        # The id stays "alpha"; same RunningProject is reused.
+        self.assertEqual(snap[0].id, "alpha")
+        self.assertIs(snap[0], rp)
 
 
 if __name__ == "__main__":

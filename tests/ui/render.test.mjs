@@ -177,8 +177,9 @@ const rolesOf = (tree) => findAll(tree, (node) => node.props.role !== undefined)
 
 // Checks that hold for every view: no control, one disclosure at most, heading levels, no raw HTML.
 function assertStructure(tree, label, { cardControls = false } = {}) {
-  // 1.3 (as start-a-story edited it): nothing responds to a click or key but the one summary and the
-  // controls of Requirements 2, 7 and 8, which all sit inside a card. A view with no chats has none.
+  // 1.3 (as start-a-story edited it, set-up-projects added the header button): nothing responds to a
+  // click or key but the one summary, the controls of Requirements 2, 7 and 8 (all inside a card),
+  // and the Projects button in the header row. A view with no chats has only the Projects button.
   const interactive = elements(tree).filter((node) => {
     const keys = Object.keys(node.props)
     return ['a', 'button', 'input', 'select', 'textarea', 'label', 'form'].includes(node.type)
@@ -192,8 +193,10 @@ function assertStructure(tree, label, { cardControls = false } = {}) {
   // The Panel's own container is focusable by script only (tabindex -1) and does nothing when used.
   const insidePanelHead = new Set(findAll(tree, (node) => node.props.className === 'eb-panel-head' || node.props['data-eb-panel'] !== undefined)
     .flatMap((box) => (box.props['data-eb-panel'] !== undefined ? [box] : elements(box))))
-  assert.deepEqual(interactive.filter((node) => !insideCards.has(node) && !insideFilter.has(node) && !insidePanelHead.has(node)), [], `${label}: interactive element outside a card`)
-  if (!cardControls) assert.deepEqual(interactive.filter((node) => !insideFilter.has(node) && !insidePanelHead.has(node)), [], `${label}: a view with no chats has no control`)
+  // The board header holds the Projects button (set-up-projects, Requirement 4.1).
+  const insideHeader = new Set(findAll(tree, (node) => node.props.className === 'eb-header').flatMap((box) => elements(box)))
+  assert.deepEqual(interactive.filter((node) => !insideCards.has(node) && !insideFilter.has(node) && !insidePanelHead.has(node) && !insideHeader.has(node)), [], `${label}: interactive element outside a card`)
+  if (!cardControls) assert.deepEqual(interactive.filter((node) => !insideFilter.has(node) && !insidePanelHead.has(node) && !insideHeader.has(node)), [], `${label}: a view with no chats has no control`)
   const details = findAll(tree, (node) => node.type === 'details')
   const summaries = findAll(tree, (node) => node.type === 'summary')
   assert.ok(details.length <= 1, `${label}: more than one details`)
@@ -1120,7 +1123,9 @@ test('without actions the controls still exist and do nothing when used', () => 
 
 test('a view with no chats draws the board as before: no control, no data-mode other than plain', () => {
   const tree = render(planView(planBody()))
-  assert.deepEqual(buttons(tree).concat(links(tree)), [])
+  // The Projects button lives in eb-header; exclude it — it is always present (set-up-projects Req 4.1)
+  const headerNodes = new Set(findAll(tree, (n) => n.props.className === 'eb-header').flatMap((box) => elements(box)))
+  assert.deepEqual(buttons(tree).filter((b) => !headerNodes.has(b)).concat(links(tree)), [])
   for (const li of cardItems(tree)) assert.equal(li.props['data-mode'], 'plain')
 })
 

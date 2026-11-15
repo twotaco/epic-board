@@ -73,11 +73,11 @@ class AppJsonTests(unittest.TestCase):
         self.assertTrue(os.path.isfile(os.path.join(ROOT, "ui", self.app["ui"]["entry"])))
         self.assertTrue(os.path.isfile(os.path.join(ROOT, self.app["backend"]["entryPoint"])))
 
-    def test_api_permission_is_exactly_the_two_chat_paths(self):
-        # start-a-story, Requirement 1, criterion 3; work-in-the-chat, Requirement 1, criterion 7 (the panel needs no entry); switch-projects, Requirement 7.1
+    def test_api_permission_is_exactly_the_three_chat_paths(self):
+        # set-up-projects, Requirement 1, criterion 1 (replaces start-a-story Requirement 1, criterion 3)
         permissions = self.app.get("permissions", {})
         self.assertIsInstance(permissions, dict)
-        self.assertEqual(permissions.get("api"), ["/api/chat", "/api/chat/slots"])
+        self.assertEqual(permissions.get("api"), ["/api/chat", "/api/chat/slots", "/api/chat/folders"])
 
     def test_no_other_permission_is_declared(self):
         # work-in-the-chat, Requirements 1.7 and 1.8: none of these, so the board cannot approve or answer
