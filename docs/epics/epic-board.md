@@ -13,6 +13,7 @@ It matters now because the plan already lives in files on main, and nothing show
 - Editing the plan from the board: moving cards, changing statuses or writing epic files.
 - The board following a conductor's work for the person. The board shows one of six states for the story's chat and its workers and embeds Crew's own chat for the person to use. The board's own code does not read the chat's messages, and does not approve or answer anything for the conductor.
 - Merging. The conductor opens pull requests and the person reviews and merges them.
+- Creating or renaming Crew folders, or editing a folder's project directory. The board reads folders; Crew manages them.
 
 ## Stories
 
@@ -23,3 +24,4 @@ It matters now because the plan already lives in files on main, and nothing show
 - [Filter by epic](../../.kiro/specs/filter-by-epic/) — done. A dropdown at the top of the board shows one epic or all of them.
 - [Board design](../../.kiro/specs/board-design/) — in progress. The board looks like part of Kiro Crew: Crew's own buttons, cards, badges, header and notices, column headers like Crew's Sessions board, bold card titles, quieter meta lines, and descriptions cut to three lines. Built after "Work in the chat".
 - [Switch projects](../../.kiro/specs/switch-projects/) — in progress. One board for several projects: `config.json` lists them and a dropdown beside the epic filter switches between them. Built after "Work in the chat" and the chat state change.
+- [Set up projects](../../.kiro/specs/set-up-projects/) — in progress. A Projects view lets the person pick which Crew folders the board shows, without editing `config.json` by hand. Built after "Start a story" and "Switch projects".
