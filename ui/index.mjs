@@ -944,6 +944,80 @@ export function projectsReduce(state, action) {
   }
 }
 
+// ---- Setup: folders, state and reducer ----
+
+// Builds a Selectable_Folder list from a GET /api/chat/folders body.
+// Returns null for a non-array body; otherwise returns [{id, name, project_dir}] after applying
+// the three folder rules: nearest-wins parent resolution, system-folder exclusion, no-directory exclusion.
+export function readFolders(body) {
+  if (!Array.isArray(body)) return null
+  const byId = new Map()
+  for (const item of body) {
+    if (item && typeof item.id === 'string') byId.set(item.id, item)
+  }
+  const SYSTEM = (item) =>
+    item.hidden === true ||
+    (typeof item.owner_app === 'string' && item.owner_app !== '') ||
+    item.mate_home === true
+  const result = []
+  for (const item of body) {
+    if (typeof item?.id !== 'string' || typeof item?.name !== 'string') continue
+    if (SYSTEM(item)) continue
+    // Walk parent_id chain to find nearest directory (up to 20 hops to guard against cycles).
+    let dir = item.project_dir ?? null
+    if (!dir) {
+      let cur = item
+      for (let hop = 0; hop < 20 && cur; hop++) {
+        if (!cur.parent_id) break
+        const parent = byId.get(cur.parent_id)
+        if (!parent || SYSTEM(parent)) break
+        if (parent.project_dir) { dir = parent.project_dir; break }
+        cur = parent
+      }
+    }
+    if (!dir) continue
+    result.push({ id: item.id, name: item.name, project_dir: dir })
+  }
+  return result
+}
+
+export const initialSetup = Object.freeze({
+  phase: 'closed', folders: null, setupInfo: null, checks: {}, names: {}, saveError: null,
+})
+
+export function setupReduce(state, action) {
+  switch (action?.kind ?? action) {
+    case 'setup-open':
+      return { ...initialSetup, phase: 'opening' }
+    case 'setup-loaded': {
+      const { folders, setupInfo } = action
+      const checks = {}, names = {}
+      for (const folder of folders ?? []) {
+        const match = setupInfo?.projects?.find((p) => p.folder_id === folder.id)
+        checks[folder.id] = !!match
+        names[folder.id] = match ? match.name : ''
+      }
+      return { ...state, phase: 'ready', folders, setupInfo, checks, names, saveError: null }
+    }
+    case 'setup-load-failed':
+      return { ...state, phase: 'error', saveError: action.message }
+    case 'setup-check': {
+      const checks = { ...state.checks, [action.folderId]: action.checked }
+      return { ...state, checks }
+    }
+    case 'setup-name':
+      return { ...state, names: { ...state.names, [action.folderId]: action.value } }
+    case 'setup-saving':
+      return { ...state, phase: 'saving', saveError: null }
+    case 'setup-save-failed':
+      return { ...state, phase: 'ready', saveError: action.message }
+    case 'setup-close':
+      return initialSetup
+    default:
+      return state
+  }
+}
+
 // What each step of a start says when it fails.
 const STEP_TEXT = {
   reserve: 'Could not reserve the chat',
@@ -1129,13 +1203,22 @@ function renderFilters(h, view, actions, parts) {
 }
 
 function renderPlanView(h, view, actions, parts = {}) {
+  const isSetupOpen = view.setupState?.phase !== 'closed'
+  const setupBtn = h('button', {
+    type: 'button',
+    'aria-label': 'Set up projects',
+    'aria-expanded': isSetupOpen ? 'true' : 'false',
+    onClick: () => actions.openSetup?.(),
+    key: 'setup-btn',
+  }, 'Set up projects')
   return [
     h('div', { className: 'eb-header', key: 'header' },
       h('span', { className: 'eb-branch' }, view.branch),
       h('span', { className: 'eb-commit' }, view.commit7),
       h('span', { className: 'eb-age' }, view.ageText),
       h('span', { className: 'eb-checking', style: { visibility: view.refreshing ? 'visible' : 'hidden' } },
-        'Checking for updates…')),
+        'Checking for updates…'),
+      setupBtn),
     renderFilters(h, view, actions, parts),
     view.projectsNotice ? h('div', { className: 'eb-notice', role: 'status', key: 'projects-notice' }, h('p', null, 'Could not read the list of projects.')) : null,
     view.failedFetch
@@ -1162,6 +1245,17 @@ function renderPlanView(h, view, actions, parts = {}) {
 }
 
 function renderBody(h, view, actions, parts) {
+  if (view.unconfigured) {
+    const isSetupOpen = view.setupState?.phase !== 'closed'
+    return h('div', { className: 'eb-notice', role: 'status', key: 'unconfigured' },
+      h('p', null, 'Choose your projects'),
+      h('button', {
+        type: 'button',
+        'aria-label': 'Set up projects',
+        'aria-expanded': isSetupOpen ? 'true' : 'false',
+        onClick: () => actions.openSetup?.(),
+      }, 'Set up projects'))
+  }
   const projectsBar = view.projects
     ? h('div', { className: 'eb-filters', key: 'filters' }, renderProjects(h, view.projects, actions, parts.Select))
     : null
@@ -1193,6 +1287,75 @@ function renderBody(h, view, actions, parts) {
   }
 }
 
+// The setup overlay: rendered when setupState.phase is not 'closed'.
+export function renderSetupView(h, setupState, actions) {
+  if (setupState.phase === 'closed') return null
+
+  if (setupState.phase === 'opening') {
+    return h('div', { className: 'eb-setup' },
+      h('p', { role: 'status' }, 'Loading…'),
+      h('button', { type: 'button', onClick: () => actions.closeSetup?.() }, 'Close'))
+  }
+
+  if (setupState.phase === 'error') {
+    return h('div', { className: 'eb-setup' },
+      h('p', { role: 'status' }, setupState.saveError ?? 'Could not load folder list.'),
+      h('button', { type: 'button', onClick: () => actions.tryAgain?.() }, 'Try again'),
+      h('button', { type: 'button', onClick: () => actions.closeSetup?.() }, 'Close'))
+  }
+
+  const folders = setupState.folders ?? []
+  if (folders.length === 0) {
+    return h('div', { className: 'eb-setup' },
+      h('p', null, 'No Crew folders have a project directory. Set a project directory in Crew first.'),
+      h('button', { type: 'button', onClick: () => actions.closeSetup?.() }, 'Close'))
+  }
+
+  const isSaving = setupState.phase === 'saving'
+  const { checks, names, setupInfo } = setupState
+
+  const checkedFolders = folders.filter((f) => !!checks[f.id])
+  const saveEnabled = !isSaving &&
+    checkedFolders.length > 0 &&
+    checkedFolders.every((f) => (names[f.id] ?? '').trim() !== '')
+
+  const configNotice = setupInfo?.source === 'saved' && setupInfo?.config_has_projects
+    ? h('p', { role: 'status', key: 'config-notice' },
+        'Your config.json also has projects; they are overridden by this saved setup.')
+    : null
+
+  return h('div', { className: 'eb-setup' },
+    configNotice,
+    setupState.saveError ? h('p', { role: 'status', key: 'save-error' }, setupState.saveError) : null,
+    h('ul', { key: 'folders' }, folders.map((folder) => {
+      const checked = !!checks[folder.id]
+      return h('li', { key: folder.id },
+        h('label', null,
+          h('input', {
+            type: 'checkbox',
+            checked,
+            onChange: (e) => actions.checkFolder?.({ folderId: folder.id, checked: e.target.checked }),
+          }),
+          folder.name),
+        h('div', null, folder.project_dir),
+        checked
+          ? h('input', {
+            type: 'text',
+            value: names[folder.id] ?? '',
+            placeholder: folder.name,
+            'aria-label': `Name for ${folder.name}`,
+            onChange: (e) => actions.nameFolder?.({ folderId: folder.id, value: e.target.value }),
+          })
+          : null)
+    })),
+    h('button', {
+      type: 'button',
+      disabled: !saveEnabled,
+      onClick: () => actions.saveSetup?.(checkedFolders),
+    }, isSaving ? 'Saving…' : 'Save'),
+    isSaving ? null : h('button', { type: 'button', onClick: () => actions.closeSetup?.() }, 'Cancel'))
+}
+
 // Builds the page for a view (what `viewOf` returns) with h = createElement.
 // Pure: no React, no hooks, no `window`. Every plan text is passed as a child.
 // A plan view that also carries `chats` (the chats state) and `ui` draws the card controls; `actions`
@@ -1200,10 +1363,12 @@ function renderBody(h, view, actions, parts) {
 // and startAgain(name, cardId). Each defaults to doing nothing.
 // `parts.Select` is the host's Select component, or none for a native select.
 export function renderBoard(h, view, actions = {}, parts = {}) {
+  const mergedActions = { ...NO_ACTIONS, ...actions }
   return h('div', { className: 'eb-root' },
     h('style', null, STYLE),
     h(`h${TITLE_LEVEL}`, { className: 'eb-title' }, 'Epic Board'),
-    renderBody(h, view, { ...NO_ACTIONS, ...actions }, parts))
+    renderBody(h, view, mergedActions, parts),
+    view.setupState ? renderSetupView(h, view.setupState, mergedActions) : null)
 }
 
 // The Panel: a titled region with a Close button around `content` (the Chat_Panel). `panel` is {title}.
@@ -1398,6 +1563,7 @@ export function createBoard(React, env = {}) {
     const [chats, chatsDispatch] = useReducer(chatsReduce, initialChats)
     const [ui, uiDispatch] = useReducer(uiReduce, initialUi)
     const [projectsState, projectsDispatch] = useReducer(projectsReduce, initialProjects)
+    const [setupState, setupDispatch] = useReducer(setupReduce, initialSetup)
     const api = (env.useAppApi ?? hostApiHook())()
     const storage = env.storage !== undefined ? env.storage : hostStorage()
     const Select = env.Select !== undefined ? env.Select : hostSelect()
@@ -1405,6 +1571,7 @@ export function createBoard(React, env = {}) {
     const ChatPanel = env.ChatPanel ?? hostChatPanel()
     const hasPanel = isChatPanel(ChatPanel)
     const { phase: projectsPhase, projects, currentId } = projectsState
+    const unconfigured = projectsPhase === 'ready' && (!projects || projects.length === 0)
 
     // What the handlers and the pollers read. Refs, so they always see the latest render.
     // `projectId` tracks the project of the active effect run; old callbacks compare against it.
@@ -1461,6 +1628,7 @@ export function createBoard(React, env = {}) {
     // Plan poller: starts (or restarts on project switch) once the project list is known.
     useEffect(() => {
       if (projectsPhase === 'loading') return
+      if (unconfigured) return
       const doc = env.document ?? document
       const fetchFn = env.fetch ?? fetch
       const setTimer = env.setTimeout ?? setTimeout
@@ -1495,6 +1663,7 @@ export function createBoard(React, env = {}) {
     // Chat poller: starts (or restarts on project switch) once the project list is known.
     useEffect(() => {
       if (projectsPhase === 'loading') return
+      if (unconfigured) return
       const doc = env.document ?? document
       const fetchFn = env.fetch ?? fetch
       const setTimer = env.setTimeout ?? setTimeout
@@ -1585,6 +1754,62 @@ export function createBoard(React, env = {}) {
       saveChoice(storage, 'all')
       saveProject(storage, id)
       projectsDispatch({ kind: 'switch', id })
+    }
+
+    const openSetup = async () => {
+      setupDispatch({ kind: 'setup-open' })
+      const fetchFn = env.fetch ?? fetch
+      const setTimer = env.setTimeout ?? setTimeout
+      const clearTimer = env.clearTimeout ?? clearTimeout
+      const controller = new AbortController()
+      const timer = setTimer(() => controller.abort(), 10000)
+      try {
+        const [foldersResult, setupResult] = await Promise.allSettled([
+          latest.current.api
+            ? latest.current.api.get('/api/chat/folders', { signal: controller.signal })
+            : Promise.reject(new Error(NO_CLIENT)),
+          makeBackend(fetchFn).get('/setup', { signal: controller.signal }),
+        ])
+        clearTimer(timer)
+        if (!latest.current.alive) return
+        if (foldersResult.status === 'fulfilled' && setupResult.status === 'fulfilled') {
+          setupDispatch({ kind: 'setup-loaded', folders: readFolders(foldersResult.value) ?? [], setupInfo: setupResult.value })
+        } else {
+          const reason = foldersResult.reason ?? setupResult.reason
+          setupDispatch({ kind: 'setup-load-failed', message: String(reason?.message ?? reason) })
+        }
+      } catch (error) {
+        clearTimer(timer)
+        if (latest.current.alive) setupDispatch({ kind: 'setup-load-failed', message: String(error?.message ?? error) })
+      }
+    }
+
+    const saveSetup = async (checkedFolders) => {
+      const fetchFn = env.fetch ?? fetch
+      const body = {
+        projects: checkedFolders.map((folder) => ({
+          folder_id: folder.id,
+          name: (setupState.names[folder.id] ?? '').trim() || folder.name,
+          repository: folder.project_dir,
+        })),
+      }
+      setupDispatch({ kind: 'setup-saving' })
+      try {
+        await makeBackend(fetchFn).post('/setup', body)
+        if (!latest.current.alive) return
+        setupDispatch({ kind: 'setup-close' })
+        dispatch({ kind: 'reset' })
+        chatsDispatch({ kind: 'reset' })
+        uiDispatch({ kind: 'reset' })
+        setFilterKey('all')
+        saveChoice(storage, 'all')
+        const projectsList = await makeBackend(fetchFn).get('/projects')
+        if (!latest.current.alive) return
+        const list = readProjects(projectsList)
+        if (list !== null) projectsDispatch({ kind: 'projects-read', projects: list, savedId: loadProject(storage) })
+      } catch (error) {
+        if (latest.current.alive) setupDispatch({ kind: 'setup-save-failed', message: String(error?.message ?? error) })
+      }
     }
 
     const actions = {
@@ -1698,7 +1923,15 @@ export function createBoard(React, env = {}) {
     const projectsView = projectsOptions ? { options: projectsOptions, currentId } : null
     const projectsNotice = projectsPhase === 'failed'
 
-    const board = renderBoard(h, { ...view, chats, ui, panelAvailable: hasPanel, projects: projectsView, projectsNotice }, { ...actions, filter, switchProject }, { Select })
+    const board = renderBoard(h,
+      { ...view, chats, ui, panelAvailable: hasPanel, projects: projectsView, projectsNotice, setupState, unconfigured },
+      { ...actions, filter, switchProject, openSetup, saveSetup,
+        closeSetup: () => setupDispatch({ kind: 'setup-close' }),
+        tryAgain: openSetup,
+        checkFolder: ({ folderId, checked }) => setupDispatch({ kind: 'setup-check', folderId, checked }),
+        nameFolder: ({ folderId, value }) => setupDispatch({ kind: 'setup-name', folderId, value }),
+      },
+      { Select })
     const panel = panelViewOf(view, ui, hasPanel)
     const panelTree = panel
       ? renderPanel(h, panel, h(boundary(), { slotKey: panel.key }, h(ChatPanel, { slotKey: panel.key, conversationOnly: true })), actions)

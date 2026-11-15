@@ -644,8 +644,14 @@ class HttpTests(unittest.TestCase):
         self.addCleanup(shutil.rmtree, self.root, True)
         self.store = ChatStore(os.path.join(self.root, "data"))
         self.holder = FakeHolder()
+        import projects as proj
+        settings = proj.Project(id="p", name="Project", repository=self.root,
+                                folder="f_1", folder_reason=None, records_file="chats.json")
         self.service = server.ChatService(self.store, "f_1", None, SECRET, self.holder)  # the real clock
-        self.httpd = server.make_server(0, self.holder, None, "/app/config.json", self.service)
+        rp = server.RunningProject(settings, self.holder, self.service)
+        state = server.RuntimeState([rp], None, 'config', False, "/app/config.json", self.root, SECRET)
+        router = server.ChatRouter([rp], SECRET)
+        self.httpd = server.make_server(0, state, router)
         import threading
         threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
         self.addCleanup(self.httpd.server_close)
@@ -729,7 +735,9 @@ class HttpTests(unittest.TestCase):
 
     def test_without_a_service_the_chats_routes_are_404(self):
         import threading
-        httpd = self.server.make_server(0, self.holder, None, "/app/config.json")
+        import projects as proj
+        state = self.server.RuntimeState([], None, 'config', False, "/app/config.json", self.root, "")
+        httpd = self.server.make_server(0, state)
         threading.Thread(target=httpd.serve_forever, daemon=True).start()
         self.addCleanup(httpd.server_close)
         self.addCleanup(httpd.shutdown)

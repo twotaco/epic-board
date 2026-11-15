@@ -1,0 +1,22 @@
+{
+  "decisions": [
+    {
+      "id": "config-wins",
+      "title": "Which source wins when both config.json projects and a Saved_Config exist?",
+      "options": ["config.json projects key wins; Saved_Config is ignored", "Saved_Config wins; config.json is ignored"],
+      "recommended": "config.json projects key wins; Saved_Config is ignored",
+      "answer": "Saved_Config wins once it exists; config.json projects is the fallback when setup.json is absent"
+    },
+    {
+      "id": "repo-restriction",
+      "title": "Should the repository path be further restricted (e.g. to home directory or known paths)?",
+      "options": ["No restriction beyond existing git checkout check", "Restrict to paths under the user's home directory"],
+      "recommended": "No restriction beyond existing git checkout check",
+      "answer": "No restriction beyond existing git checkout check"
+    }
+  ],
+  "blocking": null,
+  "context": {
+    "template": "switch-projects"
+  }
+}

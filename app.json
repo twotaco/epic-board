@@ -22,7 +22,7 @@
     "routes": "/api/apps/epic-board"
   },
   "permissions": {
-    "api": ["/api/chat", "/api/chat/slots"]
+    "api": ["/api/chat", "/api/chat/slots", "/api/chat/folders"]
   },
   "platform": {
     "os": ["macos", "linux"]

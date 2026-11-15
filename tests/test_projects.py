@@ -65,7 +65,8 @@ class LoadProjectsSingleTests(unittest.TestCase):
             f.write(text)
 
     def load(self, **env):
-        return proj.load_projects(env, self.dir)
+        projects, error, *_ = proj.load_projects(env, self.dir)
+        return projects, error
 
     def test_env_gives_one_project(self):
         projects, error = self.load(EPIC_BOARD_REPOSITORY="/tmp/myrepo")
@@ -152,7 +153,8 @@ class LoadProjectsMultiTests(unittest.TestCase):
             json.dump(data, f)
 
     def load(self, **env):
-        return proj.load_projects(env, self.dir)
+        projects, error, *_ = proj.load_projects(env, self.dir)
+        return projects, error
 
     def two_projects(self):
         return [{"name": "Alpha", "repository": "/repos/alpha"},
@@ -339,7 +341,8 @@ class RecordsFileTests(unittest.TestCase):
             json.dump(data, f)
 
     def load(self, **env):
-        return proj.load_projects(env, self.dir)
+        projects, error, *_ = proj.load_projects(env, self.dir)
+        return projects, error
 
     def test_no_legacy_each_gets_own_file(self):
         self.write_config({"projects": [{"name": "A", "repository": "/r/a"},
@@ -383,7 +386,8 @@ class IdTests(unittest.TestCase):
             json.dump(data, f)
 
     def load(self, **env):
-        return proj.load_projects(env, self.dir)
+        projects, error, *_ = proj.load_projects(env, self.dir)
+        return projects, error
 
     def test_equal_names_get_deduplicated_ids(self):
         self.write_config({"projects": [{"name": "Alpha", "repository": "/r/a"},
@@ -512,7 +516,7 @@ class Property2IdsAndFilesUniqueAndStableTests(unittest.TestCase):
         rng = random.Random(seed)
         entries = _random_projects_config(rng)
         self.write_config({"projects": entries})
-        projects, error = proj.load_projects({}, self.dir)
+        projects, error, *_ = proj.load_projects({}, self.dir)
         self.assertIsNone(error, f"seed={seed}, config={entries}")
         ids = [p.id for p in projects]
         files = [p.records_file for p in projects]
@@ -526,7 +530,7 @@ class Property2IdsAndFilesUniqueAndStableTests(unittest.TestCase):
         for id_ in ids:
             self.assertRegex(id_, pattern, f"seed={seed}: bad id {id_!r}")
         # Same config → same ids (stability)
-        projects2, _ = proj.load_projects({}, self.dir)
+        projects2, *_ = proj.load_projects({}, self.dir)
         ids2 = [p.id for p in projects2]
         self.assertEqual(ids, ids2, f"seed={seed}: ids not stable")
 
@@ -565,7 +569,7 @@ class Property3SingleRepositoryBehavesAsBefore(unittest.TestCase):
 
         self.write_config(config)
 
-        projects, error = proj.load_projects(env, self.dir)
+        projects, error, *_ = proj.load_projects(env, self.dir)
         repo_result, repo_error = server.load_repository(env, self.dir)
         folder_result, folder_reason = server.load_folder(env, self.dir)
 

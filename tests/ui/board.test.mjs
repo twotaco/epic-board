@@ -16,6 +16,11 @@ const PROJECTS_URL = `${BACKEND}/projects`
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
 const PAGE_PATH = path.join(REPO_ROOT, 'ui', 'index.mjs')
 
+// Default projects for awaitProjects: one project so unconfigured = false and pollers start.
+const DEFAULT_PROJECTS = [{ id: 'p', name: 'Project' }]
+// Strips query string from a URL for loose equality checks.
+const normalizeUrl = (url) => url.split('?')[0]
+
 // Lets promise callbacks run. Timers are fake, so a real setImmediate is safe.
 const flush = async () => {
   for (let i = 0; i < 3; i += 1) await new Promise((resolve) => setImmediate(resolve))
@@ -157,7 +162,7 @@ function mount({ hidden = false, api, storage, ChatPanel } = {}) {
   const projectsFetch = makeFetch()
   const gateway = makeGateway()
   const document = makeDocument(hidden)
-  const fetch = (url, options) => url === PLAN_URL ? planFetch(url, options) : url === PROJECTS_URL ? projectsFetch(url, options) : chatFetch(url, options)
+  const fetch = (url, options) => url.startsWith(PLAN_URL) ? planFetch(url, options) : url.startsWith(PROJECTS_URL) ? projectsFetch(url, options) : chatFetch(url, options)
   const hooks = []
   let cursor = 0
   let pending = []
@@ -261,7 +266,7 @@ function mount({ hidden = false, api, storage, ChatPanel } = {}) {
     instance,
     tree: () => tree,
     text: () => textOf(tree),
-    async awaitProjects(projects = []) {
+    async awaitProjects(projects = DEFAULT_PROJECTS) {
       projectsFetch.answer(0, 200, projects)
       await flush()
     },
@@ -299,14 +304,14 @@ test('opening the page sends one GET of the plan route and one GET of the chats 
   const page = mount()
   await page.awaitProjects()
   assert.equal(page.chatFetch.calls.length, 1)
-  assert.equal(page.chatFetch.calls[0][0], `${BACKEND}/chats`)
+  assert.equal(normalizeUrl(page.chatFetch.calls[0][0]), `${BACKEND}/chats`)
   assert.equal(page.chatFetch.calls[0][1].method, 'GET')
   page.chatFetch.answer(0, 200, { folder_id: 'f_1', folder_reason: null, chats: [] })
   await flush()
   assert.deepEqual(page.gateway.calls, [], 'no started chats: nothing is sent to Crew')
   assert.equal(page.fetch.calls.length, 1)
   const [url, options] = page.fetch.calls[0]
-  assert.equal(url, PLAN_URL)
+  assert.ok(url.startsWith(PLAN_URL))
   assert.equal(options.method, 'GET')
   assert.equal(options.credentials, 'same-origin')
   assert.equal(options.cache, 'no-store')
@@ -327,7 +332,7 @@ test('opening the page sends one GET of the plan route and one GET of the chats 
   assert.equal(page.fetch.calls.length, 4)
 
   for (const [callUrl, callOptions] of page.fetch.calls) {
-    assert.equal(callUrl, PLAN_URL)
+    assert.ok(callUrl.startsWith(PLAN_URL))
     assert.deepEqual(Object.keys(callOptions).sort(), ['cache', 'credentials', 'method', 'signal'])
     assert.equal(callOptions.method, 'GET')
   }
@@ -444,7 +449,7 @@ test('a hidden page sends no request until it becomes visible, then requests at 
   assert.equal(page.fetch.calls.length, 0, 'plan waits for projects to load')
   await page.awaitProjects()
   assert.equal(page.fetch.calls.length, 1)
-  assert.equal(page.fetch.calls[0][0], PLAN_URL)
+  assert.ok(page.fetch.calls[0][0].startsWith(PLAN_URL))
 })
 
 test('becoming visible after an answer requests at once without waiting for the timer', async () => {
@@ -547,7 +552,7 @@ test('the chats route is read on open, and the list in Crew only when there are 
   await page.awaitProjects()
   assert.equal(page.chatFetch.calls.length, 1)
   const [url, options] = page.chatFetch.calls[0]
-  assert.equal(url, `${BACKEND}/chats`)
+  assert.equal(normalizeUrl(url), `${BACKEND}/chats`)
   assert.deepEqual([options.method, options.credentials, options.cache], ['GET', 'same-origin', 'no-store'])
   assert.equal(options.body, undefined)
   assert.equal(typeof options.signal?.aborted, 'boolean')
@@ -651,7 +656,7 @@ test('a start: the question, then reserve, create and save, then the link at onc
   assert.equal(buttonNamed(page, 'Start'), undefined)
   assert.equal(page.chatFetch.calls.length, 2, 'one reservation only')
   const [reserveUrl, reserve] = page.chatFetch.calls[1]
-  assert.equal(reserveUrl, `${BACKEND}/chats`)
+  assert.equal(normalizeUrl(reserveUrl), `${BACKEND}/chats`)
   assert.deepEqual([reserve.method, reserve.credentials, reserve.headers], ['POST', 'same-origin', { 'Content-Type': 'application/json' }])
   assert.deepEqual(JSON.parse(reserve.body), { card_id: ALPHA })
 
@@ -662,7 +667,7 @@ test('a start: the question, then reserve, create and save, then the link at onc
   await flush()
   // The chat is saved before the brief is sent.
   const [savedUrl, saved] = page.chatFetch.calls[2]
-  assert.equal(savedUrl, `${BACKEND}/chats/${NAME}/started`)
+  assert.equal(normalizeUrl(savedUrl), `${BACKEND}/chats/${NAME}/started`)
   assert.deepEqual(JSON.parse(saved.body), { key: NAME })
   assert.deepEqual(page.gateway.paths(), ['/api/chat/slots'], 'no brief before the save is answered')
   assert.equal(anchors(page).length, 0, 'and no link before the save is answered')
@@ -675,7 +680,7 @@ test('a start: the question, then reserve, create and save, then the link at onc
   assert.deepEqual(page.gateway.calls[1], ['post', '/api/chat', { slot: NAME, message: 'THE BRIEF' }])
   assert.match(page.text(), /Sending the brief…/)
   assert.equal(page.chatFetch.calls.length, 4, 'and a read of the records follows at once')
-  assert.deepEqual([page.chatFetch.calls[3][0], page.chatFetch.calls[3][1].method], [`${BACKEND}/chats`, 'GET'])
+  assert.deepEqual([normalizeUrl(page.chatFetch.calls[3][0]), page.chatFetch.calls[3][1].method], [`${BACKEND}/chats`, 'GET'])
   page.gateway.answer('/api/chat', {})
   await flush()
   assert.doesNotMatch(page.text(), /Sending the brief…|The brief was not sent/)
@@ -944,7 +949,7 @@ test('a failed resume shows the reason, and Start again removes only the board\'
   click(page, 'Start again')
   await flush()
   const [url, options] = page.chatFetch.calls.at(-1)
-  assert.deepEqual([url, options.method], [`${BACKEND}/chats/${NAME}`, 'DELETE'])
+  assert.deepEqual([normalizeUrl(url), options.method], [`${BACKEND}/chats/${NAME}`, 'DELETE'])
   page.chatFetch.answer(page.chatFetch.calls.length - 1, 200, { removed: true })
   await flush()
   assert.equal(page.gateway.calls.length, callsToCrew, 'nothing was sent to Crew')
@@ -1189,6 +1194,98 @@ test('board: a plan with only epic two is shown with no reset when the saved epi
   assert.deepEqual(storage.writes, [])
 })
 
+// ---- Setup view: Projects button, unconfigured, and integration ----
+
+test('setup: Projects button is in the board when plan is showing', async () => {
+  const page = mount()
+  await page.awaitProjects()
+  page.fetch.answer(0, 200, plan())
+  page.chatFetch.answer(0, 200, chatsAnswer([]))
+  await flush()
+  assert.ok(buttonNamed(page, 'Set up projects'), 'Projects button present in plan view')
+})
+
+test('setup: Projects button present when there is exactly one project', async () => {
+  const page = mount()
+  await page.awaitProjects([{ id: 'solo', name: 'Solo' }])
+  page.fetch.answer(0, 200, plan())
+  page.chatFetch.answer(0, 200, chatsAnswer([]))
+  await flush()
+  assert.ok(buttonNamed(page, 'Set up projects'))
+})
+
+test('setup: unconfigured notice and Projects button when projects list is empty', async () => {
+  const page = mount()
+  await page.awaitProjects([])
+  assert.match(page.text(), /Choose your projects/)
+  assert.ok(buttonNamed(page, 'Set up projects'))
+  assert.equal(page.fetch.calls.length, 0, 'plan poller not started when unconfigured')
+  assert.equal(page.chatFetch.calls.length, 0, 'chat poller not started when unconfigured')
+})
+
+test('setup: unconfigured state has no columns', async () => {
+  const page = mount()
+  await page.awaitProjects([])
+  const columns = findAll(page.tree(), (n) => n.props?.className === 'eb-columns')
+  assert.equal(columns.length, 0)
+})
+
+test('setup: clicking Set up projects shows loading then ready with folder list', async () => {
+  const page = mount()
+  await page.awaitProjects()
+  page.fetch.answer(0, 200, plan())
+  page.chatFetch.answer(0, 200, chatsAnswer([]))
+  await flush()
+
+  click(page, 'Set up projects')
+  await flush()
+  assert.match(page.text(), /Loading/)
+
+  page.gateway.answer('/api/chat/folders', [{ id: 'f1', name: 'Alpha Folder', project_dir: '/home/x/proj' }])
+  page.chatFetch.answer(1, 200, { source: 'config', config_has_projects: false, projects: [] })
+  await flush()
+
+  assert.match(page.text(), /Alpha Folder/)
+  assert.ok(buttonNamed(page, 'Save'))
+})
+
+test('setup: after saveSetup succeeds, setup view closes', async () => {
+  const page = mount()
+  await page.awaitProjects()
+  page.fetch.answer(0, 200, plan())
+  page.chatFetch.answer(0, 200, chatsAnswer([]))
+  await flush()
+
+  click(page, 'Set up projects')
+  await flush()
+  page.gateway.answer('/api/chat/folders', [{ id: 'f1', name: 'Folder', project_dir: '/home/x' }])
+  page.chatFetch.answer(1, 200, { source: 'config', config_has_projects: false, projects: [] })
+  await flush()
+
+  // Check the folder and name it
+  findAll(page.tree(), (n) => n.type === 'input' && n.props.type === 'checkbox')[0]
+    .props.onChange({ target: { checked: true } })
+  await flush()
+  findAll(page.tree(), (n) => n.type === 'input' && n.props.type === 'text')[0]
+    .props.onChange({ target: { value: 'My P' } })
+  await flush()
+
+  click(page, 'Save')
+  await flush()
+
+  // Answer POST /setup
+  page.chatFetch.answer(page.chatFetch.calls.length - 1, 200, { projects: [{ id: 'q', name: 'My P' }], source: 'saved' })
+  await flush()
+
+  // Answer re-read projects
+  page.projectsFetch.answer(1, 200, [{ id: 'q', name: 'My P' }])
+  await flush()
+
+  // Setup view closed: no Save or Cancel button
+  assert.equal(buttonNamed(page, 'Save'), undefined, 'Save button gone after close')
+  assert.equal(buttonNamed(page, 'Cancel'), undefined, 'Cancel button gone after close')
+})
+
 // ---- The default export ----
 
 let freshCount = 0
@@ -1256,7 +1353,7 @@ test('the page source has no innerHTML, script injection, other network paths or
 
   // The paths the page may use: the plan route, the backend's chats and projects routes, and the chat
   // paths of start-a-story (Requirements 4, 6 and 8). Quoted paths first, then the ones built in a template.
-  const allowed = new Set([PLAN_URL, BACKEND, '/chats', '/api/chat/slots', '/api/chat', '/projects'])
+  const allowed = new Set([PLAN_URL, BACKEND, '/chats', '/api/chat/slots', '/api/chat', '/projects', '/setup', '/api/chat/folders'])
   const urls = source.match(/['"`](?:https?:)?\/[A-Za-z0-9_\-./]*['"`]/g) ?? []
   assert.deepEqual([...new Set(urls.map((url) => url.slice(1, -1)))].sort(), [...allowed].sort())
   assert.equal(/https?:\/\//.test(source), false)
