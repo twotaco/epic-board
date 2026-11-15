@@ -727,6 +727,17 @@ test('no element carries an inline colour, background or outline', () => {
   }
 })
 
+test('STYLE has the notice, filter, folder and setup rules, in tokens, with the error tone on its own class', () => {
+  for (const selector of ['.eb-notice', '.eb-notice-error', '.eb-error', '.eb-filters', '.eb-filter', '.eb-setup', '.eb-folder', '.eb-folder-label', '.eb-folder-dir', '.eb-folder-name', '.eb-setup-actions']) {
+    assert.ok(new RegExp(`(^|\\n|, )${selector.replace('.', '\\.')}[ ,{]`).test(STYLE), `a rule for ${selector}`)
+  }
+  assert.match(STYLE, /\.eb-notice\s*\{[^}]*border:\s*1px solid var\(--border, currentColor\)[^}]*background:\s*var\(--bg-elevated, transparent\)/)
+  assert.match(STYLE, /\.eb-notice-error\s*\{[^}]*var\(--danger, currentColor\)[^}]*var\(--danger-subtle, transparent\)[^}]*color:\s*var\(--danger-text, currentColor\)/)
+  assert.doesNotMatch(STYLE, /\.eb-error[^{]*\{[^}]*var\(--/, 'the fallback error keeps its own look')
+  assert.match(STYLE, /\.eb-card-spec, \.eb-folder-dir\s*\{[^}]*var\(--mono, monospace\)/)
+  assert.match(STYLE, /\.eb-folder-label input\s*\{[^}]*accent-color:\s*var\(--accent, currentColor\)/)
+})
+
 test('STYLE stacks the columns, puts them side by side from 720px in a container query, with a media query fallback', () => {
   assert.ok(STYLE.includes('container-type: inline-size'))
   const root = /\.eb-root\s*\{([^}]*)\}/.exec(STYLE)

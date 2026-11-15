@@ -822,7 +822,9 @@ export const STYLE = `
 .eb-branch { font-weight: 600; }
 .eb-commit { font-family: monospace; }
 .eb-checking { min-width: 0; }
-.eb-notice, .eb-error { border: 1px solid currentColor; border-radius: var(--radius-md, 0); margin: 0 0 16px 0; padding: 8px 12px; overflow-wrap: anywhere; }
+.eb-error { border: 1px solid currentColor; border-radius: 6px; margin: 0 0 16px 0; padding: 8px 12px; overflow-wrap: anywhere; }
+.eb-notice { border: 1px solid var(--border, currentColor); border-radius: var(--radius-lg, 0); background: var(--bg-elevated, transparent); margin: 0 0 16px 0; padding: 8px 12px; font-size: 13px; overflow-wrap: anywhere; }
+.eb-notice-error { border-color: var(--danger, currentColor); background: var(--danger-subtle, transparent); color: var(--danger-text, currentColor); }
 .eb-notice p, .eb-error p { margin: 0; }
 .eb-error ul { margin: 8px 0 0 0; padding-left: 20px; }
 .eb-filters { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 0 0 16px 0; }
@@ -839,7 +841,7 @@ export const STYLE = `
 .eb-card.eb-fb { border: 1px solid rgba(128, 128, 128, 0.5); border-radius: 6px; background: rgba(128, 128, 128, 0.1); padding: 8px 12px; }
 .eb-card-name { font-weight: 600; }
 .eb-card-description { margin-top: 4px; font-size: 13px; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; line-clamp: 3; overflow: hidden; }
-.eb-card-spec { margin-top: 4px; font-family: var(--mono, monospace); font-size: 12px; color: var(--muted, currentColor); }
+.eb-card-spec, .eb-folder-dir { margin-top: 4px; font-family: var(--mono, monospace); font-size: 12px; color: var(--muted, currentColor); overflow-wrap: anywhere; }
 .eb-card-progress { margin-top: 4px; font-size: 0.9em; }
 .eb-bar { margin-top: 4px; height: 6px; border-radius: 3px; background: var(--border, transparent); overflow: hidden; }
 .eb-bar-fill { height: 100%; background: var(--accent, currentColor); }
@@ -859,6 +861,13 @@ export const STYLE = `
 .eb-question, .eb-chat-controls { position: relative; z-index: 1; margin-top: 8px; }
 .eb-question p, .eb-chat-controls p { margin: 6px 0 0 0; }
 .eb-question button, .eb-chat-controls button { font: inherit; cursor: pointer; margin-top: 6px; }
+.eb-setup { padding: 8px 12px; }
+.eb-setup ul { margin: 0; padding: 0; }
+.eb-folder { list-style: none; margin: 0; padding: 8px 0; border-bottom: 1px solid var(--border, currentColor); }
+.eb-folder-label { display: flex; align-items: center; gap: 6px; }
+.eb-folder-label input { margin: 0; accent-color: var(--accent, currentColor); }
+.eb-folder-name { display: block; width: 100%; margin-top: 6px; font: inherit; }
+.eb-setup-actions { display: flex; gap: 8px; margin-top: 12px; }
 .eb-empty-column { margin: 0; padding: 6px; color: var(--muted, currentColor); }
 .eb-problems { margin-top: 16px; border: 1px solid var(--border, currentColor); border-radius: var(--radius-md, 0); padding: 8px 12px; }
 .eb-problems summary { cursor: pointer; }
