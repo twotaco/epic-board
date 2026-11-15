@@ -1254,8 +1254,8 @@ test('render: the dropdown sits after the header and before the columns, and fol
   const tree = renderBoard(h, view, {})
   const classes = []
   for (const node of tree.children) if (node && node.props) classes.push(node.props.className)
-  assert.ok(classes.indexOf('eb-header') < classes.indexOf('eb-filter'))
-  assert.ok(classes.indexOf('eb-filter') < classes.indexOf('eb-columns'))
+  assert.ok(classes.indexOf('eb-header') < classes.indexOf('eb-filters'))
+  assert.ok(classes.indexOf('eb-filters') < classes.indexOf('eb-columns'))
   assert.equal(labelled(tree)[0].props.value, 'hardening.md')
 })
 

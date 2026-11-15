@@ -24,6 +24,8 @@ Statuses are `planned`, `in progress` and `done`.
 4. IF neither source gives a repository, or `config.json` exists but cannot be read as an object with a text `repository` value, or the configured path is not a git checkout THEN the plan response SHALL be an error that names both the environment variable and `config.json` and says what is wrong, and SHALL contain no plan.
 5. WHEN the app is committed to a repository THEN `config.json` SHALL NOT be part of it, so a person's repository path is never published.
 
+_For several projects, `config.json` may list them under a `projects` key; these criteria apply to one project. See `.kiro/specs/switch-projects/requirements.md`, Requirement 1._
+
 ### Requirement 2
 
 **User Story:** As a person planning a project, I want the plan to come only from the main branch, so that the board shows what has landed and not what is half done on a branch.

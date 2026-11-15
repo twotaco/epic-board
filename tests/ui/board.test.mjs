@@ -12,6 +12,7 @@ import { createBoard } from '../../ui/index.mjs'
 
 const PLAN_URL = '/apps/epic-board/api/plan'
 const BACKEND = '/apps/epic-board/api'
+const PROJECTS_URL = `${BACKEND}/projects`
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
 const PAGE_PATH = path.join(REPO_ROOT, 'ui', 'index.mjs')
 
@@ -153,9 +154,10 @@ function mount({ hidden = false, api, storage, ChatPanel } = {}) {
   const clock = makeClock()
   const planFetch = makeFetch()
   const chatFetch = makeFetch()
+  const projectsFetch = makeFetch()
   const gateway = makeGateway()
   const document = makeDocument(hidden)
-  const fetch = (url, options) => (url === PLAN_URL ? planFetch : chatFetch)(url, options)
+  const fetch = (url, options) => url === PLAN_URL ? planFetch(url, options) : url === PROJECTS_URL ? projectsFetch(url, options) : chatFetch(url, options)
   const hooks = []
   let cursor = 0
   let pending = []
@@ -252,12 +254,17 @@ function mount({ hidden = false, api, storage, ChatPanel } = {}) {
   return {
     fetch: planFetch,
     chatFetch,
+    projectsFetch,
     gateway,
     document,
     clock,
     instance,
     tree: () => tree,
     text: () => textOf(tree),
+    async awaitProjects(projects = []) {
+      projectsFetch.answer(0, 200, projects)
+      await flush()
+    },
     unmount() {
       unmounted = true
       for (const slot of hooks) if (typeof slot.cleanup === 'function') slot.cleanup()
@@ -290,6 +297,7 @@ const NOTICE_TEXT = 'Could not reach the backend. Showing the plan from the last
 
 test('opening the page sends one GET of the plan route and one GET of the chats route, and no Crew request', async () => {
   const page = mount()
+  await page.awaitProjects()
   assert.equal(page.chatFetch.calls.length, 1)
   assert.equal(page.chatFetch.calls[0][0], `${BACKEND}/chats`)
   assert.equal(page.chatFetch.calls[0][1].method, 'GET')
@@ -330,17 +338,19 @@ test('the first render shows Loading…, then the board with no second Loading�
   assert.match(page.text(), /Loading…/)
   assert.doesNotMatch(page.text(), /Card Alpha/)
 
+  await page.awaitProjects()
   page.fetch.answer(0, 200, plan())
   await flush()
   const text = page.text()
   assert.match(text, /Card Alpha/)
   assert.match(text, /Card Beta/)
   assert.doesNotMatch(text, /Loading…/)
-  assert.equal(page.instance.renders, 2)
+  assert.equal(page.instance.renders, 3)
 })
 
 test('a 202 pending answer keeps Loading… and requests again after 2000 ms', async () => {
   const page = mount()
+  await page.awaitProjects()
   page.fetch.answer(0, 202, { pending: true })
   await flush()
   assert.match(page.text(), /Loading…/)
@@ -352,6 +362,7 @@ test('a 202 pending answer keeps Loading… and requests again after 2000 ms', a
 
 test('a plan with refreshing true requests again after 2000 ms', async () => {
   const page = mount()
+  await page.awaitProjects()
   page.fetch.answer(0, 200, plan({ refreshing: true }))
   await flush()
   page.clock.advance(1999)
@@ -362,6 +373,7 @@ test('a plan with refreshing true requests again after 2000 ms', async () => {
 
 test('a plan with refreshing false requests again after 15000 ms', async () => {
   const page = mount()
+  await page.awaitProjects()
   page.fetch.answer(0, 200, plan({ refreshing: false }))
   await flush()
   page.clock.advance(14999)
@@ -372,6 +384,7 @@ test('a plan with refreshing false requests again after 15000 ms', async () => {
 
 test('a rejected fetch shows the failure text and requests again after 15000 ms', async () => {
   const page = mount()
+  await page.awaitProjects()
   page.fetch.fail(0)
   await flush()
   assert.match(page.text(), /Could not reach the backend\./)
@@ -385,6 +398,7 @@ test('a rejected fetch shows the failure text and requests again after 15000 ms'
 
 test('a body that is not JSON shows the failure text and requests again after 15000 ms', async () => {
   const page = mount()
+  await page.awaitProjects()
   page.fetch.badJson(0)
   await flush()
   assert.equal(textOf(page.tree()).includes(FAILURE_TEXT), true)
@@ -397,6 +411,7 @@ test('a body that is not JSON shows the failure text and requests again after 15
 
 test('a failure after a plan keeps the board and adds the last-update notice', async () => {
   const page = mount()
+  await page.awaitProjects()
   page.fetch.answer(0, 200, plan())
   await flush()
   assert.doesNotMatch(page.text(), /Could not reach the backend/)
@@ -426,12 +441,15 @@ test('a hidden page sends no request until it becomes visible, then requests at 
 
   page.document.hidden = false
   page.document.fire('visibilitychange')
+  assert.equal(page.fetch.calls.length, 0, 'plan waits for projects to load')
+  await page.awaitProjects()
   assert.equal(page.fetch.calls.length, 1)
   assert.equal(page.fetch.calls[0][0], PLAN_URL)
 })
 
 test('becoming visible after an answer requests at once without waiting for the timer', async () => {
   const page = mount()
+  await page.awaitProjects()
   page.fetch.answer(0, 200, plan())
   await flush()
   page.document.hidden = true
@@ -446,18 +464,20 @@ test('becoming visible after an answer requests at once without waiting for the 
 
 // ---- Unmount ----
 
-test('unmounting removes the same listeners it added (one for the plan, one for the chats)', async () => {
+test('unmounting removes the same listeners it added (one for projects, one for the plan, one for the chats)', async () => {
   const page = mount()
-  assert.equal(page.document.added.length, 2)
-  assert.deepEqual(page.document.added.map(([type]) => type), ['visibilitychange', 'visibilitychange'])
-  assert.equal(page.document.listenerCount(), 2)
+  await page.awaitProjects()
+  assert.equal(page.document.added.length, 3)
+  assert.deepEqual(page.document.added.map(([type]) => type), ['visibilitychange', 'visibilitychange', 'visibilitychange'])
+  assert.equal(page.document.listenerCount(), 3)
   page.unmount()
-  assert.equal(page.document.removed.length, 2)
+  assert.equal(page.document.removed.length, 3)
   assert.deepEqual(page.document.removed.map(([, fn]) => fn).sort(), page.document.added.map(([, fn]) => fn).sort())
   assert.equal(page.document.listenerCount(), 0)
 })
 test('unmounting clears pending timers and sends no further request', async () => {
   const page = mount()
+  await page.awaitProjects()
   page.fetch.answer(0, 200, plan())
   await flush()
   assert.ok(page.clock.pending() > 0)
@@ -471,16 +491,18 @@ test('unmounting clears pending timers and sends no further request', async () =
 
 test('unmounting aborts an in-flight fetch and a late answer causes no dispatch or render', async () => {
   const page = mount()
+  await page.awaitProjects()
   const { signal } = page.fetch.calls[0][1]
   assert.equal(signal.aborted, false)
   const rendersBefore = page.instance.renders
+  const dispatchesBefore = page.instance.dispatches
   page.unmount()
   assert.equal(signal.aborted, true)
   assert.equal(page.clock.pending(), 0)
 
   page.fetch.answer(0, 200, plan())
   await flush()
-  assert.equal(page.instance.dispatches, 0)
+  assert.equal(page.instance.dispatches, dispatchesBefore)
   assert.equal(page.instance.renders, rendersBefore)
   assert.equal(page.fetch.calls.length, 1)
 })
@@ -503,6 +525,7 @@ const anchors = (page) => findAll(page.tree(), (node) => node.type === 'a')
 // Opens the page with a plan on the board and the chats route answered.
 async function ready(options = {}, chats = []) {
   const page = mount(options)
+  await page.awaitProjects()
   page.fetch.answer(0, 200, plan())
   page.chatFetch.answer(0, 200, chatsAnswer(chats))
   await flush()
@@ -521,6 +544,7 @@ const NOTICE = 'Could not read chat status. Showing the last known states.'
 
 test('the chats route is read on open, and the list in Crew only when there are started chats', async () => {
   const page = mount()
+  await page.awaitProjects()
   assert.equal(page.chatFetch.calls.length, 1)
   const [url, options] = page.chatFetch.calls[0]
   assert.equal(url, `${BACKEND}/chats`)
@@ -609,6 +633,8 @@ test('a hidden page sends no chat request until it is visible, then reads at onc
   assert.deepEqual([page.fetch.calls.length, page.chatFetch.calls.length], [0, 0])
   page.document.hidden = false
   page.document.fire('visibilitychange')
+  assert.deepEqual([page.fetch.calls.length, page.chatFetch.calls.length], [0, 0], 'plan and chat wait for projects')
+  await page.awaitProjects()
   assert.deepEqual([page.fetch.calls.length, page.chatFetch.calls.length], [1, 1])
 })
 
@@ -858,6 +884,7 @@ test('Cancel closes the question and puts focus back on the card\'s button; so d
 
 test('the question is open on one card at a time, and a Done card with no chat has no button', async () => {
   const page = mount()
+  await page.awaitProjects()
   page.fetch.answer(0, 200, plan({ groups: [{ epic: { file: 'one.md', name: 'Epic One' }, cards: [
     { id: 'one.md#A', name: 'A', description: '', status: 'planned', spec: null, tasks: null },
     { id: 'one.md#B', name: 'B', description: '', status: 'in progress', spec: 'b', tasks: { done: 1, total: 2 } },
@@ -997,6 +1024,7 @@ test('a host with no app client cannot reach Crew: the read fails, the board sta
 
 test('a backend that cannot read its file of chats shows the message when a card asks to start', async () => {
   const page = mount()
+  await page.awaitProjects()
   page.fetch.answer(0, 200, plan())
   page.chatFetch.answer(0, 500, { error: { code: 'chats_unreadable', message: '/x/chats.json cannot be read as the board\'s file of chats.' } })
   await flush()
@@ -1010,6 +1038,7 @@ test('a backend that cannot read its file of chats shows the message when a card
 
 test('unmounting stops both pollers, aborts the reads in flight, and a late answer does nothing', async () => {
   const page = mount()
+  await page.awaitProjects()
   const { signal } = page.chatFetch.calls[0][1]
   assert.equal(signal.aborted, false)
   const before = page.instance.renders
@@ -1055,6 +1084,7 @@ const selectOf = (page) => findAll(page.tree(), (n) => n.type === 'select' && n.
 const choose = (page, key) => selectOf(page).props.onChange({ target: { value: key } })
 const pageWith = async (storage, body = TWO) => {
   const page = mount({ storage })
+  await page.awaitProjects()
   page.fetch.answer(0, 200, body)
   await flush()
   return page
@@ -1096,6 +1126,7 @@ test('board: nothing is drawn or reset before the first plan', async () => {
   const page = mount({ storage })
   assert.equal(selectOf(page), undefined)
   assert.deepEqual(storage.writes, [])
+  await page.awaitProjects()
   page.fetch.answer(0, 200, TWO)
   await flush()
   assert.equal(selectOf(page).props.value, 'two.md')
@@ -1217,15 +1248,15 @@ test('the page source has no innerHTML, script injection, other network paths or
   assert.equal(/\bnew\s+Function\b/.test(source), false)
 
   assert.equal(/\bfetch\s*\(/.test(source), false, 'no direct fetch( call')
-  // Two calls: the plan route, and the backend client's (the chats routes, under BACKEND_BASE).
+  // Two calls: the plan route (via planUrl), and the backend client's (chats and projects, under BACKEND_BASE).
   const calls = source.match(/\bfetchFn\s*\(/g) ?? []
   assert.equal(calls.length, 2)
-  assert.equal(/\bfetchFn\s*\(\s*PLAN_URL\s*,/.test(source), true, 'one call is on PLAN_URL')
-  assert.equal(/\bfetchFn\s*\(\s*BACKEND_BASE\s*\+\s*path\s*,/.test(source), true, 'the other is on BACKEND_BASE + path')
+  assert.equal(/\bfetchFn\s*\(\s*planUrl\s*,/.test(source), true, 'one call is on planUrl')
+  assert.equal(/\bfetchFn\s*\(\s*BACKEND_BASE\s*\+\s*path\s*\+\s*query\s*,/.test(source), true, 'the other is on BACKEND_BASE + path + query')
 
-  // The paths the page may use: the plan route, the backend's chats route, and the chat paths of
-  // start-a-story (Requirements 4, 6 and 8). Quoted paths first, then the ones built in a template.
-  const allowed = new Set([PLAN_URL, BACKEND, '/chats', '/api/chat/slots', '/api/chat'])
+  // The paths the page may use: the plan route, the backend's chats and projects routes, and the chat
+  // paths of start-a-story (Requirements 4, 6 and 8). Quoted paths first, then the ones built in a template.
+  const allowed = new Set([PLAN_URL, BACKEND, '/chats', '/api/chat/slots', '/api/chat', '/projects'])
   const urls = source.match(/['"`](?:https?:)?\/[A-Za-z0-9_\-./]*['"`]/g) ?? []
   assert.deepEqual([...new Set(urls.map((url) => url.slice(1, -1)))].sort(), [...allowed].sort())
   assert.equal(/https?:\/\//.test(source), false)
@@ -1266,6 +1297,7 @@ const openByClick = (page, name) => {
 // The page with both cards started and working, and the fake ChatPanel mounted by the host.
 async function readyChats(Chat, records = [RECORD, RECORD_B], rows = records.map((record) => row(record.key, { running: true }))) {
   const page = mount({ ChatPanel: Chat })
+  await page.awaitProjects()
   page.fetch.answer(0, 200, plan())
   page.chatFetch.answer(0, 200, chatsAnswer(records))
   await flush()

@@ -10,7 +10,7 @@ import sys
 import time
 import traceback
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import urlparse
+from urllib.parse import urlparse, parse_qs
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -18,12 +18,13 @@ from chats import NAME_PATTERN, ChatError, ChatStore, MAX_CARD_ID_CHARS, build_b
 from gitsource import open_snapshot, read_snapshot  # noqa: E402
 from held import Holder  # noqa: E402
 from plan import build_plan  # noqa: E402
+from projects import check_folder, load_projects, ENV_NAME, FOLDER_ENV_NAME, FOLDER_MAX_CHARS  # noqa: E402
 from proxyauth import verify  # noqa: E402
 
 APP_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-ENV_NAME = "EPIC_BOARD_REPOSITORY"
 STATUS = {"repository_not_configured": 409, "repository_not_a_checkout": 409,
-          "ref_unreadable": 502, "read_failed": 502, "internal": 500}
+          "ref_unreadable": 502, "read_failed": 502, "internal": 500,
+          "project_not_found": 404, "invalid_request": 400}
 
 
 def config_error(code, message, config_path):
@@ -53,10 +54,6 @@ def load_repository(environ=None, app_dir=None):
     return os.path.abspath(os.path.expanduser(value.strip())), None
 
 
-FOLDER_ENV_NAME = "EPIC_BOARD_FOLDER"
-FOLDER_MAX_CHARS = 200
-
-
 def load_folder(environ=None, app_dir=None):
     """Return (folder_id or None, reason or None): the Crew folder chats are opened in.
 
@@ -82,12 +79,7 @@ def load_folder(environ=None, app_dir=None):
         if "folder_id" not in data:
             return None, None
         value = data["folder_id"]
-    if not isinstance(value, str) or not value.strip():
-        return None, f"{source} must be text and not empty."
-    value = value.strip()
-    if len(value) > FOLDER_MAX_CHARS:
-        return None, f"{source} is longer than {FOLDER_MAX_CHARS} characters."
-    return value, None
+    return check_folder(value, source)
 
 
 def data_dir(environ=None):
@@ -130,7 +122,8 @@ MAX_BODY_BYTES = 4096
 CHATS_ROUTE = re.compile(r"/chats(?:/([^/]+)(?:/(started))?)?$")
 CHAT_STATUS = {"unauthorized": 401, "proxy_secret_missing": 503, "invalid_request": 400, "chat_not_found": 404,
                "not_found": 404, "card_not_found": 409, "card_done": 409, "chat_exists": 409, "folder_not_set": 409,
-               "plan_not_ready": 409, "chats_unreadable": 500, "internal": 500}
+               "plan_not_ready": 409, "chats_unreadable": 500, "internal": 500,
+               "project_not_found": 404, "repository_not_configured": 409}
 
 
 def chat_refusal(code, message):
@@ -148,10 +141,46 @@ def fields(body, expected):
     return data
 
 
-class ChatService:
-    """The `/chats` routes: which chat belongs to which card. Never calls Crew, never runs git.
+def pick_project(projects, query):
+    """Return (project, None) or (None, (status, body)).
+    `query` is the parsed query string as a dict of lists (from parse_qs with keep_blank_values=True)."""
+    values = query.get("project", [])
+    if len(values) > 1:
+        return None, chat_refusal("invalid_request", "The request has more than one project value.")
+    if len(values) == 0:
+        if not projects:
+            return None, None  # caller handles empty list
+        return projects[0], None
+    value = values[0]
+    if not value:
+        return None, chat_refusal("project_not_found", "No project has that id.")
+    for project in projects:
+        if project.id == value:
+            return project, None
+    return None, chat_refusal("project_not_found", "No project has that id.")
 
-    `holder` is the plan holder, or none when the repository setting is wrong. `secret` is
+
+class RunningProject:
+    """A project's running parts: its plan holder (or None) and its chat service."""
+
+    def __init__(self, settings, holder, chats):
+        self.settings = settings
+        self.holder = holder
+        self.chats = chats
+
+    @property
+    def id(self):
+        return self.settings.id
+
+    @property
+    def name(self):
+        return self.settings.name
+
+
+class ChatService:
+    """The `/chats` routes for one project. Never calls Crew, never runs git.
+
+    `holder` is the plan holder, or None when the repository setting is wrong. `secret` is
     KIROCREW_PROXY_SECRET. Every request must carry the gateway's signature.
     """
 
@@ -160,11 +189,16 @@ class ChatService:
         self.secret, self.holder, self.clock = secret, holder, clock
 
     def handle(self, method, path, header, body):
-        """Return (http status, body). `path` is the request target as received, query included."""
+        """Return (http status, body). `path` is the request target as received, query included.
+        Checks the signature, then delegates to handle_verified."""
         if not self.secret:
             return chat_refusal("proxy_secret_missing", "The app has no proxy secret, so chats cannot be saved.")
         if not verify(header, method=method, target=path, body=body, secret=self.secret, now=self.clock()):
             return chat_refusal("unauthorized", "The request is not signed by the gateway.")
+        return self.handle_verified(method, path, body)
+
+    def handle_verified(self, method, path, body):
+        """The body of handle() after signature verification."""
         try:
             if len(body) > MAX_BODY_BYTES:
                 raise ChatError("invalid_request", 400, "The body is too large.")
@@ -216,7 +250,37 @@ class ChatService:
                 "brief": build_brief(card, epic_file, plan["branch"], spec_folders(plan))}
 
 
-def make_handler(holder, error, config_path, chats=None):
+class ChatRouter:
+    """Checks the signature, resolves the project and delegates to that project's ChatService."""
+
+    def __init__(self, running_projects, secret, clock=time.time):
+        self.running_projects = running_projects  # list of RunningProject
+        self.secret = secret
+        self.clock = clock
+
+    def handle(self, method, path, header, body):
+        """Return (http status, body). Signature is checked before the project is resolved."""
+        if not self.secret:
+            return chat_refusal("proxy_secret_missing", "The app has no proxy secret, so chats cannot be saved.")
+        if not verify(header, method=method, target=path, body=body, secret=self.secret, now=self.clock()):
+            return chat_refusal("unauthorized", "The request is not signed by the gateway.")
+        query = parse_qs(urlparse(path).query, keep_blank_values=True)
+        project, refusal = pick_project([rp.settings for rp in self.running_projects], query)
+        if refusal is not None:
+            return refusal
+        if project is None:
+            # Empty list: behave like the config error case
+            return chat_refusal("repository_not_configured", "No project is configured.")
+        rp = next(rp for rp in self.running_projects if rp.id == project.id)
+        return rp.chats.handle_verified(method, path, body)
+
+
+def make_handler(running_projects, error, config_path, router=None):
+    """Build the HTTP handler class.
+
+    `running_projects` is a list of RunningProject; `error` is the config error or None;
+    `router` is a ChatRouter (or None when no projects are running).
+    """
     class Handler(BaseHTTPRequestHandler):
         def _send(self, code, body):
             data = json.dumps(body).encode()
@@ -230,8 +294,7 @@ def make_handler(holder, error, config_path, chats=None):
             return self._send(404, {"error": {"code": "not_found", "message": "Not found."}})
 
         def _chats(self, method):
-            """Read the body (never more than the limit) and hand the request to the chat service."""
-            if chats is None or not CHATS_ROUTE.search(urlparse(self.path).path):
+            if router is None or not CHATS_ROUTE.search(urlparse(self.path).path):
                 return self._not_found()
             raw = self.headers.get("Content-Length")
             if raw is None and method == "POST":
@@ -241,17 +304,32 @@ def make_handler(holder, error, config_path, chats=None):
                 self.close_connection = True
                 return self._send(*chat_refusal("invalid_request", "The body is missing, not a number or too large."))
             body = self.rfile.read(length) if length else b""
-            return self._send(*chats.handle(method, self.path, self.headers.get("X-KiroCrew-Proxy", ""), body))
+            return self._send(*router.handle(method, self.path, self.headers.get("X-KiroCrew-Proxy", ""), body))
 
         def do_GET(self):
             path = urlparse(self.path).path
             if path.endswith("/health"):
                 return self._send(200, {"ok": True})
+            if path.endswith("/projects"):
+                if running_projects is None:
+                    return self._send(200, [])
+                return self._send(200, [{"id": rp.id, "name": rp.name} for rp in running_projects])
             if path.endswith("/plan"):
-                return self._send(*plan_response(holder, error, config_path))
+                query = parse_qs(urlparse(self.path).query, keep_blank_values=True)
+                if error or not running_projects:
+                    return self._send(*plan_response(None, error, config_path))
+                project, refusal = pick_project([rp.settings for rp in running_projects], query)
+                if refusal is not None:
+                    return self._send(*refusal)
+                if project is None:
+                    return self._send(*plan_response(None, error, config_path))
+                rp = next(rp for rp in running_projects if rp.id == project.id)
+                return self._send(*plan_response(rp.holder, None, config_path))
             return self._chats("GET")
 
         def do_POST(self):
+            if urlparse(self.path).path.endswith("/projects"):
+                return self._not_found()
             return self._chats("POST")
 
         def do_DELETE(self):
@@ -263,20 +341,24 @@ def make_handler(holder, error, config_path, chats=None):
     return Handler
 
 
-def make_server(port, holder, error, config_path, chats=None):
+def make_server(port, running_projects, error, config_path, router=None):
     """Bind the port. Starts no thread and runs no git."""
-    return ThreadingHTTPServer(("127.0.0.1", port), make_handler(holder, error, config_path, chats))
+    return ThreadingHTTPServer(("127.0.0.1", port), make_handler(running_projects, error, config_path, router))
 
 
 if __name__ == "__main__":
-    repo, problem = load_repository()
-    # The Holder does nothing until start(), so the port is bound before any git runs.
-    held = None if problem else Holder(repo, read_snapshot, open_snapshot, build_plan)
-    # The chat records and the folder setting do not depend on the repository setting, so the service
-    # exists even when the repository is wrong (then a reservation answers plan_not_ready). It runs no git.
-    folder, folder_reason = load_folder()
-    service = ChatService(ChatStore(data_dir()), folder, folder_reason, os.environ.get("KIROCREW_PROXY_SECRET", ""), held)
-    server = make_server(int(os.environ["PORT"]), held, problem, os.path.join(APP_DIR, "config.json"), service)
-    if held:
-        held.start()
+    projects, problem = load_projects()
+    config_path = os.path.join(APP_DIR, "config.json")
+    secret = os.environ.get("KIROCREW_PROXY_SECRET", "")
+    dd = data_dir()
+    running = []
+    for project in projects:
+        held = Holder(project.repository, read_snapshot, open_snapshot, build_plan)
+        store = ChatStore(dd, filename=project.records_file)
+        service = ChatService(store, project.folder, project.folder_reason, secret, held)
+        running.append(RunningProject(project, held, service))
+    router = ChatRouter(running, secret) if running else None
+    server = make_server(int(os.environ["PORT"]), running if running else None, problem, config_path, router)
+    for rp in running:
+        rp.holder.start()
     server.serve_forever()

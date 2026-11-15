@@ -12,7 +12,9 @@ from urllib.error import HTTPError
 from urllib.request import urlopen
 
 import gitsource
+import projects as proj
 import server
+from chats import ChatStore
 from held import INTERNAL_MESSAGE, Holder
 from plan import build_plan
 
@@ -158,7 +160,14 @@ class ServeTests(unittest.TestCase):
                 self.jobs.pop(0)()
 
     def get(self, holder, error, path):
-        httpd = server.make_server(0, holder, error, "/app/config.json")
+        if holder is not None:
+            settings = proj.Project(id="p", name="Project", repository=self.checkout,
+                                    folder=None, folder_reason=None, records_file="chats.json")
+            rp = server.RunningProject(settings, holder, None)
+            running = [rp]
+        else:
+            running = None
+        httpd = server.make_server(0, running, error, "/app/config.json")
         self.addCleanup(httpd.server_close)
         threading.Thread(target=httpd.serve_forever, daemon=True).start()
         self.addCleanup(httpd.shutdown)
@@ -265,6 +274,388 @@ class ServeTests(unittest.TestCase):
 
     def test_unknown_path_is_404(self):
         self.assertEqual(self.get(self.holder(self.checkout), None, "/other")[0], 404)
+
+
+SECRET = "test-secret"
+NOW = 1_800_000_000
+
+
+def sign(method, target, body=b"", secret=SECRET, stamp=NOW):
+    import hashlib
+    import hmac
+    digest = hashlib.sha256(body).hexdigest()
+    mac = hmac.new(secret.encode(), f"{stamp}:{method}:{target}:{digest}".encode(), hashlib.sha256).hexdigest()
+    return f"{stamp}:{mac}"
+
+
+def fake_plan_body():
+    return {"branch": "main", "groups": [
+        {"epic": None, "cards": [{"name": "s", "status": "in progress",
+                                  "tasks": {"done": 1, "total": 2}, "spec": "s",
+                                  "description": "", "id": "#s", "epic": None}]}
+    ]}
+
+
+class FakeHolder:
+    def __init__(self, answer=("plan", None)):
+        self.answer, self.calls = answer, 0
+
+    def request(self):
+        self.calls += 1
+        kind, value = self.answer
+        return (kind, fake_plan_body() if kind == "plan" and value is None else value)
+
+
+class PickProjectTests(unittest.TestCase):
+    def p(self, id_):
+        return proj.Project(id=id_, name=id_.title(), repository=f"/r/{id_}", folder=None,
+                            folder_reason=None, records_file=f"chats-{id_}.json")
+
+    def pick(self, projects, **query_parts):
+        from urllib.parse import urlencode
+        qs = {k: v for k, v in query_parts.items()}
+        from urllib.parse import parse_qs
+        query = {k: [v] if not isinstance(v, list) else v for k, v in qs.items()}
+        return server.pick_project(projects, query)
+
+    def test_no_project_key_returns_first(self):
+        ps = [self.p("alpha"), self.p("beta")]
+        rp, err = server.pick_project(ps, {})
+        self.assertEqual(rp.id, "alpha")
+        self.assertIsNone(err)
+
+    def test_no_project_key_returns_none_for_empty_list(self):
+        rp, err = server.pick_project([], {})
+        self.assertIsNone(rp)
+        self.assertIsNone(err)
+
+    def test_project_key_finds_by_id(self):
+        ps = [self.p("alpha"), self.p("beta")]
+        rp, err = server.pick_project(ps, {"project": ["beta"]})
+        self.assertEqual(rp.id, "beta")
+        self.assertIsNone(err)
+
+    def test_unknown_id_is_404(self):
+        ps = [self.p("alpha")]
+        rp, err = server.pick_project(ps, {"project": ["unknown"]})
+        self.assertIsNone(rp)
+        status, body = err
+        self.assertEqual(status, 404)
+        self.assertEqual(body["error"]["code"], "project_not_found")
+
+    def test_empty_value_is_404(self):
+        ps = [self.p("alpha")]
+        rp, err = server.pick_project(ps, {"project": [""]})
+        self.assertIsNone(rp)
+        self.assertEqual(err[0], 404)
+
+    def test_multiple_project_values_is_400(self):
+        ps = [self.p("alpha")]
+        rp, err = server.pick_project(ps, {"project": ["alpha", "alpha"]})
+        self.assertIsNone(rp)
+        self.assertEqual(err[0], 400)
+        self.assertEqual(err[1]["error"]["code"], "invalid_request")
+
+
+def _make_running(id_, holder, store, folder="f_1", folder_reason=None, secret=SECRET):
+    settings = proj.Project(id=id_, name=id_.title(), repository=f"/r/{id_}",
+                            folder=folder, folder_reason=folder_reason,
+                            records_file=f"chats-{id_}.json")
+    chats = server.ChatService(store, folder, folder_reason, secret, holder, clock=lambda: NOW)
+    return server.RunningProject(settings, holder, chats)
+
+
+class ProjectsRouteTests(unittest.TestCase):
+    def setUp(self):
+        self.root = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.root, True)
+        self.data = os.path.join(self.root, "data")
+
+    def _make_server(self, running, error=None):
+        router = server.ChatRouter(running, SECRET, clock=lambda: NOW) if running else None
+        httpd = server.make_server(0, running, error, "/app/config.json", router)
+        threading.Thread(target=httpd.serve_forever, daemon=True).start()
+        self.addCleanup(httpd.shutdown)
+        self.addCleanup(httpd.server_close)
+        return httpd
+
+    def get(self, httpd, path):
+        try:
+            with urlopen(f"http://127.0.0.1:{httpd.server_port}{path}") as r:
+                return r.status, json.load(r)
+        except HTTPError as e:
+            return e.code, json.load(e)
+
+    def test_two_projects_returns_id_and_name(self):
+        rp1 = _make_running("alpha", FakeHolder(), ChatStore(self.data, filename="chats-alpha.json"))
+        rp2 = _make_running("beta", FakeHolder(), ChatStore(self.data, filename="chats-beta.json"))
+        httpd = self._make_server([rp1, rp2])
+        status, body = self.get(httpd, "/api/projects")
+        self.assertEqual(status, 200)
+        self.assertEqual(body, [{"id": "alpha", "name": "Alpha"}, {"id": "beta", "name": "Beta"}])
+
+    def test_empty_project_list_returns_empty_list(self):
+        httpd = self._make_server(None)
+        status, body = self.get(httpd, "/api/projects")
+        self.assertEqual(status, 200)
+        self.assertEqual(body, [])
+
+    def test_no_signature_needed(self):
+        rp = _make_running("p", FakeHolder(), ChatStore(self.data, filename="chats-p.json"))
+        httpd = self._make_server([rp])
+        status, body = self.get(httpd, "/projects")
+        self.assertEqual(status, 200)
+
+    def test_post_to_projects_is_404(self):
+        rp = _make_running("p", FakeHolder(), ChatStore(self.data, filename="chats-p.json"))
+        httpd = self._make_server([rp])
+        import urllib.request
+        req = urllib.request.Request(f"http://127.0.0.1:{httpd.server_port}/projects",
+                                     data=b"", method="POST")
+        try:
+            urllib.request.urlopen(req)
+            self.fail("Expected 404")
+        except HTTPError as e:
+            self.assertEqual(e.code, 404)
+
+    def test_no_repository_path_in_body(self):
+        rp = _make_running("p", FakeHolder(), ChatStore(self.data, filename="chats-p.json"))
+        httpd = self._make_server([rp])
+        _, body = self.get(httpd, "/projects")
+        self.assertNotIn("/r/", json.dumps(body))
+
+
+class MultiProjectTests(unittest.TestCase):
+    def setUp(self):
+        self.root = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.root, True)
+        self.data = os.path.join(self.root, "data")
+        os.makedirs(self.data)
+
+    def _make_server(self, rps, error=None):
+        router = server.ChatRouter(rps, SECRET, clock=lambda: NOW) if rps else None
+        httpd = server.make_server(0, rps, error, "/app/config.json", router)
+        threading.Thread(target=httpd.serve_forever, daemon=True).start()
+        self.addCleanup(httpd.shutdown)
+        self.addCleanup(httpd.server_close)
+        return httpd
+
+    def get(self, httpd, path):
+        try:
+            with urlopen(f"http://127.0.0.1:{httpd.server_port}{path}") as r:
+                return r.status, json.load(r)
+        except HTTPError as e:
+            return e.code, json.load(e)
+
+    def test_plan_routes_to_correct_holder(self):
+        h1 = FakeHolder(("plan", None))
+        h2 = FakeHolder(("error", {"code": "ref_unreadable", "message": "bad"}))
+        rp1 = _make_running("alpha", h1, ChatStore(self.data, filename="chats-alpha.json"))
+        rp2 = _make_running("beta", h2, ChatStore(self.data, filename="chats-beta.json"))
+        httpd = self._make_server([rp1, rp2])
+        status, body = self.get(httpd, "/plan?project=alpha")
+        self.assertEqual(status, 200)
+        self.assertEqual(h1.calls, 1)
+        self.assertEqual(h2.calls, 0)
+
+    def test_one_projects_error_does_not_affect_other(self):
+        h1 = FakeHolder(("plan", None))
+        h2 = FakeHolder(("error", {"code": "ref_unreadable", "message": "bad"}))
+        rp1 = _make_running("alpha", h1, ChatStore(self.data, filename="chats-alpha.json"))
+        rp2 = _make_running("beta", h2, ChatStore(self.data, filename="chats-beta.json"))
+        httpd = self._make_server([rp1, rp2])
+        # alpha works fine
+        s1, b1 = self.get(httpd, "/plan?project=alpha")
+        self.assertEqual(s1, 200)
+        # beta has an error
+        s2, b2 = self.get(httpd, "/plan?project=beta")
+        self.assertEqual(s2, 502)
+        self.assertEqual(b2["error"]["code"], "ref_unreadable")
+
+    def test_default_project_is_first_when_no_project_param(self):
+        h1 = FakeHolder(("plan", None))
+        h2 = FakeHolder(("error", {"code": "ref_unreadable", "message": "bad"}))
+        rp1 = _make_running("alpha", h1, ChatStore(self.data, filename="chats-alpha.json"))
+        rp2 = _make_running("beta", h2, ChatStore(self.data, filename="chats-beta.json"))
+        httpd = self._make_server([rp1, rp2])
+        status, _ = self.get(httpd, "/plan")
+        self.assertEqual(status, 200)
+        self.assertEqual(h1.calls, 1)
+        self.assertEqual(h2.calls, 0)
+
+    def test_unknown_project_id_is_404(self):
+        rp = _make_running("alpha", FakeHolder(), ChatStore(self.data, filename="chats-alpha.json"))
+        httpd = self._make_server([rp])
+        status, body = self.get(httpd, "/plan?project=unknown")
+        self.assertEqual(status, 404)
+        self.assertEqual(body["error"]["code"], "project_not_found")
+
+    def test_chats_reservation_in_one_project_does_not_affect_other(self):
+        import urllib.request
+        # Give each project a card via a fake plan
+        plan = fake_plan_body()
+        h1 = FakeHolder(("plan", plan))
+        h2 = FakeHolder(("plan", plan))
+        store1 = ChatStore(self.data, filename="chats-alpha.json", new_name=lambda: "chat-001")
+        store2 = ChatStore(self.data, filename="chats-beta.json", new_name=lambda: "chat-002")
+        rp1 = _make_running("alpha", h1, store1)
+        rp2 = _make_running("beta", h2, store2)
+        httpd = self._make_server([rp1, rp2])
+        # POST to alpha's chats
+        body = json.dumps({"card_id": "#s"}).encode()
+        path = f"/api/chats?project=alpha"
+        header = sign("POST", path, body)
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{httpd.server_port}{path}",
+            data=body, method="POST",
+            headers={"Content-Type": "application/json", "X-KiroCrew-Proxy": header})
+        with urllib.request.urlopen(req) as r:
+            resp = json.load(r)
+        self.assertEqual(resp["card_id"], "#s")
+        # Beta's store is untouched
+        self.assertEqual(store2.started(), [])
+
+    def test_chats_signature_with_different_project_is_401(self):
+        rp1 = _make_running("alpha", FakeHolder(), ChatStore(self.data, filename="chats-alpha.json"))
+        rp2 = _make_running("beta", FakeHolder(), ChatStore(self.data, filename="chats-beta.json"))
+        httpd = self._make_server([rp1, rp2])
+        import urllib.request
+        # Sign for project=alpha but send to project=beta
+        body = json.dumps({"card_id": "#s"}).encode()
+        signed_path = "/api/chats?project=alpha"
+        header = sign("POST", signed_path, body)
+        actual_path = "/api/chats?project=beta"
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{httpd.server_port}{actual_path}",
+            data=body, method="POST",
+            headers={"Content-Type": "application/json", "X-KiroCrew-Proxy": header})
+        try:
+            urllib.request.urlopen(req)
+            self.fail("Expected 401")
+        except HTTPError as e:
+            self.assertEqual(e.code, 401)
+
+    def test_unreadable_records_file_does_not_affect_other_project(self):
+        import urllib.request
+        plan = fake_plan_body()
+        store1 = ChatStore(self.data, filename="chats-alpha.json")
+        store2 = ChatStore(self.data, filename="chats-beta.json", new_name=lambda: "chat-002")
+        rp1 = _make_running("alpha", FakeHolder(("plan", plan)), store1)
+        rp2 = _make_running("beta", FakeHolder(("plan", plan)), store2)
+        httpd = self._make_server([rp1, rp2])
+        # Write bad data to alpha's store
+        os.makedirs(self.data, exist_ok=True)
+        with open(os.path.join(self.data, "chats-alpha.json"), "w") as f:
+            f.write("not json")
+        # GET alpha chats → chats_unreadable
+        path = "/api/chats?project=alpha"
+        header = sign("GET", path)
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{httpd.server_port}{path}",
+            headers={"X-KiroCrew-Proxy": header})
+        try:
+            urllib.request.urlopen(req)
+            self.fail("Expected error")
+        except HTTPError as e:
+            self.assertIn(e.code, (500,))
+        # Beta's chats route still works
+        path2 = "/api/chats?project=beta"
+        header2 = sign("GET", path2)
+        req2 = urllib.request.Request(
+            f"http://127.0.0.1:{httpd.server_port}{path2}",
+            headers={"X-KiroCrew-Proxy": header2})
+        with urllib.request.urlopen(req2) as r:
+            resp = json.load(r)
+        self.assertIn("chats", resp)
+
+
+class ServerPropertyTests(unittest.TestCase):
+    """Property 1: A project's answers come from that project only.
+    Property 3: Single repository behaves as before.
+    Property 4: The signature covers the project."""
+
+    def setUp(self):
+        self.root = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.root, True)
+        self.data = os.path.join(self.root, "data")
+        os.makedirs(self.data)
+
+    def _router(self, rps):
+        return server.ChatRouter(rps, SECRET, clock=lambda: NOW)
+
+    def _pick_error_code(self, rps, project_id):
+        from urllib.parse import parse_qs
+        query = parse_qs(f"project={project_id}", keep_blank_values=True)
+        settings = [rp.settings for rp in rps]
+        rp, err = server.pick_project(settings, query)
+        if err:
+            return err[0]
+        return None
+
+    def test_property1_project_answers_come_from_that_project_only(self):
+        import random
+        for seed in range(100):
+            rng = random.Random(seed)
+            n = rng.randint(2, 5)
+            holders = [FakeHolder() for _ in range(n)]
+            stores = [ChatStore(self.data, filename=f"chats-p{i}.json") for i in range(n)]
+            rps = [_make_running(f"p{i}", holders[i], stores[i]) for i in range(n)]
+            # Pick a random project
+            chosen = rng.randint(0, n - 1)
+            settings = [rp.settings for rp in rps]
+            from urllib.parse import parse_qs
+            q = parse_qs(f"project=p{chosen}", keep_blank_values=True)
+            rp, err = server.pick_project(settings, q)
+            self.assertIsNone(err, f"seed={seed}")
+            self.assertEqual(rp.id, f"p{chosen}", f"seed={seed}")
+            # Calling the holder for p{chosen} should not call others
+            matched = next(r for r in rps if r.id == f"p{chosen}")
+            matched.holder.request()
+            for i, h in enumerate(holders):
+                if i == chosen:
+                    self.assertEqual(h.calls, 1, f"seed={seed}, project=p{chosen}")
+                else:
+                    self.assertEqual(h.calls, 0, f"seed={seed}, project=p{i} should not be called")
+
+    def test_property3_single_repository_routes_same_with_no_project_param(self):
+        import random
+        for seed in range(100):
+            rng = random.Random(seed)
+            h = FakeHolder()
+            rp = _make_running("p0", h, ChatStore(self.data, filename="chats-p0.json"))
+            settings = [rp.settings]
+            # No project param → picks first
+            rp_none, err_none = server.pick_project(settings, {})
+            self.assertIsNone(err_none, f"seed={seed}")
+            self.assertEqual(rp_none.id, "p0", f"seed={seed}")
+            # With project=p0 → same project
+            from urllib.parse import parse_qs
+            q = parse_qs("project=p0", keep_blank_values=True)
+            rp_id, err_id = server.pick_project(settings, q)
+            self.assertIsNone(err_id, f"seed={seed}")
+            self.assertEqual(rp_id.id, "p0", f"seed={seed}")
+
+    def test_property4_signature_covers_project_query(self):
+        import random
+        for seed in range(100):
+            rng = random.Random(seed)
+            n = rng.randint(2, 4)
+            stores = [ChatStore(self.data, filename=f"chats-q{i}.json") for i in range(n)]
+            rps = [_make_running(f"q{i}", FakeHolder(), stores[i]) for i in range(n)]
+            router = self._router(rps)
+            # Sign for q0
+            body = b""
+            path_q0 = f"/api/chats?project=q0"
+            header = sign("GET", path_q0, body)
+            # Use same signature but with project=q1 → should be unauthorized
+            if n > 1:
+                path_q1 = f"/api/chats?project=q1"
+                status, resp = router.handle("GET", path_q1, header, body)
+                self.assertEqual(status, 401, f"seed={seed}: expected 401 for tampered project")
+            # Same path as signed → should proceed (get to verify signature step)
+            status_ok, _ = router.handle("GET", path_q0, header, body)
+            # 200 (got chats list) or some other non-401 code
+            self.assertNotEqual(status_ok, 401, f"seed={seed}: original path must pass sig check")
 
 
 if __name__ == "__main__":

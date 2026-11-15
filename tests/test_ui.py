@@ -74,7 +74,7 @@ class AppJsonTests(unittest.TestCase):
         self.assertTrue(os.path.isfile(os.path.join(ROOT, self.app["backend"]["entryPoint"])))
 
     def test_api_permission_is_exactly_the_two_chat_paths(self):
-        # start-a-story, Requirement 1, criterion 3; work-in-the-chat, Requirement 1, criterion 7 (the panel needs no entry)
+        # start-a-story, Requirement 1, criterion 3; work-in-the-chat, Requirement 1, criterion 7 (the panel needs no entry); switch-projects, Requirement 7.1
         permissions = self.app.get("permissions", {})
         self.assertIsInstance(permissions, dict)
         self.assertEqual(permissions.get("api"), ["/api/chat", "/api/chat/slots"])
