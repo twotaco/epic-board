@@ -50,9 +50,10 @@ Group 1 is the page's logic, including saving and restoring the choice, with no 
   - [x] 2.3 Check `app.json` and the backend are untouched
     - Run `git diff origin/main --stat` and confirm no file under `backend/`, no `app.json` and no `config.json` changed, and that the existing `app.json` test still shows no `storage` permission
     - _Requirements: 4.1, 4.2_
-  - [ ] 2.4 Check it in a browser or on the host
+  - [x] 2.4 Check it in a browser or on the host
     - Open the board on a project with two epics and a "No epic" group. Choose each option and check the columns, the counts and a card's chat state; wait for a plan refresh and check the choice stays; reload the page and check the choice comes back; remove or rename the saved epic and reload, and check the board shows all epics. Check that `localStorage` works in the host's page, that the host `Select` is the control drawn, that choosing with it changes the board, and that its props match the design. Report what was checked, or that it could not be checked
     - _Requirements: 1.1, 1.3, 2.2, 2.3, 2.4, 3.1, 3.5, 3.6, 3.7_
+    - _Note: Only one epic on this host; the two-epic case is checked on Dead Reckoning after Switch projects, and is covered by tests._
   - [x] 2.5 Run the tests and report the counts
     - Run `python3 -m unittest discover -s tests -t .` and report run, passed and skipped, with the page tests named separately
     - _Requirements: 4.3_
