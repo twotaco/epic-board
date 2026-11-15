@@ -298,12 +298,16 @@ export function createPoller({
 
 // ---- Chats: the state of each started chat, and starting and resuming one ----
 
-// The four states a chat can show. There is no "finished": a story is done only when main says so.
+// The states a chat can show. There is no "finished": a story is done only when main says so.
+// "Review" and "Your turn" are the words for a card whose conductor is waiting for the person; a Review
+// badge says "Review #N" or "Checks failed #N" (see `reviewWord`).
 export const STATE_WORDS = Object.freeze({
   'needs-you': 'Needs you',
-  working: 'Working',
   interrupted: 'Interrupted',
-  idle: 'Idle',
+  working: 'Working',
+  stalled: 'Stalled',
+  review: 'Review',
+  'your-turn': 'Your turn',
 })
 
 // How long a chat that Crew does not know is "restoring" before the card offers to resume it.
@@ -311,19 +315,69 @@ export const RESTORE_MS = 60000
 const CHAT_SOON_MS = 5000
 const CHAT_LATER_MS = 15000
 const AGENT = 'kirocrew-conductor'
+// `crew=all` keeps the rows of a conductor's workers, which a person's list leaves out by default.
+const CHAT_LIST = '/api/chat/slots?crew=all'
 
-// One state for a chat, from its row in Crew's chat list and the role of its last row (or
-// undefined when that has not been read). The first that applies:
-//   Needs you   a tool waits for an approval, or the chat asked a question
-//   Working     a turn is running or waiting for admission
-//   Interrupted the turn ended without a reply, or the last row is an error
-//   Idle        anything else
+const isFlagged = (row) => row?.pending_approval === true || row?.needs_input === true
+const isBusy = (row) => row?.running === true || row?.admission_queued === true
+
+// The rows of a conductor's workers: every row whose `crew_root` or `created_by` is the conductor's key.
+// They are used only for the flags of `stateOf`. Nothing else of such a row is ever read.
+export function workersOf(list, key) {
+  return list.filter((row) => isObject(row) && row.key !== key && (row.crew_root === key || row.created_by === key))
+}
+
+// Whether the conductor's ledger has an item gone quiet, by the rule of Crew's `crewWorkCounts`
+// (`website/src/lib/crewWork.ts`): no live conductor loop, the item's worker is not running, and its
+// `stale_at_ms` has passed.
+export function hasStalled(facts, rows, now) {
+  if (!isObject(facts) || !Array.isArray(facts.items) || facts.conductor_looping) return false
+  const running = new Set(rows.filter((row) => row?.running === true).map((row) => row.key))
+  return facts.items.some((item) => {
+    if (!isObject(item)) return false
+    const at = typeof item.stale_at_ms === 'number' ? item.stale_at_ms : 0
+    return !(item.worker && running.has(item.worker)) && at > 0 && now >= at
+  })
+}
+
+const isHttps = (value) => {
+  try { return new URL(value).protocol === 'https:' } catch { return false }
+}
+
+// The conductor's open or draft pull request, as {number, url, failed}, or null. Only an https address
+// is kept, and `failed` is true when its checks failed. Crew sends `state` and `ci` only to the owner (or
+// for a public repository), so a link without a `state` is not counted.
+export function reviewOf(row) {
+  const links = Array.isArray(row?.source_links) ? row.source_links : []
+  for (const link of links) {
+    if (!isObject(link) || (link.kind !== undefined && link.kind !== 'change')) continue
+    if (link.state !== 'open' && link.state !== 'draft') continue
+    if (!Number.isInteger(link.number) || !isHttps(link.url)) continue
+    return { number: link.number, url: link.url, failed: link.ci === 'failed' }
+  }
+  return null
+}
+
+// The word of a Review badge.
+export const reviewWord = (review) => (review ? `${review.failed ? 'Checks failed' : 'Review'} #${review.number}` : STATE_WORDS.review)
+
+// One state for a conductor's chat, from its row in Crew's chat list, the role of its last row (or
+// undefined when that has not been read), the rows of its workers and the time. The first that applies:
+//   Needs you   the conductor or a worker waits for an approval or asked a question
+//   Interrupted the conductor's turn ended without a reply, or its last row is an error
+//   Working     the conductor or a worker is running or queued
+//   Stalled     the conductor's ledger has an item gone quiet
+//   Review      the conductor has an open or draft pull request
+//   Your turn   anything else
 // Needs you comes first because a turn that waits for an approval is still running.
-export function stateOf(row, lastRole) {
-  if (row?.pending_approval === true || row?.needs_input === true) return 'needs-you'
-  if (row?.running === true || row?.admission_queued === true) return 'working'
-  if (row?.interrupted === true || lastRole === 'error') return 'interrupted'
-  return 'idle'
+export function stateOf(row, lastRole, workers = [], now = 0) {
+  const team = [row, ...workers]
+  if (team.some(isFlagged)) return 'needs-you'
+  if (row?.interrupted === true || (lastRole === 'error' && !isBusy(row))) return 'interrupted'
+  if (team.some(isBusy)) return 'working'
+  if (hasStalled(row?.crew_work, team, now)) return 'stalled'
+  if (reviewOf(row)) return 'review'
+  return 'your-turn'
 }
 
 // The address of a chat in the dashboard. Only the percent-encoded key goes in it.
@@ -400,7 +454,7 @@ export async function readChats({ backend, gateway, previous = initialChats, now
   const missingSince = {}
   if (records.length === 0) return { at: now(), folder, recordsError: null, chats: [], byKey, missingSince }
 
-  const list = await gateway.get('/api/chat/slots', { signal })
+  const list = await gateway.get(CHAT_LIST, { signal })
   if (!Array.isArray(list)) throw new Error('The chat list is not a list.')
   const ours = new Set(records.map((record) => record.key))
   const rows = new Map()
@@ -423,10 +477,11 @@ export async function readChats({ backend, gateway, previous = initialChats, now
     const key = record.key
     const row = rows.get(key)
     if (row) {
-      let state = stateOf(row, undefined)
+      const workers = workersOf(list, key)
       let role
       let roleRead = false
-      if (state === 'idle') {
+      // The last row matters only when nothing above Interrupted has decided and the conductor is not running.
+      if (![row, ...workers].some(isFlagged) && row.interrupted !== true && !isBusy(row)) {
         const cached = previous.byKey?.[key]
         if (cached?.roleRead === true && cached.lastTs === row.last_ts && cached.messages === row.messages) {
           role = cached.role
@@ -440,9 +495,10 @@ export async function readChats({ backend, gateway, previous = initialChats, now
           role = lastRoleOf(detail)
           roleRead = true
         }
-        state = stateOf(row, role)
       }
+      const state = stateOf(row, role, workers, now())
       byKey[key] = { state, lastTs: row.last_ts, messages: row.messages, role, roleRead }
+      if (state === 'review') byKey[key].review = reviewOf(row)
       continue
     }
     const detail = await detailOf(key)
@@ -451,7 +507,7 @@ export async function readChats({ backend, gateway, previous = initialChats, now
       continue
     }
     const role = lastRoleOf(detail)
-    const state = detail.running === true || detail.admission_queued === true ? 'working' : role === 'error' ? 'interrupted' : 'idle'
+    const state = detail.running === true || detail.admission_queued === true ? 'working' : role === 'error' ? 'interrupted' : 'your-turn'
     byKey[key] = { state, role, roleRead: true }
   }
   const at = now()
@@ -536,7 +592,8 @@ export function cardViewOf(card, chats, ui = {}, nowMs = chats.at) {
     return {
       mode: 'chat', key, name: record.name, href: chatHref(key),
       state: entry ? entry.state : null,
-      stateWord: entry ? STATE_WORDS[entry.state] : null,
+      stateWord: entry ? (entry.state === 'review' ? reviewWord(entry.review) : STATE_WORDS[entry.state]) : null,
+      stateHref: entry?.state === 'review' && entry.review ? entry.review.url : null,
       brief: ui.briefs?.[key] ?? null,
       open: ui.open?.key === key,
     }
@@ -756,6 +813,7 @@ export const STYLE = `
 .eb-chat-line { margin-top: 6px; }
 .eb-chat-state { display: inline-block; border: 1px solid currentColor; border-radius: 10px; padding: 0 8px; font-size: 0.85em; }
 .eb-chat-state[data-state='needs-you'] { font-weight: 600; }
+.eb-chat-state a { position: relative; z-index: 1; }
 .eb-chat-note { margin: 6px 0 0 0; }
 .eb-question, .eb-chat-controls { position: relative; z-index: 1; margin-top: 8px; }
 .eb-question p, .eb-chat-controls p { margin: 6px 0 0 0; }
@@ -818,7 +876,8 @@ function renderChatPart(h, card, view, actions) {
       const parts = []
       if (view.state || view.open) {
         parts.push(h('div', { className: 'eb-chat-line', key: 'state' },
-          view.state ? h('span', { className: 'eb-chat-state', 'data-state': view.state }, view.stateWord) : null,
+          view.state ? h('span', { className: 'eb-chat-state', 'data-state': view.state },
+            view.stateHref ? h('a', { href: view.stateHref, target: '_blank', rel: 'noopener noreferrer' }, view.stateWord) : view.stateWord) : null,
           view.open ? h('span', { className: 'eb-chat-open' }, 'Chat open') : null))
       }
       if (view.brief?.kind === 'sending') {

@@ -6,7 +6,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
   RESTORE_MS, STATE_WORDS, cardViewOf, chatDelay, chatHref, chatsReduce, classifyChats, initialChats,
-  readChats, stateOf,
+  readChats, reviewOf, reviewWord, stateOf, workersOf,
 } from '../../ui/index.mjs'
 import { forSeeds, forSeedsAsync } from './support.mjs'
 
@@ -27,7 +27,7 @@ function fakeGateway({ rows = [], details = {}, listError = null } = {}) {
     calls: [],
     get: async (path) => {
       gateway.calls.push(path)
-      if (path === '/api/chat/slots') {
+      if (path === '/api/chat/slots?crew=all') {
         if (listError) throw listError
         return rows
       }
@@ -38,7 +38,7 @@ function fakeGateway({ rows = [], details = {}, listError = null } = {}) {
       if (detail === undefined) throw httpError(404, null)
       return detail
     },
-    details() { return gateway.calls.filter((path) => path !== '/api/chat/slots') },
+    details() { return gateway.calls.filter((path) => path !== '/api/chat/slots?crew=all') },
   }
   return gateway
 }
@@ -51,48 +51,107 @@ const read = (deps) => readChats({ now: () => 1000, ...deps })
 
 // ---- stateOf ----
 
-test('each flag on its own gives its state, and an idle row gives Idle', () => {
+test('each flag on its own gives its state, and a quiet row gives Your turn', () => {
   assert.equal(stateOf(row('k', { pending_approval: true })), 'needs-you')
   assert.equal(stateOf(row('k', { needs_input: true })), 'needs-you')
   assert.equal(stateOf(row('k', { running: true })), 'working')
   assert.equal(stateOf(row('k', { admission_queued: true })), 'working')
   assert.equal(stateOf(row('k', { interrupted: true })), 'interrupted')
   assert.equal(stateOf(row('k'), 'error'), 'interrupted')
-  assert.equal(stateOf(row('k')), 'idle')
-  assert.equal(stateOf(row('k'), 'assistant'), 'idle')
-  assert.equal(stateOf(row('k'), null), 'idle')
+  assert.equal(stateOf(row('k')), 'your-turn')
+  assert.equal(stateOf(row('k'), 'assistant'), 'your-turn')
+  assert.equal(stateOf(row('k'), null), 'your-turn')
 })
 
-test('flags in pairs: Needs you beats Working, and Working beats Interrupted', () => {
+test('flags in pairs: Needs you beats Interrupted, and Interrupted beats Working', () => {
   assert.equal(stateOf(row('k', { running: true, pending_approval: true })), 'needs-you')
   assert.equal(stateOf(row('k', { running: true, needs_input: true })), 'needs-you')
   assert.equal(stateOf(row('k', { admission_queued: true, needs_input: true })), 'needs-you')
-  assert.equal(stateOf(row('k', { running: true, interrupted: true })), 'working')
+  assert.equal(stateOf(row('k', { running: true, interrupted: true })), 'interrupted')
   assert.equal(stateOf(row('k', { pending_approval: true, interrupted: true }), 'error'), 'needs-you')
   assert.equal(stateOf(row('k', { interrupted: true }), 'error'), 'interrupted')
+  assert.equal(stateOf(row('k', { running: true }), 'error'), 'working', 'a running turn is not interrupted by an old error row')
 })
 
 test('missing fields count as false, and only true counts as true', () => {
-  assert.equal(stateOf({}), 'idle')
-  assert.equal(stateOf(null), 'idle')
-  assert.equal(stateOf({ running: 'yes', pending_approval: 1, needs_input: 'true', interrupted: 1 }), 'idle')
+  assert.equal(stateOf({}), 'your-turn')
+  assert.equal(stateOf(null), 'your-turn')
+  assert.equal(stateOf({ running: 'yes', pending_approval: 1, needs_input: 'true', interrupted: 1 }), 'your-turn')
 })
 
-test('the state words are the four of the spec', () => {
-  assert.deepEqual(STATE_WORDS, { 'needs-you': 'Needs you', working: 'Working', interrupted: 'Interrupted', idle: 'Idle' })
+test('the state words are the six of the spec', () => {
+  assert.deepEqual(STATE_WORDS, {
+    'needs-you': 'Needs you', interrupted: 'Interrupted', working: 'Working', stalled: 'Stalled', review: 'Review', 'your-turn': 'Your turn',
+  })
   assert.ok(Object.isFrozen(STATE_WORDS))
+})
+
+const PR = { kind: 'change', provider: 'github', number: 7, url: 'https://github.com/o/r/pull/7', state: 'open', ci: 'passed' }
+const stale = (worker, at) => ({ open: 1, person: 0, items: [{ worker, stale_at_ms: at }] })
+
+test('a worker of the conductor counts for Needs you and Working, found by crew_root or created_by', () => {
+  const k = row('k')
+  for (const link of ['crew_root', 'created_by']) {
+    assert.equal(stateOf(k, undefined, [row('w', { [link]: 'k', pending_approval: true })]), 'needs-you', link)
+    assert.equal(stateOf(k, undefined, [row('w', { [link]: 'k', needs_input: true })]), 'needs-you', link)
+    assert.equal(stateOf(k, undefined, [row('w', { [link]: 'k', running: true })]), 'working', link)
+    assert.equal(stateOf(k, undefined, [row('w', { [link]: 'k', admission_queued: true })]), 'working', link)
+  }
+  assert.equal(stateOf(row('k', { interrupted: true }), undefined, [row('w', { running: true })]), 'interrupted')
+})
+
+test('workersOf takes the rows whose crew_root or created_by is the key, and not the conductor or others', () => {
+  const list = [row('k'), row('a', { crew_root: 'k' }), row('b', { created_by: 'k' }), row('c', { crew_root: 'x' }), row('d', { created_by: 'x' }), row('e')]
+  assert.deepEqual(workersOf(list, 'k').map((r) => r.key), ['a', 'b'])
+})
+
+test('Stalled follows the rule of crewWorkCounts: stale item, no live conductor loop, worker not running', () => {
+  const at = 5000
+  const k = (extra) => row('k', { crew_work: stale('w', at), ...extra })
+  assert.equal(stateOf(k(), undefined, [], 4999), 'your-turn', 'not yet stale')
+  assert.equal(stateOf(k(), undefined, [], 5000), 'stalled')
+  assert.equal(stateOf(k({ crew_work: { ...stale('w', at), conductor_looping: true } }), undefined, [], 9000), 'your-turn', 'a live loop picks it up')
+  assert.equal(stateOf(k({ crew_work: stale('w', 0) }), undefined, [], 9000), 'your-turn', 'stale_at_ms 0 is never')
+  assert.equal(stateOf(k(), undefined, [row('w', { running: true })], 9000), 'working', 'a running worker is never stale')
+  assert.equal(stateOf(k({ crew_work: stale('', at) }), undefined, [], 9000), 'stalled', 'an unbound worker can be stale')
+  assert.equal(stateOf(k({ crew_work: { items: 'x' } }), undefined, [], 9000), 'your-turn')
+  assert.equal(stateOf(k({ source_links: [PR] }), undefined, [], 9000), 'stalled', 'Stalled comes before Review')
+})
+
+test('Review: an open or draft pull request of the conductor, with Checks failed when its ci failed', () => {
+  const k = (...links) => row('k', { source_links: links })
+  assert.equal(stateOf(k(PR)), 'review')
+  assert.equal(stateOf(k({ ...PR, state: 'draft' })), 'review')
+  for (const state of ['merged', 'closed', undefined]) assert.equal(stateOf(k({ ...PR, state })), 'your-turn', String(state))
+  assert.equal(stateOf(k({ ...PR, kind: 'issue' })), 'your-turn')
+  assert.equal(stateOf(k({ ...PR, url: 'http://github.com/o/r/pull/7' })), 'your-turn', 'only an https address')
+  assert.equal(stateOf(k({ ...PR, url: 'javascript:alert(1)' })), 'your-turn')
+  assert.equal(stateOf(k({ ...PR, state: 'merged' }, { ...PR, number: 8, state: 'open' })), 'review')
+  assert.deepEqual(reviewOf(k(PR)), { number: 7, url: PR.url, failed: false })
+  assert.deepEqual(reviewOf(k({ ...PR, ci: 'failed' })), { number: 7, url: PR.url, failed: true })
+  assert.equal(reviewOf(row('k')), null)
+  assert.equal(reviewWord({ number: 7, failed: false }), 'Review #7')
+  assert.equal(reviewWord({ number: 7, failed: true }), 'Checks failed #7')
+  assert.equal(stateOf(k(PR), undefined, [row('w', { running: true })]), 'working', 'Working comes before Review')
+  assert.equal(stateOf(row('k'), undefined, [row('w', { source_links: [PR] })]), 'your-turn', 'a worker pull request does not count')
 })
 
 test('Property 1: one state, by precedence', () => {
   const flag = (r) => r.pick([undefined, false, false, true])
   const roles = ['error', 'assistant', 'user', 'inject', '', null, undefined]
   forSeeds('one state, by precedence', 400, (r) => {
-    const candidate = { pending_approval: flag(r), needs_input: flag(r), running: flag(r), admission_queued: flag(r), interrupted: flag(r) }
+    const make = () => ({ pending_approval: flag(r), needs_input: flag(r), running: flag(r), admission_queued: flag(r), interrupted: flag(r) })
+    const candidate = { ...make(), key: 'k', crew_work: r.pick([undefined, stale('w1', 100), stale('', 100)]), source_links: r.pick([undefined, [PR], [{ ...PR, state: 'merged' }]]) }
+    const workers = Array.from({ length: r.int(0, 3) }, (_, i) => ({ ...make(), key: `w${i}`, crew_root: 'k' }))
     const lastRole = r.pick(roles)
-    const expected = candidate.pending_approval === true || candidate.needs_input === true ? 'needs-you'
-      : candidate.running === true || candidate.admission_queued === true ? 'working'
-        : candidate.interrupted === true || lastRole === 'error' ? 'interrupted' : 'idle'
-    const got = stateOf(candidate, lastRole)
+    const team = [candidate, ...workers]
+    const on = (field) => team.some((x) => x[field] === true)
+    const expected = on('pending_approval') || on('needs_input') ? 'needs-you'
+      : candidate.interrupted === true || (lastRole === 'error' && !(candidate.running === true || candidate.admission_queued === true)) ? 'interrupted'
+        : on('running') || on('admission_queued') ? 'working'
+          : candidate.crew_work && !(candidate.crew_work.items[0].worker === 'w1' && workers.some((x) => x.key === 'w1' && x.running === true)) ? 'stalled'
+            : candidate.source_links?.[0].state === 'open' ? 'review' : 'your-turn'
+    const got = stateOf(candidate, lastRole, workers, 1000)
     assert.ok(Object.keys(STATE_WORDS).includes(got))
     assert.equal(got, expected)
   })
@@ -120,8 +179,8 @@ test('chatDelay: 5000 while a chat works, needs the person or is restoring, 1500
   const at = 100000
   const make = (byKey, missingSince = {}) => ({ kind: 'chats', read: { at, byKey, missingSince, chats: [] } })
   assert.equal(chatDelay(make({})), 15000)
-  assert.equal(chatDelay(make({ a: { state: 'idle' }, b: { state: 'interrupted' } })), 15000)
-  assert.equal(chatDelay(make({ a: { state: 'idle' }, b: { state: 'working' } })), 5000)
+  assert.equal(chatDelay(make({ a: { state: 'your-turn' }, b: { state: 'interrupted' } })), 15000)
+  assert.equal(chatDelay(make({ a: { state: 'your-turn' }, b: { state: 'working' } })), 5000)
   assert.equal(chatDelay(make({ a: { state: 'needs-you' } })), 5000)
   assert.equal(chatDelay(make({ a: { state: 'missing' } }, { a: at - 59999 })), 5000)
   assert.equal(chatDelay(make({ a: { state: 'missing' } }, { a: at - RESTORE_MS })), 15000)
@@ -172,10 +231,54 @@ test('the states of our chats, from the list, with other chats ignored', async (
   })
   const result = await read({ backend: fakeBackend(backendAnswer(chats)), gateway })
   assert.deepEqual(Object.fromEntries(Object.entries(result.byKey).map(([key, entry]) => [key, entry.state])), {
-    'k-working': 'working', 'k-needs': 'needs-you', 'k-interrupted': 'interrupted', 'k-idle': 'idle', 'k-error': 'interrupted',
+    'k-working': 'working', 'k-needs': 'needs-you', 'k-interrupted': 'interrupted', 'k-idle': 'your-turn', 'k-error': 'interrupted',
   })
-  assert.deepEqual(gateway.calls, ['/api/chat/slots', '/api/chat/slots/k-idle?limit=1', '/api/chat/slots/k-error?limit=1'])
+  assert.deepEqual(gateway.calls, ['/api/chat/slots?crew=all', '/api/chat/slots/k-idle?limit=1', '/api/chat/slots/k-error?limit=1'])
   assert.equal(result.byKey['someone-elses'], undefined)
+})
+
+test('the workers of a conductor count for its state, and the list asked for keeps them', async () => {
+  const chats = [record('c1', 'a'), record('c2', 'b')]
+  const gateway = fakeGateway({
+    rows: [row('a'), row('w1', { crew_root: 'a', pending_approval: true }), row('b', { last_ts: 't9' }), row('w2', { created_by: 'b', running: true }), row('w3', { crew_root: 'nobody', pending_approval: true })],
+    details: { b: detailWith('assistant') },
+  })
+  const result = await read({ backend: fakeBackend(backendAnswer(chats)), gateway })
+  assert.equal(gateway.calls[0], '/api/chat/slots?crew=all')
+  assert.deepEqual([result.byKey.a.state, result.byKey.b.state], ['needs-you', 'working'])
+  assert.deepEqual(Object.keys(result.byKey), ['a', 'b'], 'no entry for a worker')
+  assert.ok(!JSON.stringify(result).includes('w1'), 'nothing of a worker row is kept')
+  assert.deepEqual(gateway.details(), ['/api/chat/slots/b?limit=1'], 'a worker is never read on its own')
+})
+
+test('Interrupted is read before Working: an idle conductor whose last row is an error is Interrupted while a worker runs', async () => {
+  const gateway = fakeGateway({ rows: [row('a'), row('w', { crew_root: 'a', running: true })], details: { a: detailWith('assistant', 'error') } })
+  const result = await read({ backend: fakeBackend(backendAnswer([record('c1', 'a')])), gateway })
+  assert.equal(result.byKey.a.state, 'interrupted')
+})
+
+test('a Review entry keeps the pull request and nothing else of the row', async () => {
+  const pr = { kind: 'change', number: 3, url: 'https://github.com/o/r/pull/3', state: 'draft', ci: 'passed', label: 'SECRET' }
+  const gateway = fakeGateway({ rows: [row('a', { source_links: [pr], last_message: 'SECRET' })], details: { a: detailWith('assistant') } })
+  const result = await read({ backend: fakeBackend(backendAnswer([record('c1', 'a')])), gateway })
+  assert.deepEqual(result.byKey.a.review, { number: 3, url: pr.url, failed: false })
+  assert.ok(!JSON.stringify(result).includes('SECRET'))
+})
+
+test('a stalled ledger item is judged at the time of the read', async () => {
+  const gateway = () => fakeGateway({ rows: [row('a', { crew_work: stale('w', 2000) })], details: { a: detailWith('assistant') } })
+  const backend = fakeBackend(backendAnswer([record('c1', 'a')]))
+  assert.equal((await readChats({ backend, gateway: gateway(), now: () => 1999 })).byKey.a.state, 'your-turn')
+  assert.equal((await readChats({ backend, gateway: gateway(), now: () => 2000 })).byKey.a.state, 'stalled')
+})
+
+test('cardViewOf says Review #N linked to its pull request, and Checks failed #N when the checks failed', () => {
+  const review = { number: 7, url: 'https://github.com/o/r/pull/7', failed: false }
+  const view = (entry) => cardViewOf(card(), chatsWith({ records: started(), byKey: { k1: entry } }), {})
+  assert.deepEqual([view({ state: 'review', review }).stateWord, view({ state: 'review', review }).stateHref], ['Review #7', review.url])
+  assert.equal(view({ state: 'review', review: { ...review, failed: true } }).stateWord, 'Checks failed #7')
+  assert.equal(view({ state: 'your-turn' }).stateWord, 'Your turn')
+  assert.equal(view({ state: 'your-turn' }).stateHref, null)
 })
 
 test('the last row is read only for a chat that is not Needs you, Working or interrupted', async () => {
@@ -199,7 +302,7 @@ test('the earlier answer is reused while last_ts and messages are unchanged, and
   gateway = fakeGateway({ rows: [row('k')], details })
   const second = await read({ backend, gateway, previous: { ...initialChats, byKey: first.byKey } })
   assert.deepEqual(gateway.details(), [], 'same last_ts and messages: no read')
-  assert.equal(second.byKey.k.state, 'idle')
+  assert.equal(second.byKey.k.state, 'your-turn')
 
   gateway = fakeGateway({ rows: [row('k', { last_ts: 't2' })], details: { k: detailWith('assistant', 'error') } })
   const third = await read({ backend, gateway, previous: { ...initialChats, byKey: second.byKey } })
@@ -209,7 +312,7 @@ test('the earlier answer is reused while last_ts and messages are unchanged, and
   gateway = fakeGateway({ rows: [row('k', { last_ts: 't2', messages: 4 })], details })
   const fourth = await read({ backend, gateway, previous: { ...initialChats, byKey: third.byKey } })
   assert.equal(gateway.details().length, 1, 'messages changed: read')
-  assert.equal(fourth.byKey.k.state, 'idle')
+  assert.equal(fourth.byKey.k.state, 'your-turn')
 })
 
 test('a cached last row of error keeps the chat Interrupted without a request', async () => {
@@ -228,7 +331,7 @@ test('a chat that is not in the list is read on its own: a 404 is missing, with 
   const first = await readChats({ backend, gateway, now: () => 5000 })
   assert.deepEqual(first.byKey.k, { state: 'missing' })
   assert.deepEqual(first.missingSince, { k: 5000 })
-  assert.deepEqual(gateway.calls, ['/api/chat/slots', '/api/chat/slots/k?limit=1'])
+  assert.deepEqual(gateway.calls, ['/api/chat/slots?crew=all', '/api/chat/slots/k?limit=1'])
 
   const second = await readChats({ backend, gateway: fakeGateway({ rows: [] }), now: () => 9000, previous: { ...initialChats, missingSince: first.missingSince } })
   assert.deepEqual(second.missingSince, { k: 5000 }, 'the run keeps its start')
@@ -244,13 +347,13 @@ test('a chat absent from the list but answered by its detail takes the state of 
     details: { a: { running: true, messages: [] }, b: { admission_queued: true, ...detailWith('assistant') }, c: detailWith('user', 'error'), d: detailWith('assistant') },
   })
   const result = await read({ backend: fakeBackend(backendAnswer(chats)), gateway })
-  assert.deepEqual(Object.fromEntries(Object.entries(result.byKey).map(([key, entry]) => [key, entry.state])), { a: 'working', b: 'working', c: 'interrupted', d: 'idle' })
+  assert.deepEqual(Object.fromEntries(Object.entries(result.byKey).map(([key, entry]) => [key, entry.state])), { a: 'working', b: 'working', c: 'interrupted', d: 'your-turn' })
   assert.deepEqual(result.missingSince, {})
 })
 
-test('a detail answer with no rows is Idle', async () => {
+test('a detail answer with no rows is Your turn', async () => {
   const result = await read({ backend: fakeBackend(backendAnswer([record('c1', 'k')])), gateway: fakeGateway({ rows: [row('k')], details: { k: { messages: [] } } }) })
-  assert.equal(result.byKey.k.state, 'idle')
+  assert.equal(result.byKey.k.state, 'your-turn')
   assert.equal(result.byKey.k.role, null)
 })
 
@@ -318,8 +421,8 @@ test('a good read replaces everything and clears the failed flag; a failed read 
   const failed = chatsReduce(state, { kind: 'failure' })
   assert.equal(failed.failed, true)
   assert.deepEqual([failed.records, failed.byKey, failed.at], [state.records, state.byKey, state.at])
-  state = chatsReduce(failed, { kind: 'chats', read: goodRead({ at: 2000, byKey: { k1: { state: 'idle' } } }) })
-  assert.deepEqual([state.failed, state.byKey.k1.state, state.at], [false, 'idle', 2000])
+  state = chatsReduce(failed, { kind: 'chats', read: goodRead({ at: 2000, byKey: { k1: { state: 'your-turn' } } }) })
+  assert.deepEqual([state.failed, state.byKey.k1.state, state.at], [false, 'your-turn', 2000])
 })
 
 test('a failure before any read leaves the state empty and not loaded', () => {
@@ -386,13 +489,13 @@ test('a card with a started chat is a link in every column, with its state once 
   for (const status of ['planned', 'in progress', 'done']) {
     const chats = chatsWith({ records: started(), byKey: { k1: { state: 'needs-you' } } })
     assert.deepEqual(cardViewOf(card({ status }), chats, { asking: 'e.md#A' }), {
-      mode: 'chat', key: 'k1', name: 'k1', href: '/chat?sid=k1', state: 'needs-you', stateWord: 'Needs you', brief: null, open: false,
+      mode: 'chat', key: 'k1', name: 'k1', href: '/chat?sid=k1', state: 'needs-you', stateWord: 'Needs you', stateHref: null, brief: null, open: false,
     }, status)
   }
 })
 
 test('a started chat carries its brief note, which only a chat shows', () => {
-  const chats = chatsWith({ records: started(), byKey: { k1: { state: 'idle' } } })
+  const chats = chatsWith({ records: started(), byKey: { k1: { state: 'your-turn' } } })
   assert.deepEqual(cardViewOf(card(), chats, { briefs: { k1: { kind: 'sending' } } }).brief, { kind: 'sending' })
   assert.deepEqual(cardViewOf(card(), chats, { briefs: { k1: { kind: 'failed', reason: 'boom' } } }).brief, { kind: 'failed', reason: 'boom' })
   assert.equal(cardViewOf(card(), chats, { briefs: { other: { kind: 'sending' } } }).brief, null)
@@ -406,7 +509,7 @@ test('a started chat that has not been read yet is a link with no state', () => 
 })
 
 test('a card with a started chat never offers the question', () => {
-  const chats = chatsWith({ records: started(), byKey: { k1: { state: 'idle' } } })
+  const chats = chatsWith({ records: started(), byKey: { k1: { state: 'your-turn' } } })
   assert.equal(cardViewOf(card(), chats, { asking: 'e.md#A', flows: { 'e.md#A': { kind: 'starting', step: 'save' } } }).mode, 'chat')
 })
 
@@ -428,7 +531,7 @@ test('resuming and a failed resume replace the not-open text', () => {
   const chats = chatsWith({ records: started(), byKey: { k1: { state: 'missing' } }, missingSince: { k1: 0 }, at: 200000 })
   assert.equal(cardViewOf(card(), chats, { resumes: { k1: { kind: 'resuming' } } }).mode, 'resuming')
   assert.deepEqual(cardViewOf(card(), chats, { resumes: { k1: { kind: 'failed', reason: 'nope' } } }), { mode: 'resume-failed', key: 'k1', name: 'k1', reason: 'nope' })
-  const back = chatsWith({ records: started(), byKey: { k1: { state: 'idle' } }, at: 200000 })
+  const back = chatsWith({ records: started(), byKey: { k1: { state: 'your-turn' } }, at: 200000 })
   assert.equal(cardViewOf(card(), back, { resumes: { k1: { kind: 'resuming' } } }).mode, 'chat', 'a chat that is back is a chat')
 })
 
@@ -466,7 +569,7 @@ test('Property 6: the restoring clock', async () => {
 })
 
 test('a started chat is open only when the page has it open', () => {
-  const chats = chatsWith({ records: started(), byKey: { k1: { state: 'idle' } } })
+  const chats = chatsWith({ records: started(), byKey: { k1: { state: 'your-turn' } } })
   assert.equal(cardViewOf(card(), chats, { open: { cardId: 'e.md#A', key: 'k1' } }).open, true)
   assert.equal(cardViewOf(card(), chats, { open: { cardId: 'e.md#B', key: 'k2' } }).open, false)
   assert.equal(cardViewOf(card(), chats, {}).open, false)

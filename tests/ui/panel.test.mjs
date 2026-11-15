@@ -87,7 +87,7 @@ test('Property 1: at most one chat is open, and it is the last one opened and st
           break
       }
       assert.deepEqual(ui.open, expected)
-      const chats = { ...initialChats, records, byKey: Object.fromEntries(records.map((x) => [x.key, { state: 'idle' }])) }
+      const chats = { ...initialChats, records, byKey: Object.fromEntries(records.map((x) => [x.key, { state: 'your-turn' }])) }
       const marked = cards.filter((c) => cardViewOf(c, chats, ui, 0).open === true)
       assert.ok(marked.length <= 1)
       if (marked.length === 1) assert.equal(ui.open.cardId, marked[0].id)
@@ -104,7 +104,7 @@ test('Property 2: the mark, the Panel and the chat agree', () => {
     const plan = { branch: 'main', commit: 'abc', age_seconds: 1, fetch: { ok: true }, problems: [], groups: [{ epic: { file: 'e.md', name: 'E' }, cards }] }
     const state = { content: { type: 'plan', plan }, unreachable: false }
     const records = ids.filter(() => r.bool(0.6)).map((id) => ({ card_id: id, name: `k-${id}`, key: `k-${id}`, created: 't' }))
-    const chats = { ...initialChats, records, byKey: Object.fromEntries(records.map((x) => [x.key, { state: r.pick(['idle', 'working', 'needs-you', 'missing']) }])), at: 0, loaded: true }
+    const chats = { ...initialChats, records, byKey: Object.fromEntries(records.map((x) => [x.key, { state: r.pick(['your-turn', 'working', 'needs-you', 'missing']) }])), at: 0, loaded: true }
     const target = r.pick(ids)
     const ui = r.bool(0.7) ? { ...initialUi, open: { cardId: target, key: `k-${target}` } } : initialUi
     const hasPanel = r.bool(0.7)

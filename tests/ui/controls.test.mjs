@@ -156,10 +156,10 @@ test('a connection failure rejects as it is, and an answer that is not JSON on a
 test('readChats reports the records as soon as the backend answers, before it asks Crew anything', async () => {
   const order = []
   const backend = { get: async () => { order.push('backend'); return { folder_id: 'f_1', folder_reason: null, chats: [{ card_id: A, name: 'n', key: 'k', created: 't' }] } } }
-  const gateway = { get: async (path) => { order.push(path); if (path === '/api/chat/slots') return [{ key: 'k', running: true }]; throw new Error('no') } }
+  const gateway = { get: async (path) => { order.push(path); if (path === '/api/chat/slots?crew=all') return [{ key: 'k', running: true }]; throw new Error('no') } }
   const seen = []
   await readChats({ backend, gateway, now: () => 5, onRecords: (records) => { order.push('records'); seen.push(records) } })
-  assert.deepEqual(order, ['backend', 'records', '/api/chat/slots'])
+  assert.deepEqual(order, ['backend', 'records', '/api/chat/slots?crew=all'])
   assert.deepEqual(seen[0].chats.map((record) => record.key), ['k'])
   assert.deepEqual(seen[0].folder, { id: 'f_1', reason: null })
 })
