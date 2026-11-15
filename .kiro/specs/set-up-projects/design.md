@@ -4,7 +4,7 @@
 
 This story adds a Projects view that lets the person pick which Crew folders the board shows, without editing `config.json` by hand. It builds on "Read the plan from main", "Show the board", "Start a story" and "Switch projects", and does not repeat them.
 
-**Build order.** Build this story after "Switch projects" (pull request 33, merged) and after "Start a story" is complete. Both must have landed on main.
+**Build order.** Build this story after "Switch projects" (pull request 33, merged). It does not wait for "Start a story".
 
 The work splits in three:
 

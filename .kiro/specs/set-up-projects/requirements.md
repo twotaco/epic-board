@@ -8,13 +8,13 @@ Today, setting up the board means writing `config.json` by hand with repository 
 
 Every Crew folder already has a `project_dir` field (`GET /api/chat/folders`, Crew 0.12.2). Setting up a project means picking a folder. A new Projects view on the board lists the person's Crew folders that have a project directory. The person ticks the ones the board should show, names each project (defaulting to the folder name), and saves. The repository comes from the folder's directory, and the folder is used for Start. This saves to the app's data folder and takes effect without a restart or `kirocrew app update`.
 
-`config.json` keeps working. When it has a valid `projects` key, the backend uses it, the Projects view is not shown, and the saved file is ignored. This keeps every current installation working without change. When `config.json` has no `projects` key, the saved file is used if it exists; otherwise, the legacy single-project form applies; otherwise, the board is Unconfigured and shows "Choose your projects" in place of the `repository_not_configured` error.
+`config.json` keeps working. The Projects view is always shown. When a saved setup exists it wins; `config.json` is the fallback when no saved setup exists yet. This keeps every current installation working without change. When neither a saved setup nor `config.json` has a `projects` key, the legacy single-project form applies; otherwise, the board is Unconfigured and shows "Choose your projects" in place of the `repository_not_configured` error.
 
-**Build order.** This story is built after "Switch projects" (`.kiro/specs/switch-projects/`, pull request 33, merged) and after "Start a story" (`.kiro/specs/start-a-story/`) is complete. Both must have landed on main before work begins.
+**Build order.** This story is built after "Switch projects" (`.kiro/specs/switch-projects/`, pull request 33, merged). It does not wait for "Start a story".
 
 ## Glossary
 
-- **Selectable_Folder**: a Crew folder in `GET /api/chat/folders` whose `project_dir` field is a non-empty string.
+- **Selectable_Folder**: a folder from `GET /api/chat/folders` shown in the Projects view. Three rules determine eligibility: (1) **nearest-wins directory** — a folder's directory is its own `project_dir` when non-empty, or the nearest ancestor's `project_dir` following `parent_id` through the same list; a hidden, `owner_app` or `mate_home` folder is never an ancestor source; (2) **system folders excluded** — folders with `hidden: true`, a non-empty `owner_app`, or `mate_home: true` are excluded; (3) **no directory excluded** — folders whose directory is still empty after rule 1 are excluded. A Selectable_Folder is `{id, name, project_dir}` where `project_dir` is the resolved non-empty directory.
 - **Saved_Config**: the file `setup.json` in the Data_Folder that holds the project entries the person saved from the Projects view. Its form is described in Requirement 6.
 - **Unconfigured**: the board has no valid Project_List from any source (no `config.json` `projects` key, no valid Saved_Config, no legacy single-project repository).
 - **Project_List**, **Data_Folder**, **Chat_Record**, **Started_Chat**, **Crew_Folder**, **Legacy_Repository**, **Project_Id**, **Records_File**, **Default_Project**: as the switch spec defines them.
@@ -51,9 +51,9 @@ Every Crew folder already has a `project_dir` field (`GET /api/chat/folders`, Cr
 #### Acceptance Criteria
 
 1. WHEN the Projects view opens THEN the page SHALL call `GET /api/chat/folders` through `useAppApi` and SHALL show a loading state inside the view until the call ends.
-2. THE page SHALL show every Selectable_Folder: each folder in the response whose `project_dir` field is a non-empty string. Each row SHALL show the folder's name and its `project_dir`, as literal text. Rows SHALL be in the order the response gives them.
+2. THE page SHALL apply the three rules in the glossary's Selectable_Folder definition to build the list from the response: resolve each folder's directory by nearest-wins through `parent_id`; exclude hidden, `owner_app` and `mate_home` folders (and never use them as ancestor sources); exclude folders with no resolved directory. Each row SHALL show the folder's name and its resolved directory as literal text. Rows SHALL be in the order the response gives them.
 3. IF the call fails, times out (more than 10 seconds) or the response is not a list THEN the view SHALL show the message "Could not read Crew folders." and a "Try again" button, SHALL NOT show the Save button, and SHALL NOT pre-tick any folder.
-4. FOLDERS with no `project_dir`, or with an empty or non-string `project_dir`, SHALL be omitted with no notice.
+4. FOLDERS with `hidden: true`, a non-empty `owner_app`, or `mate_home: true` SHALL be excluded. Folders whose directory is still empty after nearest-wins resolution SHALL also be excluded. Both are omitted with no notice to the person.
 5. IF no Selectable_Folder exists THEN the view SHALL show "No Crew folders have a project directory. Set a project directory in Crew first." and no other content besides a close control.
 6. THE page SHALL treat the folder list as fresh for each opening of the Projects view and SHALL NOT cache it between openings.
 
@@ -108,9 +108,8 @@ Every Crew folder already has a `project_dir` field (`GET /api/chat/folders`, Cr
 1. EVERY request to `POST .../setup` SHALL carry a valid gateway signature (the start spec's Requirement 5, criterion 7). An unsigned request SHALL answer 401 `unauthorized` and change nothing.
 2. FOR each entry in the list, the backend SHALL check: `folder_id` is a non-empty string of at most 200 characters; `name` is a non-empty string of at most 100 characters and not only whitespace; `repository` is a string that, when expanded as `load_projects` expands a repository path (home directory and relative path expansion to one absolute path), is an existing directory that is a git checkout (has a `.git` entry or is inside a git worktree). An entry that fails any check SHALL cause a 400 `invalid_request` answer (Requirement 6, criterion 3).
 3. THE request body SHALL be at most 4,096 bytes and a JSON object. Any body that is not a JSON object, is too large, or holds a `projects` field that is not a list of 1 to 20 objects SHALL answer 400 `invalid_request` and change nothing.
-4. THE backend SHALL NOT follow symbolic links when checking `repository`: the check is on the expanded absolute path only.
-5. THE backend SHALL NOT validate `folder_id` against Crew's real folder list, because the backend never calls Crew. It checks only that the value is well-formed text.
-6. THE backend SHALL NOT restrict `repository` to any subtree of the filesystem beyond the existing git checkout check. The person controls the page, so they can already pass arbitrary paths to the backend through unsigned means; the signed check prevents a cross-site or replayed request from saving a path the person did not choose. No further restriction is applied.
+4. THE backend SHALL NOT validate `folder_id` against Crew's real folder list, because the backend never calls Crew. It checks only that the value is well-formed text.
+5. THE backend SHALL NOT restrict `repository` to any subtree of the filesystem beyond the existing git checkout check. The owner can already open any directory in Crew, so a path restriction protects nothing; the signed check prevents a cross-site or replayed request from saving a path the person did not choose. No further restriction is applied.
 
 ### Requirement 8: The updated Project_List and live update
 
@@ -119,7 +118,7 @@ Every Crew folder already has a `project_dir` field (`GET /api/chat/folders`, Cr
 #### Acceptance Criteria
 
 1. THE switch spec's Requirement 1, criterion 6 says "THE Project_List SHALL be built once, when the app starts". THIS story extends that: the Project_List SHALL also be rebuilt in memory when `POST .../setup` succeeds (Requirement 6, criterion 3). The rebuilding replaces the in-memory list atomically, so that requests arriving during the rebuild are answered by either the old or the new list and not a mix. The backend MUST remain thread-safe across this rebuild.
-2. THE page SHALL, after a successful `POST .../setup`: call `GET .../projects` to get the new Project_List, apply Requirement 2's dropdown and project-selection logic as if the page had just loaded with that list, reset the epic filter to "all", show the first project's plan (triggering a fresh plan and chats poll), and close the Projects view. It SHALL NOT do a full page reload.
+2. THE page SHALL, after a successful `POST .../setup`: call `GET .../projects` to get the new Project_List, keep the project the person was on when its id is still in the new list (as the switch spec's Requirement 4, criterion 5 does), otherwise select the first project, reset the epic filter to "all", trigger a fresh plan and chats poll, and close the Projects view. It SHALL NOT do a full page reload.
 3. WHEN the Projects view closes after a successful save THEN no plan or chat state from before the save SHALL remain on the page; the state SHALL be as fresh as a page load with the new Project_List.
 
 ### Requirement 9: Theme, accessibility and failures

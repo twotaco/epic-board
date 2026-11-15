@@ -2,7 +2,7 @@
 
 ## Overview
 
-One pull request on branch `story/set-up-projects`, cut from `origin/main` after "Start a story" and "Switch projects" have both landed. Never merge; the owner reviews and merges.
+One pull request on branch `story/set-up-projects`, cut from `origin/main` after "Switch projects" has landed. Never merge; the owner reviews and merges.
 
 The work has five numbered tasks, each with sub-tasks. Run the full test suite after tasks 1 and 3 and once at the end. Tick each sub-task in this file as it is done.
 
@@ -111,7 +111,7 @@ The work has five numbered tasks, each with sub-tasks. Run the full test suite a
     - `tryAgain()`: same as `openSetup()` but from within the error state; re-dispatch `'setup-open'` and re-fetch
     - `saveSetup(checkedFolders)`: build the body `{projects: [{folder_id, name, repository}]}` from `setupState`; dispatch `'setup-saving'`; call the backend with `makeBackend(fetchFn).post('/setup', body)` (the host's gateway signs it automatically); on 200 dispatch `'setup-close'` then re-read `GET .../projects` and dispatch `{kind: 'projects-read', ...}` to trigger the existing switch-project reset; on failure dispatch `'setup-save-failed'` with the error message
     - `unconfigured` passed to `renderBoard` when `projectsPhase === 'ready' && (!projects || projects.length === 0)`; plan and chats pollers do not start in this state (guard the plan-poller `useEffect` with `!unconfigured`)
-    - After a successful save and re-read of `/projects`: the existing `'projects-read'` dispatch triggers plan/chats pollers for the first project, the epic filter resets to `'all'` (send `{kind: 'filter', value: 'all'}` and `saveChoice(storage, 'all')`), the board state resets as a project switch does
+    - After a successful save and re-read of `/projects`: dispatch `{kind: 'projects-read', projects, savedId: loadProject(storage)}` so the existing switch-project logic keeps the current project when its id is still in the new list and falls back to the first project when it is not; the epic filter resets to `'all'` (send `{kind: 'filter', value: 'all'}` and `saveChoice(storage, 'all')`), the board state resets as a project switch does
     - _Requirements: 1.2, 3.1, 3.6, 4.5, 4.6, 5.4, 8.2, 8.3, 9.7_
   - [ ] 3.4 Tests in `tests/ui/board.test.mjs` and `tests/ui/setup.test.mjs`
     - `board.test.mjs`: Projects button is in the render output when `projects.length > 0` (not unconfigured), when `projects.length === 1` (button still present), and when `unconfigured = true` (button still present in the notice); Unconfigured state: notice text present, columns absent
