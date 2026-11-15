@@ -1431,7 +1431,7 @@ export function renderSetupView(h, setupState, actions, kit = {}) {
 
   const configNotice = setupInfo?.source === 'saved' && setupInfo?.config_has_projects
     ? h('p', { className: 'eb-notice', role: 'status', key: 'config-notice' },
-        'Your config.json also has projects; they are overridden by this saved setup.')
+        'config.json also has a projects list; this saved setup takes priority.')
     : null
 
   return h('div', { className: 'eb-setup' },
