@@ -186,7 +186,7 @@ function assertStructure(tree, label, { cardControls = false } = {}) {
       || keys.some((key) => /^on[A-Z]/.test(key) || key === 'href' || key === 'tabIndex' || key === 'contentEditable')
       || ['button', 'link', 'checkbox', 'menuitem', 'tab', 'switch'].includes(node.props.role)
   })
-  const insideCards = new Set(findAll(tree, (node) => node.type === 'li' && node.props.className === 'eb-card').flatMap((li) => elements(li)))
+  const insideCards = new Set(findAll(tree, (node) => node.type === 'li' && /(^| )eb-card( |$)/.test(node.props.className ?? '')).flatMap((li) => elements(li)))
   // The epic dropdown (epic filter, Requirement 1.1) is the one control outside a card.
   const insideFilter = new Set(findAll(tree, (node) => node.props.className === 'eb-filter').flatMap((box) => elements(box)))
   // The Panel's header holds its "Close" button (work-in-the-chat). Nothing else in the Panel is the page's own control.
@@ -631,20 +631,29 @@ yellow yellowgreen`.split(/\s+/))
 
 const COLOUR_PROPERTY = /^(color|background(-color|-image)?|border(-[a-z]+)*|outline(-[a-z]+)*|box-shadow|text-shadow|fill|stroke|caret-color|accent-color|text-decoration(-color)?|column-rule(-color)?)$/
 
+// A colour value the page may give `color`: currentColor, inherit, or a theme token whose second argument is currentColor.
+const TOKEN_COLOUR = /^(currentColor|inherit|var\(--[a-z-]+,\s*currentColor\))$/
+
 // Returns what is wrong with a style sheet's colours and focus rules, as a list of messages.
+// A grey of the page's own is allowed only in a rule whose selector has the fallback marker `.eb-fb`.
 function themeProblems(css) {
   const problems = []
   if (/#[0-9a-f]{3,8}\b/i.test(css)) problems.push('hex colour')
-  for (const match of css.matchAll(/\b(rgba?|hsla?|hwb|lab|lch|oklab|oklch|color|color-mix)\(([^)]*)\)/gi)) {
-    const [, fn, args] = match
-    const grey = /^\s*128\s*,\s*128\s*,\s*128\s*,\s*(\d*\.?\d+)\s*$/.exec(args)
-    const alpha = grey ? Number(grey[1]) : NaN
-    if (!/^rgba?$/i.test(fn) || !grey || !(alpha > 0 && alpha < 1)) problems.push(`colour function ${match[0]}`)
+  for (const rule of css.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+    const [, selector, body] = rule
+    for (const match of body.matchAll(/\b(rgba?|hsla?|hwb|lab|lch|oklab|oklch|color|color-mix)\(([^)]*)\)/gi)) {
+      const [, fn, args] = match
+      const grey = /^\s*128\s*,\s*128\s*,\s*128\s*,\s*(\d*\.?\d+)\s*$/.exec(args)
+      const alpha = grey ? Number(grey[1]) : NaN
+      if (!/^rgba?$/i.test(fn) || !grey || !(alpha > 0 && alpha < 1)) problems.push(`colour function ${match[0]}`)
+      else if (!selector.includes('.eb-fb')) problems.push(`grey outside a fallback rule: ${selector.trim()}`)
+    }
   }
   for (const match of css.matchAll(/([a-z-]+)\s*:\s*([^;{}]+?)\s*(?=;|\})/gi)) {
     const [, property, value] = match
     const name = property.toLowerCase()
-    if (name === 'color' || name === 'background-color') problems.push(`${name} property`)
+    if (name === 'background-color') problems.push(`${name} property`)
+    if (name === 'color' && !TOKEN_COLOUR.test(value.trim())) problems.push(`${name} property: ${value}`)
     if (COLOUR_PROPERTY.test(name)) {
       const bare = value.replace(/\b(rgba?|hsla?)\([^)]*\)/gi, ' ')
       for (const token of bare.split(/[\s,()]+/)) {
@@ -686,19 +695,23 @@ test('the theme scan finds bad colours and focus rules, so a clean result means 
     '.a { outline: none; }',
     '.a:focus { outline: 0; }',
     '.a { outline-style: none; }',
+    '.a { background: rgba(128, 128, 128, 0.1); }',
+    '.a { color: var(--muted); }',
+    '.a { color: var(--muted, red); }',
   ]
   for (const css of bad) assert.notDeepEqual(themeProblems(css), [], css)
-  const good = '.a { border: 1px solid currentColor; background: rgba(128, 128, 128, 0.1); outline: 2px solid currentColor; color-scheme: normal; }'
+  const good = '.a.eb-fb { border: 1px solid currentColor; background: rgba(128, 128, 128, 0.1); outline: 2px solid currentColor; color-scheme: normal; }'
+    + ' .b { border: 1px solid var(--border, currentColor); color: var(--muted, currentColor); background: var(--card, transparent); }'
   assert.deepEqual(themeProblems(good), [])
 })
 
-test('STYLE has no opaque colour, no colour or background-colour property and no outline removal', () => {
+test('STYLE has no opaque colour, no colour literal outside the fallback rules and no outline removal', () => {
   assert.equal(typeof STYLE, 'string')
   assert.ok(STYLE.length > 100)
   assert.deepEqual(themeProblems(STYLE), [])
   assert.ok(!/outline\s*:\s*(none|0)/i.test(STYLE))
-  assert.ok(!/(^|[^-\w])(color|background-color)\s*:/i.test(STYLE))
-  // Every colour STYLE uses is currentColor or a translucent grey.
+  assert.ok(!/(^|[^-\w])background-color\s*:/i.test(STYLE))
+  // Every colour STYLE uses is currentColor, a theme token or, in a fallback rule, a translucent grey.
   for (const match of STYLE.matchAll(/rgba\(([^)]*)\)/g)) {
     assert.match(match[1], /^128, 128, 128, 0?\.\d+$/)
   }
@@ -712,6 +725,17 @@ test('no element carries an inline colour, background or outline', () => {
       for (const key of Object.keys(style)) assert.ok(!/color|background|outline|border/i.test(key), `${name}: inline ${key}`)
     }
   }
+})
+
+test('STYLE has the notice, filter, folder and setup rules, in tokens, with the error tone on its own class', () => {
+  for (const selector of ['.eb-notice', '.eb-notice-error', '.eb-error', '.eb-filters', '.eb-filter', '.eb-setup', '.eb-folder', '.eb-folder-label', '.eb-folder-dir', '.eb-folder-name', '.eb-setup-actions']) {
+    assert.ok(new RegExp(`(^|\\n|, )${selector.replace('.', '\\.')}[ ,{]`).test(STYLE), `a rule for ${selector}`)
+  }
+  assert.match(STYLE, /\.eb-notice\s*\{[^}]*border:\s*1px solid var\(--border, currentColor\)[^}]*background:\s*var\(--bg-elevated, transparent\)/)
+  assert.match(STYLE, /\.eb-notice-error\s*\{[^}]*var\(--danger, currentColor\)[^}]*var\(--danger-subtle, transparent\)[^}]*color:\s*var\(--danger-text, currentColor\)/)
+  assert.doesNotMatch(STYLE, /\.eb-error[^{]*\{[^}]*var\(--/, 'the fallback error keeps its own look')
+  assert.match(STYLE, /\.eb-card-spec, \.eb-folder-dir\s*\{[^}]*var\(--mono, monospace\)/)
+  assert.match(STYLE, /\.eb-folder-label input\s*\{[^}]*accent-color:\s*var\(--accent, currentColor\)/)
 })
 
 test('STYLE stacks the columns, puts them side by side from 720px in a container query, with a media query fallback', () => {
@@ -861,7 +885,7 @@ function recorder() {
   return { calls, actions }
 }
 const renderWith = (view, actions) => renderBoard(h, view, actions)
-const theCard = (tree) => findAll(tree, (node) => node.type === 'li' && node.props.className === 'eb-card')[0]
+const theCard = (tree) => findAll(tree, (node) => node.type === 'li' && /(^| )eb-card( |$)/.test(node.props.className ?? ''))[0]
 const buttons = (node) => findAll(node, (n) => n.type === 'button')
 const links = (node) => findAll(node, (n) => n.type === 'a')
 const labelOf = (node) => textOf(node)
@@ -1357,7 +1381,7 @@ test('the Open_Card, and only it, shows "Chat open", aria-current and data-open'
     { card_id: CARD_ID, name: 'k1', key: 'k1', created: 't' }, { card_id: other.id, name: 'k2', key: 'k2', created: 't' },
   ], byKey: { k1: { state: 'your-turn' }, k2: { state: 'your-turn' } } })
   const tree = renderWith(withPanel(chatsView({ chats, extraCards: [other], ui: { open: { cardId: CARD_ID, key: 'k1' } } })))
-  const [first, second] = findAll(tree, (n) => n.type === 'li' && n.props.className === 'eb-card')
+  const [first, second] = findAll(tree, (n) => n.type === 'li' && /(^| )eb-card( |$)/.test(n.props.className ?? ''))
   assert.equal(first.props['data-open'], 'true')
   assert.equal(links(first)[0].props['aria-current'], 'true')
   assert.equal(findAll(first, (n) => n.props.className === 'eb-chat-open').map(labelOf).join(), 'Chat open')

@@ -611,9 +611,42 @@ export function cardViewOf(card, chats, ui = {}, nowMs = chats.at) {
   return { mode: 'question', failure: flow?.kind === 'failed' ? { step: flow.step, reason: flow.reason } : null }
 }
 
-// Whether the host's value is something React can mount as a component.
-export function isChatPanel(value) {
+// Whether a host value is something React can mount as a component: a function, or an object with a
+// `$$typeof` (memo, forwardRef).
+export function isComponent(value) {
   return typeof value === 'function' || (typeof value === 'object' && value !== null && '$$typeof' in value)
+}
+
+export function isChatPanel(value) {
+  return isComponent(value)
+}
+
+// The components the page may take from the host's `@kirocrew/ui`: the seven it draws with, and the
+// Select of the project and epic dropdowns.
+const KIT_NAMES = ['Btn', 'Card', 'CardTitle', 'Badge', 'PageHeader', 'EmptyState', 'ErrorNotice', 'Select']
+
+// The entries of `module` that are components, by name. Anything else is left out. Never throws: a
+// getter that throws leaves its component out.
+export function pickKit(module) {
+  const kit = {}
+  if (typeof module !== 'object' || module === null) return kit
+  for (const name of KIT_NAMES) {
+    try {
+      if (isComponent(module[name])) kit[name] = module[name]
+    } catch {
+      // a throwing getter: that component is missing
+    }
+  }
+  return kit
+}
+
+// The kit of the host's `@kirocrew/ui`, empty when there is no window or no module. Never throws.
+export function hostKit() {
+  try {
+    return pickKit(typeof window !== 'undefined' ? window.__kirocrew_modules?.['@kirocrew/ui'] : undefined)
+  } catch {
+    return {}
+  }
 }
 
 // What the Panel shows, or null: {cardId, key, title}. `title` is the plan card's name, found by id in the
@@ -777,9 +810,10 @@ export async function startAgain({ name, backend }) {
 // headings two levels below it, so one edit shifts all three.
 export const TITLE_LEVEL = 1
 
-// The one style sheet. It sets no text or background colour (the host's theme
-// supplies them). Borders, bar tracks, bar fills and tints use `currentColor` or
-// a grey with an alpha between 0 and 1. No rule removes the focus indicator.
+// The one style sheet. A colour is `currentColor`, `inherit` or a host theme token as
+// `var(--token, currentColor)`. The only greys of its own, `rgba(128, 128, 128, a)`, sit in
+// rules for the fallbacks (the elements marked `eb-fb`), which draw what a missing Crew
+// component would. No rule removes the focus indicator.
 export const STYLE = `
 .eb-root { container-type: inline-size; box-sizing: border-box; height: 100%; overflow-y: auto; padding: 16px; }
 .eb-root *, .eb-root *::before, .eb-root *::after { box-sizing: border-box; }
@@ -788,33 +822,37 @@ export const STYLE = `
 .eb-branch { font-weight: 600; }
 .eb-commit { font-family: monospace; }
 .eb-checking { min-width: 0; }
-.eb-notice, .eb-error { border: 1px solid currentColor; border-radius: 6px; margin: 0 0 16px 0; padding: 8px 12px; overflow-wrap: anywhere; }
+.eb-error { border: 1px solid currentColor; border-radius: 6px; margin: 0 0 16px 0; padding: 8px 12px; overflow-wrap: anywhere; }
+.eb-notice { border: 1px solid var(--border, currentColor); border-radius: var(--radius-lg, 0); background: var(--bg-elevated, transparent); margin: 0 0 16px 0; padding: 8px 12px; font-size: 13px; overflow-wrap: anywhere; }
+.eb-notice-error { border-color: var(--danger, currentColor); background: var(--danger-subtle, transparent); color: var(--danger-text, currentColor); }
 .eb-notice p, .eb-error p { margin: 0; }
 .eb-error ul { margin: 8px 0 0 0; padding-left: 20px; }
 .eb-filters { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 0 0 16px 0; }
 .eb-filter { margin: 0; }
 .eb-filter select { font: inherit; padding: 4px 8px; }
 .eb-columns { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
-.eb-column { min-width: 0; }
-.eb-column-title { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; margin: 0 0 8px 0; padding-bottom: 4px; border-bottom: 1px solid currentColor; }
-.eb-count { font-weight: 400; opacity: 0.7; }
-.eb-group { min-width: 0; margin: 0 0 12px 0; }
-.eb-group-title { margin: 0 0 6px 0; font-size: 0.95em; overflow-wrap: anywhere; }
+.eb-column { min-width: 0; border: 1px solid var(--border, currentColor); border-radius: var(--radius-md, 0); background: var(--card, transparent); overflow: hidden; }
+.eb-column-title { display: flex; justify-content: space-between; align-items: center; gap: 4px; margin: 0; padding: 8px; border-bottom: 1px solid var(--border, currentColor); background: var(--bg-elevated, transparent); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
+.eb-count { font-size: 11px; font-weight: 400; letter-spacing: normal; color: var(--muted, currentColor); }
+.eb-group { min-width: 0; margin: 0; padding: 6px; }
+.eb-group-title { margin: 0 0 6px 0; font-size: 11.5px; font-weight: 600; color: var(--muted, currentColor); overflow-wrap: anywhere; }
 .eb-cards { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
-.eb-card { position: relative; min-width: 0; border: 1px solid rgba(128, 128, 128, 0.5); border-radius: 6px; background: rgba(128, 128, 128, 0.1); padding: 8px 12px; overflow-wrap: anywhere; }
+.eb-card { position: relative; min-width: 0; margin-bottom: 0; overflow-wrap: anywhere; }
+.eb-card.eb-fb { border: 1px solid rgba(128, 128, 128, 0.5); border-radius: 6px; background: rgba(128, 128, 128, 0.1); padding: 8px 12px; }
 .eb-card-name { font-weight: 600; }
-.eb-card-description { margin-top: 4px; }
-.eb-card-spec { margin-top: 4px; font-family: monospace; font-size: 0.85em; opacity: 0.7; }
+.eb-card-description { margin-top: 4px; font-size: 13px; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; line-clamp: 3; overflow: hidden; }
+.eb-card-spec, .eb-folder-dir { margin-top: 4px; font-family: var(--mono, monospace); font-size: 12px; color: var(--muted, currentColor); overflow-wrap: anywhere; }
 .eb-card-progress { margin-top: 4px; font-size: 0.9em; }
-.eb-bar { margin-top: 4px; height: 6px; border-radius: 3px; background: rgba(128, 128, 128, 0.3); overflow: hidden; }
-.eb-bar-fill { height: 100%; background: currentColor; opacity: 0.6; }
+.eb-bar { margin-top: 4px; height: 6px; border-radius: 3px; background: var(--border, transparent); overflow: hidden; }
+.eb-bar-fill { height: 100%; background: var(--accent, currentColor); }
 .eb-card-main { all: unset; font-weight: 600; cursor: pointer; overflow-wrap: anywhere; }
-.eb-card-main::after { content: ''; position: absolute; inset: 0; border-radius: 6px; }
+.eb-card-main::after { content: ''; position: absolute; inset: 0; border-radius: inherit; }
 .eb-card-main:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
-.eb-card[data-mode='startable']:hover, .eb-card[data-mode='question']:hover, .eb-card[data-mode='blocked']:hover, .eb-card[data-mode='chat']:hover { background: rgba(128, 128, 128, 0.2); }
+.eb-card[data-mode='startable']:hover, .eb-card[data-mode='question']:hover, .eb-card[data-mode='blocked']:hover, .eb-card[data-mode='chat']:hover { background: var(--bg-hover, transparent); }
+.eb-card.eb-fb[data-mode='startable']:hover, .eb-card.eb-fb[data-mode='question']:hover, .eb-card.eb-fb[data-mode='blocked']:hover, .eb-card.eb-fb[data-mode='chat']:hover { background: rgba(128, 128, 128, 0.2); }
 .eb-card:focus-within { border-color: currentColor; }
 .eb-card[data-open='true'] { border-color: currentColor; box-shadow: 0 0 0 1px currentColor; }
-.eb-chat-open { margin-left: 8px; font-size: 0.85em; font-weight: 600; }
+.eb-chat-open { margin-left: 8px; font-size: 12px; color: var(--muted, currentColor); }
 .eb-chat-line { margin-top: 6px; }
 .eb-chat-state { display: inline-block; border: 1px solid currentColor; border-radius: 10px; padding: 0 8px; font-size: 0.85em; }
 .eb-chat-state[data-state='needs-you'] { font-weight: 600; }
@@ -823,8 +861,15 @@ export const STYLE = `
 .eb-question, .eb-chat-controls { position: relative; z-index: 1; margin-top: 8px; }
 .eb-question p, .eb-chat-controls p { margin: 6px 0 0 0; }
 .eb-question button, .eb-chat-controls button { font: inherit; cursor: pointer; margin-top: 6px; }
-.eb-empty-column { margin: 0; opacity: 0.7; }
-.eb-problems { margin-top: 16px; border: 1px solid rgba(128, 128, 128, 0.5); border-radius: 6px; padding: 8px 12px; }
+.eb-setup { padding: 8px 12px; }
+.eb-setup ul { margin: 0; padding: 0; }
+.eb-folder { list-style: none; margin: 0; padding: 8px 0; border-bottom: 1px solid var(--border, currentColor); }
+.eb-folder-label { display: flex; align-items: center; gap: 6px; }
+.eb-folder-label input { margin: 0; accent-color: var(--accent, currentColor); }
+.eb-folder-name { display: block; width: 100%; margin-top: 6px; font: inherit; }
+.eb-setup-actions { display: flex; gap: 8px; margin-top: 12px; }
+.eb-empty-column { margin: 0; padding: 6px; color: var(--muted, currentColor); }
+.eb-problems { margin-top: 16px; border: 1px solid var(--border, currentColor); border-radius: var(--radius-md, 0); padding: 8px 12px; }
 .eb-problems summary { cursor: pointer; }
 .eb-problems ul { margin: 8px 0 0 0; padding-left: 20px; }
 .eb-problems li { overflow-wrap: anywhere; margin-bottom: 4px; }
@@ -1120,7 +1165,7 @@ function renderCard(h, card, index, view, actions) {
       },
     }, card.name)
   }
-  return h('li', { className: 'eb-card', 'data-mode': chat.mode, ...(chat.open ? { 'data-open': 'true' } : {}), key: index },
+  return h('li', { className: 'eb-card eb-fb', 'data-mode': chat.mode, ...(chat.open ? { 'data-open': 'true' } : {}), key: index },
     h('div', { className: 'eb-card-name' }, name),
     card.description ? h('div', { className: 'eb-card-description' }, card.description) : null,
     card.spec != null ? h('div', { className: 'eb-card-spec' }, card.spec) : null,
@@ -1361,13 +1406,14 @@ export function renderSetupView(h, setupState, actions) {
 // A plan view that also carries `chats` (the chats state) and `ui` draws the card controls; `actions`
 // are what they call: ask(cardId), cancel(cardId), start(cardId), close(cardId), sendBrief(key), resume(key)
 // and startAgain(name, cardId). Each defaults to doing nothing.
-// `parts.Select` is the host's Select component, or none for a native select.
-export function renderBoard(h, view, actions = {}, parts = {}) {
+// `kit` holds the host's components by name (`pickKit`): `kit.Select` is the Select of the dropdowns, or
+// none for a native select. An empty kit draws every part as the earlier specs do.
+export function renderBoard(h, view, actions = {}, kit = {}) {
   const mergedActions = { ...NO_ACTIONS, ...actions }
   return h('div', { className: 'eb-root' },
     h('style', null, STYLE),
     h(`h${TITLE_LEVEL}`, { className: 'eb-title' }, 'Epic Board'),
-    renderBody(h, view, mergedActions, parts))
+    renderBody(h, view, mergedActions, kit))
 }
 
 // The Panel: a titled region with a Close button around `content`. `panel` is {title, ariaLabel?}.
@@ -1500,9 +1546,14 @@ function hostApiHook() {
 
 // The host's Crew Select, or null when the module or its Select is missing or the lookup throws.
 export function hostSelect() {
+  return hostKit().Select ?? null
+}
+
+// The host's Kanban icon (lucide-react) for the empty state, or null when there is none or the lookup throws.
+function hostIcon() {
   try {
-    const Select = typeof window !== 'undefined' ? window.__kirocrew_modules?.['@kirocrew/ui']?.Select : undefined
-    return typeof Select === 'function' || (typeof Select === 'object' && Select !== null) ? Select : null
+    const Kanban = typeof window !== 'undefined' ? window.__kirocrew_modules?.['lucide-react']?.Kanban : undefined
+    return isComponent(Kanban) ? Kanban : null
   } catch {
     return null
   }
@@ -1567,10 +1618,13 @@ export function createBoard(React, env = {}) {
     const [setupState, setupDispatch] = useReducer(setupReduce, initialSetup)
     const api = (env.useAppApi ?? hostApiHook())()
     const storage = env.storage !== undefined ? env.storage : hostStorage()
-    const Select = env.Select !== undefined ? env.Select : hostSelect()
+    const kit = env.kit ?? hostKit()
+    const Select = env.Select !== undefined ? env.Select : (kit.Select ?? null)
     const [filterKey, setFilterKey] = useState(() => loadChoice(storage))
     const ChatPanel = env.ChatPanel ?? hostChatPanel()
     const hasPanel = isChatPanel(ChatPanel)
+    const Kanban = hostIcon()
+    const icon = Kanban ? h(Kanban, { size: 40, 'aria-hidden': 'true' }) : undefined
     const { phase: projectsPhase, projects, currentId } = projectsState
     const unconfigured = projectsPhase === 'ready' && (!projects || projects.length === 0)
 
@@ -1958,9 +2012,9 @@ export function createBoard(React, env = {}) {
       saveSetup,
     }
     const board = renderBoard(h,
-      { ...view, chats, ui, panelAvailable: hasPanel, projects: projectsView, projectsNotice, setupState, unconfigured },
+      { ...view, chats, ui, panelAvailable: hasPanel, projects: projectsView, projectsNotice, setupState, unconfigured, icon },
       { ...actions, filter, switchProject, openSetup, ...setupActionSet },
-      { Select })
+      { ...kit, Select })
     const chatPanel = !setupOpen ? panelViewOf(view, ui, hasPanel) : null
     let panelTree
     if (setupOpen) {

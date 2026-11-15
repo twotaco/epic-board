@@ -12,29 +12,29 @@ The projects parts (Requirement 6) are written against the code that "Switch pro
 
 ## Tasks
 
-- [ ] 1. Page: the kit, the fallback marker and the style sheet
-  - [ ] 1.1 Add the lookup to `ui/index.mjs`
+- [x] 1. Page: the kit, the fallback marker and the style sheet
+  - [x] 1.1 Add the lookup to `ui/index.mjs`
     - `isComponent(value)`, `pickKit(module)` and `hostKit()` as the design gives them; make `isChatPanel` of the chat story and the lookup of `Select` of the Filter by epic story go through `isComponent` and `hostKit`, so there is one test and one reading of the module, with the rule of the Filter by epic spec unchanged
     - `renderBoard(h, view, actions, kit = {})` takes the kit and passes it down to the functions that draw a part; with an empty kit the tree is what it is today
     - `createBoard` reads `env.kit ?? hostKit()` on every render and passes it to `renderBoard`; it also looks up `window.__kirocrew_modules['lucide-react']?.Kanban` and passes the icon in the view
     - Nothing else in the file changes
     - _Requirements: 1.1, 1.2, 1.3, 1.5_
-  - [ ] 1.2 Mark the fallbacks and rewrite `STYLE`
+  - [x] 1.2 Mark the fallbacks and rewrite `STYLE`
     - Give every element the fallback draws the class `eb-fb`, and move every `rgba(128, 128, 128, a)` rule under `.eb-fb`
     - Rewrite the rest of `STYLE` as the design's table says, with `currentColor` or `var(--token, currentColor)` for colours, the sizes of the table and no others, `.eb-card` `position: relative`, `margin-bottom: 0` on a card in the list, the description's three-line cut, and the body's gutter
     - Keep the `@container (min-width: 720px)` rule and the `@supports not` copy, and the panel rules of the chat story, with the two changes of "Edits"
     - The projects parts, with the rows of the design's table: split `.eb-notice` from `.eb-error` (the fallback keeps today's `.eb-error` look) and give `.eb-notice` the neutral tone and `.eb-notice-error` the error tone; `.eb-filters` and `.eb-filter` as the table gives them; `.eb-setup`, `.eb-folder`, `.eb-folder-label`, `.eb-folder-dir`, `.eb-folder-name` and `.eb-setup-actions`; the directory in the one rule of the meta line
     - _Requirements: 1.3, 2.1, 2.2, 2.3, 2.5, 3.3, 3.4, 3.8, 3.9, 5.1, 5.2, 5.3, 5.4, 5.5, 6.1, 6.3, 6.4, 6.5_
-  - [ ] 1.3 Check them in `tests/ui/kit.test.mjs` and the existing files
+  - [x] 1.3 Check them in `tests/ui/kit.test.mjs` and the existing files
     - `isComponent` for a function, a memo-like object, `null`, a string, a number and a plain object; `pickKit` for each kind of module value and for a throwing getter; `hostKit` with no `window`
     - Update the `STYLE` scans in `tests/ui/render.test.mjs` as "Edits" says: no colour literal outside `.eb-fb` rules, `var(--token, currentColor)` allowed, no `outline: none`; the scans cover the new notice, folder and filter rules too
     - Check that every existing page test still passes with no kit
     - _Requirements: 1.1, 1.2, 5.1, 5.2, 5.5_
-  - [ ] 1.4 Write property test for the lookup in `tests/ui/kit.test.mjs`
+  - [x] 1.4 Write property test for the lookup in `tests/ui/kit.test.mjs`
     - **Property 2: A kit lookup never throws and keeps only components**
     - Seeded module values of every kind; at least 100 iterations with the seed printed on failure
     - **Validates: Requirements 1.1, 1.2**
-  - [ ] 1.5 Run the tests
+  - [x] 1.5 Run the tests
     - Run `python3 -m unittest discover -s tests -t .` and `node --test tests/ui/*.test.mjs` and report the counts run, passed and skipped for each
     - _Requirements: 1.1, 1.2, 1.3, 1.5, 5.1, 5.2, 5.5_
 
