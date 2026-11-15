@@ -817,7 +817,13 @@ export const TITLE_LEVEL = 1
 export const STYLE = `
 .eb-root { container-type: inline-size; box-sizing: border-box; height: 100%; overflow-y: auto; padding: 16px; }
 .eb-root *, .eb-root *::before, .eb-root *::after { box-sizing: border-box; }
+.eb-root.eb-has-header { padding: 0; }
+.eb-body { padding: 0 16px 16px 16px; }
+@media (min-width: 768px) {
+  .eb-body { padding: 0 24px 16px 24px; }
+}
 .eb-title { margin: 0 0 12px 0; }
+.eb-has-header .eb-title { margin: 0; }
 .eb-header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 16px; margin: 0 0 16px 0; }
 .eb-branch { font-weight: 600; }
 .eb-commit { font-family: monospace; }
@@ -831,8 +837,12 @@ export const STYLE = `
 .eb-filter { margin: 0; }
 .eb-filter select { font: inherit; padding: 4px 8px; }
 .eb-columns { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
-.eb-column { min-width: 0; border: 1px solid var(--border, currentColor); border-radius: var(--radius-md, 0); background: var(--card, transparent); overflow: hidden; }
+.eb-column { --eb-lane: var(--muted, currentColor); min-width: 0; border: 1px solid var(--border, currentColor); border-radius: var(--radius-md, 0); background: var(--card, transparent); overflow: hidden; }
+.eb-column[data-column='in progress'] { --eb-lane: var(--accent, currentColor); }
+.eb-column[data-column='done'] { --eb-lane: var(--ok, currentColor); }
 .eb-column-title { display: flex; justify-content: space-between; align-items: center; gap: 4px; margin: 0; padding: 8px; border-bottom: 1px solid var(--border, currentColor); background: var(--bg-elevated, transparent); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
+.eb-dot { flex: none; width: 8px; height: 8px; margin-right: 2px; border-radius: 50%; background: var(--eb-lane, currentColor); }
+.eb-column-name { margin-right: auto; color: var(--eb-lane, currentColor); }
 .eb-count { font-size: 11px; font-weight: 400; letter-spacing: normal; color: var(--muted, currentColor); }
 .eb-group { min-width: 0; margin: 0; padding: 6px; }
 .eb-group-title { margin: 0 0 6px 0; font-size: 11.5px; font-weight: 600; color: var(--muted, currentColor); overflow-wrap: anywhere; }
@@ -1178,9 +1188,10 @@ function renderCard(h, card, index, view, actions) {
 }
 
 function renderColumn(h, column, view, actions) {
-  return h('div', { className: 'eb-column', key: column.key },
+  return h('div', { className: 'eb-column', 'data-column': column.key, key: column.key },
     h(`h${TITLE_LEVEL + 1}`, { className: 'eb-column-title' },
-      h('span', null, column.title),
+      h('span', { className: 'eb-dot', 'aria-hidden': 'true' }),
+      h('span', { className: 'eb-column-name' }, column.title),
       ' ',
       h('span', { className: 'eb-count' }, String(column.count))),
     column.groups.length === 0
@@ -1199,44 +1210,39 @@ function renderProblems(h, problems) {
       h('div', null, problem.reason)))))
 }
 
-// The project dropdown: the host's Select when there is one, else a native select. Both are named "Project".
-// `view` is {options: [{key, label}], currentId}.
-function renderProjects(h, view, actions, Select) {
-  const { options, currentId } = view
+// One dropdown, the host's Select when there is one, else a native select, in its own `div.eb-filter`.
+// Crew's Select (kirocrew-ui/Select.tsx, 0.12.2): `options` are the values as strings, `optionLabels` the
+// labels in the same order, and `onChange` receives the chosen value. `options` here is [{key, label}].
+function renderDropdown(h, Select, { key, label, value, options, choose }) {
   const control = Select
     ? h(Select, {
-      'aria-label': 'Project',
-      value: currentId,
-      options: options.map((o) => o.key),
-      optionLabels: options.map((o) => o.label),
-      onChange: (value) => actions.switchProject(value),
+      'aria-label': label,
+      value,
+      options: options.map((option) => option.key),
+      optionLabels: options.map((option) => option.label),
+      onChange: choose,
     })
     : h('select', {
-      'aria-label': 'Project',
-      value: currentId,
-      onChange: (event) => actions.switchProject(event.target.value),
-    }, options.map((o) => h('option', { key: o.key, value: o.key }, o.label)))
-  return h('div', { className: 'eb-filter', key: 'project' }, control)
+      className: 'eb-fb',
+      'aria-label': label,
+      value,
+      onChange: (event) => choose(event.target.value),
+    }, options.map((option) => h('option', { key: option.key, value: option.key }, option.label)))
+  return h('div', { className: 'eb-filter', key }, control)
 }
 
-// The epic dropdown: the host's Select when there is one, else a native select. Both are named "Epic".
+// The project dropdown, named "Project". `view` is {options: [{key, label}], currentId}.
+function renderProjects(h, view, actions, Select) {
+  return renderDropdown(h, Select, {
+    key: 'project', label: 'Project', value: view.currentId, options: view.options, choose: (value) => actions.switchProject(value),
+  })
+}
+
+// The epic dropdown, named "Epic".
 function renderFilter(h, filter, actions, Select) {
-  const control = Select
-    ? h(Select, {
-      'aria-label': 'Epic',
-      value: filter.key,
-      // Crew's Select (kirocrew-ui/Select.tsx, 0.12.2): `options` are the values as strings, `optionLabels`
-      // the labels in the same order, and `onChange` receives the chosen value.
-      options: filter.options.map((option) => option.key),
-      optionLabels: filter.options.map((option) => option.label),
-      onChange: (value) => actions.filter(value),
-    })
-    : h('select', {
-      'aria-label': 'Epic',
-      value: filter.key,
-      onChange: (event) => actions.filter(event.target.value),
-    }, filter.options.map((option) => h('option', { key: option.key, value: option.key }, option.label)))
-  return h('div', { className: 'eb-filter', key: 'filter' }, control)
+  return renderDropdown(h, Select, {
+    key: 'filter', label: 'Epic', value: filter.key, options: filter.options, choose: (value) => actions.filter(value),
+  })
 }
 
 // The project and epic dropdowns together in one flex row; null when neither applies.
@@ -1247,23 +1253,40 @@ function renderFilters(h, view, actions, parts) {
   return h('div', { className: 'eb-filters', key: 'filters' }, projectEl, epicEl)
 }
 
-function renderPlanView(h, view, actions, parts = {}) {
-  const isSetupOpen = view.setupState?.phase !== 'closed'
-  const setupBtn = h('button', {
+// The "Checking for updates…" text: always in the page, hidden while nothing is refreshing, so the layout does not move.
+const renderChecking = (h, view) =>
+  h('span', { className: 'eb-checking', style: { visibility: view.refreshing ? 'visible' : 'hidden' }, key: 'checking' }, 'Checking for updates…')
+
+// The header's "Projects" button: a plain Btn, or a native button. It is in the plan view only.
+function renderProjectsButton(h, view, actions, Btn) {
+  const props = {
     type: 'button',
     'data-eb-setup-btn': 'true',
-    'aria-expanded': isSetupOpen ? 'true' : 'false',
+    'aria-expanded': view.setupState?.phase !== 'closed' ? 'true' : 'false',
     onClick: () => actions.openSetup?.(),
     key: 'setup-btn',
-  }, 'Projects')
+  }
+  return Btn ? h(Btn, props, 'Projects') : h('button', { ...props, className: 'eb-fb' }, 'Projects')
+}
+
+function renderEmpty(h, view, EmptyState) {
+  const title = `No specs or epics were found on ${view.branch}.`
+  return EmptyState
+    ? h(EmptyState, { title, subtitle: EMPTY_PLAN_HINT, ...(view.icon ? { icon: view.icon } : {}), key: 'empty' })
+    : h('div', { className: 'eb-empty', key: 'empty' }, h('p', null, title), h('p', null, EMPTY_PLAN_HINT))
+}
+
+function renderPlanView(h, view, actions, parts = {}) {
   return [
-    h('div', { className: 'eb-header', key: 'header' },
-      h('span', { className: 'eb-branch' }, view.branch),
-      h('span', { className: 'eb-commit' }, view.commit7),
-      h('span', { className: 'eb-age' }, view.ageText),
-      h('span', { className: 'eb-checking', style: { visibility: view.refreshing ? 'visible' : 'hidden' } },
-        'Checking for updates…'),
-      setupBtn),
+    // With PageHeader the header is drawn by `renderBoard`.
+    parts.PageHeader
+      ? null
+      : h('div', { className: 'eb-header', key: 'header' },
+        h('span', { className: 'eb-branch' }, view.branch),
+        h('span', { className: 'eb-commit' }, view.commit7),
+        h('span', { className: 'eb-age' }, view.ageText),
+        renderChecking(h, view),
+        renderProjectsButton(h, view, actions, parts.Btn)),
     renderFilters(h, view, actions, parts),
     view.projectsNotice ? h('div', { className: 'eb-notice', role: 'status', key: 'projects-notice' }, h('p', null, 'Could not read the list of projects.')) : null,
     view.failedFetch
@@ -1281,25 +1304,36 @@ function renderPlanView(h, view, actions, parts = {}) {
         h('p', null, 'Could not read chat status. Showing the last known states.'))
       : null,
     view.empty
-      ? h('div', { className: 'eb-empty', key: 'empty' },
-        h('p', null, `No specs or epics were found on ${view.branch}.`),
-        h('p', null, EMPTY_PLAN_HINT))
+      ? renderEmpty(h, view, parts.EmptyState)
       : h('div', { className: 'eb-columns', key: 'columns' }, view.columns.map((column) => renderColumn(h, column, view, actions))),
     view.problems.length > 0 ? renderProblems(h, view.problems) : null,
   ]
 }
 
+// The backend's error: its message, then its code and the `settings` entries as code text.
+function renderBackendError(h, view, ErrorNotice) {
+  const code = h('p', null, view.code)
+  const settings = view.settings.length > 0
+    ? h('ul', null, view.settings.map((setting, index) => h('li', { key: index }, h('code', null, setting))))
+    : null
+  return ErrorNotice
+    ? h(ErrorNotice, { message: view.message, footer: h('div', null, code, settings), key: 'error' })
+    : h('div', { className: 'eb-error', role: 'alert', key: 'error' }, h('p', null, view.message), code, settings)
+}
+
 function renderBody(h, view, actions, parts) {
   if (view.unconfigured) {
-    const isSetupOpen = view.setupState?.phase !== 'closed'
+    const setupProps = {
+      type: 'button',
+      'aria-label': 'Set up projects',
+      'aria-expanded': view.setupState?.phase !== 'closed' ? 'true' : 'false',
+      onClick: () => actions.openSetup?.(),
+    }
     return h('div', { className: 'eb-notice', role: 'status', key: 'unconfigured' },
       h('p', null, 'Choose your projects'),
-      h('button', {
-        type: 'button',
-        'aria-label': 'Set up projects',
-        'aria-expanded': isSetupOpen ? 'true' : 'false',
-        onClick: () => actions.openSetup?.(),
-      }, 'Set up projects'))
+      parts.Btn
+        ? h(parts.Btn, { ...setupProps, primary: true }, 'Set up projects')
+        : h('button', { ...setupProps, className: 'eb-fb' }, 'Set up projects'))
   }
   const projectsBar = view.projects
     ? h('div', { className: 'eb-filters', key: 'filters' }, renderProjects(h, view.projects, actions, parts.Select))
@@ -1314,18 +1348,15 @@ function renderBody(h, view, actions, parts) {
       return [
         projectsBar,
         projectsNoticeEl,
-        h('p', { className: 'eb-error', role: 'alert', key: 'error' }, 'Could not reach the backend.'),
+        parts.ErrorNotice
+          ? h(parts.ErrorNotice, { message: 'Could not reach the backend.', key: 'error' })
+          : h('p', { className: 'eb-error', role: 'alert', key: 'error' }, 'Could not reach the backend.'),
       ]
     case 'error':
       return [
         projectsBar,
         projectsNoticeEl,
-        h('div', { className: 'eb-error', role: 'alert', key: 'error' },
-          h('p', null, view.message),
-          h('p', null, view.code),
-          view.settings.length > 0
-            ? h('ul', null, view.settings.map((setting, index) => h('li', { key: index }, h('code', null, setting))))
-            : null),
+        renderBackendError(h, view, parts.ErrorNotice),
       ]
     default:
       return renderPlanView(h, view, actions, parts)
@@ -1410,10 +1441,22 @@ export function renderSetupView(h, setupState, actions) {
 // none for a native select. An empty kit draws every part as the earlier specs do.
 export function renderBoard(h, view, actions = {}, kit = {}) {
   const mergedActions = { ...NO_ACTIONS, ...actions }
-  return h('div', { className: 'eb-root' },
-    h('style', null, STYLE),
-    h(`h${TITLE_LEVEL}`, { className: 'eb-title' }, 'Epic Board'),
-    renderBody(h, view, mergedActions, kit))
+  const style = h('style', null, STYLE)
+  const title = h(`h${TITLE_LEVEL}`, { className: 'eb-title' }, 'Epic Board')
+  if (!kit.PageHeader) return h('div', { className: 'eb-root' }, style, title, renderBody(h, view, mergedActions, kit))
+  // The branch, commit, age and "Projects" button are in the plan view only; the other states draw the title alone.
+  const inPlan = !view.unconfigured && view.kind === 'plan'
+  const header = inPlan
+    ? {
+      title,
+      subtitle: [view.branch, view.commit7, view.ageText].join(' · '),
+      actions: [renderChecking(h, view), renderProjectsButton(h, view, mergedActions, kit.Btn)],
+    }
+    : { title }
+  return h('div', { className: 'eb-root eb-has-header' },
+    style,
+    h(kit.PageHeader, header),
+    h('div', { className: 'eb-body' }, renderBody(h, view, mergedActions, kit)))
 }
 
 // The Panel: a titled region with a Close button around `content`. `panel` is {title, ariaLabel?}.
