@@ -104,7 +104,10 @@ function makeDocument(hidden) {
     listenerCount: () => listeners.length,
     // Elements the page can find by `[data-card-id]`; a test registers them in `nodes`.
     nodes: [],
+    // The question's "Start" buttons, found by `[data-eb-start]`; a test registers them in `startNodes`.
+    startNodes: [],
     querySelectorAll(selector) {
+      if (selector === '[data-eb-start]') return this.startNodes
       assert.equal(selector, '[data-card-id]')
       return this.nodes
     },
@@ -889,6 +892,22 @@ test('Cancel closes the question and puts focus back on the card\'s button; so d
   findAll(page.tree(), (n) => n.props.role === 'group')[0].props.onKeyDown({ key: 'Escape' })
   assert.doesNotMatch(page.text(), /Start a conductor on this story\?/)
   assert.deepEqual(focused, [ALPHA, ALPHA])
+})
+
+test('opening the question puts focus on its Start button, so Escape works straight after a click', async () => {
+  const page = await ready()
+  const focused = []
+  const start = (id) => ({ getAttribute: (name) => (name === 'data-eb-start' ? id : null), focus: () => focused.push(`start:${id}`) })
+  const card = (id) => ({ getAttribute: (name) => (name === 'data-card-id' ? id : null), focus: () => focused.push(`card:${id}`) })
+  page.document.startNodes.push(start('one.md#Card Beta'), start(ALPHA))
+  page.document.nodes.push(card(ALPHA))
+  click(page, 'Card Alpha')
+  assert.deepEqual(focused, [`start:${ALPHA}`], 'focus moves to this card\'s Start, not another card\'s')
+  const startButton = findAll(page.tree(), (n) => n.type === 'button' && n.props['data-eb-start'] === ALPHA)
+  assert.equal(startButton.length, 1, 'the Start button carries its card id')
+  findAll(page.tree(), (n) => n.props.role === 'group')[0].props.onKeyDown({ key: 'Escape' })
+  assert.doesNotMatch(page.text(), /Start a conductor on this story\?/)
+  assert.deepEqual(focused, [`start:${ALPHA}`, `card:${ALPHA}`], 'Escape closes it and focus returns to the card')
 })
 
 test('the question is open on one card at a time, and a Done card with no chat has no button', async () => {

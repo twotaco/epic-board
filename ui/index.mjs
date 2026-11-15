@@ -1074,7 +1074,7 @@ function renderChatPart(h, card, view, actions) {
           ? h('p', { className: 'eb-chat-note', role: 'status' }, `${STEP_TEXT[view.failure.step] ?? 'The start failed'}: ${view.failure.reason}`)
           : null,
         h('p', null, 'Start a conductor on this story?'),
-        h('button', { type: 'button', onClick: () => actions.start(card.id) }, 'Start'),
+        h('button', { type: 'button', 'data-eb-start': card.id, onClick: () => actions.start(card.id) }, 'Start'),
         ' ',
         h('button', { type: 'button', onClick: () => actions.cancel(card.id) }, 'Cancel'))
     }
@@ -1727,6 +1727,15 @@ export function createBoard(React, env = {}) {
       const target = [...doc.querySelectorAll('[data-card-id]')].find((node) => node.getAttribute('data-card-id') === ui.focus.cardId)
       if (target && typeof target.focus === 'function') target.focus()
     }, [ui.focus])
+
+    // When the question opens on a card, put focus on its "Start" button, so that Escape closes it straight
+    // after a mouse click (start-a-story, Requirement 2, criterion 3).
+    useEffect(() => {
+      if (ui.asking == null) return
+      const doc = env.document ?? document
+      const target = [...doc.querySelectorAll('[data-eb-start]')].find((node) => node.getAttribute('data-eb-start') === ui.asking)
+      if (target && typeof target.focus === 'function') target.focus()
+    }, [ui.asking])
 
     // When a Panel opens or shows another chat, put focus on its container.
     const panelKey = hasPanel && ui.open ? ui.open.key : null

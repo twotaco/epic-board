@@ -116,8 +116,8 @@ Group 1 reads the projects from the config and names their files. Group 2 makes 
     - Run `python3 -m unittest discover -s tests -t .` and `node --test tests/ui/*.test.mjs` and report the counts run, passed and skipped for each
     - _Requirements: 4.1, 4.2, 4.3, 4.4, 4.5, 4.6, 4.7, 4.8, 5.1, 5.2, 5.3, 5.4, 5.5, 5.6, 5.7, 5.8, 6.1, 6.2, 6.3, 6.4, 6.5, 6.6, 7.1, 7.2, 7.3, 7.4, 7.5, 7.6_
 
-- [ ] 5. Check it on a Crew host
-  - [ ] 5.1 Install the app in Kiro Crew with two projects and check it (done by you in the app)
+- [x] 5. Check it on a Crew host
+  - [x] 5.1 Install the app in Kiro Crew with two projects and check it (done by you in the app)
     - Use Crew 0.12.2 or later and the app's `app.json` as it is. Put two projects in `config.json`, one of them the repository the board uses today, with its `chats.json` in place
     - **Check the signature with a query.** Start a story in the second project. Confirm the `chats` calls with `?project=` are accepted (no 401 `unauthorized`), and that the record lands in `chats-<id>.json` and not in `chats.json`. If the gateway drops or changes the query, stop and report it: the design's fallback is a path segment for the project (Open Questions 4)
     - Check the legacy file: the project whose repository is the old one still shows the chats it showed before, with their links and states, and nothing of them shows on the other project
@@ -129,6 +129,7 @@ Group 1 reads the projects from the config and names their files. Group 2 makes 
     - Check the order with the chat state change and "Work in the chat": the panel, the card's chat state and the Start button work in each project
     - Check light and dark themes and the focus ring on the dropdown
     - _Requirements: 3.2, 3.6, 4.2, 4.4, 5.1, 5.3, 5.4, 6.1, 6.2, 7.2, 7.4_
+    - _Checked on the Crew host on 15 November 2026. Seen: a start in the second project, with the signed `?project=` calls accepted and the record in `chats-dead-reckoning.json`; the existing chats kept in `chats.json`; the dropdown; fast switching; the choice kept on reload; and Start in each project's folder. Not reproducible on this host, covered by tests: a start during a switch, a repository that is not a checkout, and a failed `/projects` read._
 
 ## Notes
 

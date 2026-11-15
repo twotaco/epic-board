@@ -71,8 +71,8 @@ Group 1 is the page's pure logic. Group 2 draws the panel and its styles. Group 
     - Run `python3 -m unittest discover -s tests -t .` and `node --test tests/ui/*.test.mjs` and report the counts run, passed and skipped for each
     - _Requirements: 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 2.1, 2.2, 2.3, 2.6, 2.7, 3.3, 3.4, 4.1, 4.2, 4.3, 5.1, 5.2, 5.3, 5.4, 6.5, 6.6_
 
-- [ ] 4. Check it on a Crew host
-  - [ ] 4.1 Install the app in Kiro Crew and check the panel (done by you in the app)
+- [x] 4. Check it on a Crew host
+  - [x] 4.1 Install the app in Kiro Crew and check the panel (done by you in the app)
     - Use Crew 0.12.2 or later, the throwaway project of the start spec's task 4.2, and the app's `app.json` as it is, with `permissions.api` of exactly `/api/chat` and `/api/chat/slots`
     - **Check the permissions.** Click a started card. Confirm that the transcript loads, a message sends, a tool approval can be approved and a question can be answered in the panel, and that the host reports no permission error and the browser's network log shows no refusal for the panel's requests. If a call is refused, note its path, add only that entry to `permissions.api` and change the start spec's Requirement 1, criterion 3 and the check in `tests/test_ui.py` with it
     - Check that the panel shows no sessions rail and that the address bar does not change when a chat opens or switches
@@ -86,6 +86,7 @@ Group 1 is the page's pure logic. Group 2 draws the panel and its styles. Group 
     - Check the open questions of the design: after a panel has been open, what Crew's own chat page shows as its active chat, and whether the panel stays on its chat while you change sessions elsewhere in Crew
     - Check light and dark themes and the focus ring on "Close"
     - _Requirements: 1.2, 1.3, 1.5, 1.7, 2.1, 2.2, 2.4, 3.1, 3.2, 3.3, 3.4, 4.1, 4.2, 5.1, 6.1, 6.3_
+    - _Checked on the Crew host on 15 November 2026. Seen: the transcript, sending, approving and answering in the panel, switching chats, the mark, Cmd-click to a new tab, the narrow layout with Close, focus, and both themes. Not reproducible on this host, covered by tests: the fallback without ChatPanel. The design's open questions about Crew's own active chat were not checked. `permissions.api` now also lists `/api/chat/folders` (set-up-projects, Requirement 1); the panel itself needed no entry._
 
 ## Notes
 
