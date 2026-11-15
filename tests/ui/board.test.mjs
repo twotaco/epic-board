@@ -108,11 +108,15 @@ function makeDocument(hidden) {
       assert.equal(selector, '[data-card-id]')
       return this.nodes
     },
-    // The Panel's container, which a test registers in `panel`.
+    // The Panel's container (chat or setup), which a test registers in `panel`.
     panel: null,
+    // The Projects button, which a test registers in `setupBtn`.
+    setupBtn: null,
     querySelector(selector) {
-      assert.equal(selector, '[data-eb-panel]')
-      return this.panel
+      if (selector === '[data-eb-panel]') return this.panel
+      if (selector === '[data-eb-setup-btn]') return this.setupBtn ?? null
+      assert.fail(`unexpected querySelector: ${selector}`)
+      return null
     },
   }
 }
@@ -1202,7 +1206,7 @@ test('setup: Projects button is in the board when plan is showing', async () => 
   page.fetch.answer(0, 200, plan())
   page.chatFetch.answer(0, 200, chatsAnswer([]))
   await flush()
-  assert.ok(buttonNamed(page, 'Set up projects'), 'Projects button present in plan view')
+  assert.ok(buttonNamed(page, 'Projects'), 'Projects button present in plan view')
 })
 
 test('setup: Projects button present when there is exactly one project', async () => {
@@ -1211,7 +1215,7 @@ test('setup: Projects button present when there is exactly one project', async (
   page.fetch.answer(0, 200, plan())
   page.chatFetch.answer(0, 200, chatsAnswer([]))
   await flush()
-  assert.ok(buttonNamed(page, 'Set up projects'))
+  assert.ok(buttonNamed(page, 'Projects'))
 })
 
 test('setup: unconfigured notice and Projects button when projects list is empty', async () => {
@@ -1230,14 +1234,14 @@ test('setup: unconfigured state has no columns', async () => {
   assert.equal(columns.length, 0)
 })
 
-test('setup: clicking Set up projects shows loading then ready with folder list', async () => {
+test('setup: clicking Projects shows loading then ready with folder list', async () => {
   const page = mount()
   await page.awaitProjects()
   page.fetch.answer(0, 200, plan())
   page.chatFetch.answer(0, 200, chatsAnswer([]))
   await flush()
 
-  click(page, 'Set up projects')
+  click(page, 'Projects')
   await flush()
   assert.match(page.text(), /Loading/)
 
@@ -1256,7 +1260,7 @@ test('setup: after saveSetup succeeds, setup view closes', async () => {
   page.chatFetch.answer(0, 200, chatsAnswer([]))
   await flush()
 
-  click(page, 'Set up projects')
+  click(page, 'Projects')
   await flush()
   page.gateway.answer('/api/chat/folders', [{ id: 'f1', name: 'Folder', project_dir: '/home/x' }])
   page.chatFetch.answer(1, 200, { source: 'config', config_has_projects: false, projects: [] })
@@ -1284,6 +1288,50 @@ test('setup: after saveSetup succeeds, setup view closes', async () => {
   // Setup view closed: no Save or Cancel button
   assert.equal(buttonNamed(page, 'Save'), undefined, 'Save button gone after close')
   assert.equal(buttonNamed(page, 'Cancel'), undefined, 'Cancel button gone after close')
+})
+
+test('setup: view is drawn in the panel aside, not appended after the board', async () => {
+  const page = mount()
+  await page.awaitProjects()
+  page.fetch.answer(0, 200, plan())
+  page.chatFetch.answer(0, 200, chatsAnswer([]))
+  await flush()
+
+  click(page, 'Projects')
+  await flush()
+
+  // The setup content must be inside the panel aside, not in the eb-root div.
+  const root = findAll(page.tree(), (n) => n.props?.className === 'eb-root')[0]
+  assert.equal(findAll(root, (n) => n.props?.className === 'eb-setup').length, 0,
+    'eb-setup not inside eb-root')
+  const panel = asideOf(page)
+  assert.ok(panel, 'panel aside is present')
+  assert.equal(panel.props['aria-label'], 'Projects')
+  assert.ok(findAll(panel, (n) => n.props?.className === 'eb-setup').length > 0,
+    'eb-setup inside the panel aside')
+})
+
+test('setup: opening focuses the panel, closing returns focus to the Projects button', async () => {
+  const page = mount()
+  await page.awaitProjects()
+  page.fetch.answer(0, 200, plan())
+  page.chatFetch.answer(0, 200, chatsAnswer([]))
+  await flush()
+
+  const focused = []
+  page.document.panel = { focus: () => focused.push('panel') }
+  page.document.setupBtn = { focus: () => focused.push('setup-btn') }
+
+  click(page, 'Projects')
+  await flush()
+  assert.deepEqual(focused, ['panel'], 'panel focused on open')
+
+  page.gateway.answer('/api/chat/folders', [])
+  page.chatFetch.answer(1, 200, { source: 'config', config_has_projects: false, projects: [] })
+  await flush()
+
+  click(page, 'Close')
+  assert.deepEqual(focused, ['panel', 'setup-btn'], 'Projects button focused on close')
 })
 
 // ---- The default export ----
