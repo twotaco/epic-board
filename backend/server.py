@@ -168,6 +168,7 @@ class RuntimeState:
     def __init__(self, running_projects, error, source, config_has_projects, config_path, data_dir, secret,
                  clock=None):
         self._lock = threading.Lock()
+        self._save_lock = threading.Lock()  # serialises POST /setup rebuild
         self._running = running_projects  # list of RunningProject, or [] on error
         self.error = error
         self.source = source  # 'saved' | 'config' | 'legacy' | 'unconfigured'
@@ -182,12 +183,13 @@ class RuntimeState:
         with self._lock:
             return list(self._running)
 
-    def rebuild(self, new_running, new_source):
-        """Swap the running list atomically; return the old list."""
+    def rebuild(self, new_running, new_source, new_error=None):
+        """Swap the running list atomically, clearing error. Return the old list."""
         with self._lock:
             old = self._running
             self._running = new_running
             self.source = new_source
+            self.error = new_error
             return old
 
 
@@ -206,6 +208,14 @@ class RunningProject:
     @property
     def name(self):
         return self.settings.name
+
+
+def make_running_project(project, data_dir, secret, clock=time.time):
+    """Build a RunningProject with live git and plan functions. Used by startup and POST /setup."""
+    held = Holder(project.repository, read_snapshot, open_snapshot, build_plan)
+    store = ChatStore(data_dir, filename=project.records_file)
+    service = ChatService(store, project.folder, project.folder_reason, secret, held, clock)
+    return RunningProject(project, held, service)
 
 
 class ChatService:
@@ -285,31 +295,35 @@ class ChatRouter:
     """Checks the signature, resolves the project and delegates to that project's ChatService."""
 
     def __init__(self, running_projects, secret, clock=time.time):
-        self.running_projects = running_projects  # list of RunningProject
+        # Accept a RuntimeState (snapshots on each request) or a fixed list (for tests).
+        if hasattr(running_projects, 'snapshot'):
+            self._get_running = running_projects.snapshot
+        else:
+            self._get_running = lambda: running_projects
         self.secret = secret
         self.clock = clock
 
     def handle(self, method, path, header, body):
         """Return (http status, body). Signature is checked before the project is resolved."""
+        running_projects = self._get_running()
         if not self.secret:
             return chat_refusal("proxy_secret_missing", "The app has no proxy secret, so chats cannot be saved.")
         if not verify(header, method=method, target=path, body=body, secret=self.secret, now=self.clock()):
             return chat_refusal("unauthorized", "The request is not signed by the gateway.")
         query = parse_qs(urlparse(path).query, keep_blank_values=True)
-        project, refusal = pick_project([rp.settings for rp in self.running_projects], query)
+        project, refusal = pick_project([rp.settings for rp in running_projects], query)
         if refusal is not None:
             return refusal
         if project is None:
-            # Empty list: behave like the config error case
             return chat_refusal("repository_not_configured", "No project is configured.")
-        rp = next(rp for rp in self.running_projects if rp.id == project.id)
+        rp = next(rp for rp in running_projects if rp.id == project.id)
         return rp.chats.handle_verified(method, path, body)
 
 
 def make_handler(state, router=None):
     """Build the HTTP handler class.
 
-    `state` is a RuntimeState; `router` is a ChatRouter (or None when no projects are running).
+    `state` is a RuntimeState; `router` is a ChatRouter (or None when not needed).
     """
     class Handler(BaseHTTPRequestHandler):
         def _send(self, code, body):
@@ -415,43 +429,49 @@ def make_handler(state, router=None):
                 msg = validate_setup_entry(entry, i)
                 if msg is not None:
                     return self._send(400, error_body("invalid_request", msg))
-            # Save.
-            try:
-                save_setup(state.data_dir, projects_value)
-            except OSError as e:
-                return self._send(500, error_body("internal", f"Could not save setup: {e}"))
-            # Rebuild project list.
-            new_projects, _, new_source, new_config_has = load_projects(data_dir=state.data_dir)
-            old_running = state.snapshot()
-            old_by_id = {rp.id: rp for rp in old_running}
-            new_running = []
-            dd = state.data_dir
-            for project in new_projects:
-                if project.id in old_by_id:
-                    new_running.append(old_by_id[project.id])
-                else:
-                    held = Holder(project.repository, None, None, None)
-                    store = ChatStore(dd, filename=project.records_file)
-                    service = ChatService(store, project.folder, project.folder_reason, state.secret, held)
-                    rp = RunningProject(project, held, service)
-                    new_running.append(rp)
-            old_list = state.rebuild(new_running, new_source)
-            state.config_has_projects = new_config_has
-            new_ids = {rp.id for rp in new_running}
-            for rp in old_list:
-                if rp.id not in new_ids:
-                    if rp.holder is not None and hasattr(rp.holder, 'stop'):
-                        rp.holder.stop()
-            # Start holders for new projects.
-            new_ids_set = {rp.id for rp in old_running}
-            for rp in new_running:
-                if rp.id not in new_ids_set and rp.holder is not None:
+            # Serialise save and rebuild so concurrent saves cannot interleave.
+            with state._save_lock:
+                try:
+                    save_setup(state.data_dir, projects_value)
+                except OSError as e:
+                    return self._send(500, error_body("internal", f"Could not save setup: {e}"))
+                # Reload project list from the new file.
+                new_projects, new_error, new_source, new_config_has = load_projects(data_dir=state.data_dir)
+                old_running = state.snapshot()
+                old_by_id = {rp.id: rp for rp in old_running}
+                new_running = []
+                reused = set()   # object ids of RunningProjects kept from the old list
+                new_to_start = []
+                for project in new_projects:
+                    old_rp = old_by_id.get(project.id)
+                    # Reuse only when id, repository, folder and records_file are all unchanged.
+                    if (old_rp is not None and
+                            old_rp.settings.repository == project.repository and
+                            old_rp.settings.folder == project.folder and
+                            old_rp.settings.records_file == project.records_file):
+                        new_running.append(old_rp)
+                        reused.add(id(old_rp))
+                    else:
+                        # Build with real git/plan functions so the plan is readable immediately.
+                        rp = make_running_project(project, state.data_dir, state.secret, state.clock)
+                        new_running.append(rp)
+                        new_to_start.append(rp)
+                # Atomically swap the list and clear state.error so /plan no longer returns 409.
+                old_list = state.rebuild(new_running, new_source, new_error)
+                state.config_has_projects = new_config_has
+                # Stop holders for projects not reused (removed or settings changed).
+                for old_rp in old_list:
+                    if id(old_rp) not in reused:
+                        if old_rp.holder is not None and hasattr(old_rp.holder, 'stop'):
+                            old_rp.holder.stop()
+                # Start holders for new RunningProjects.
+                for rp in new_to_start:
                     try:
                         rp.holder.start()
                     except Exception:
                         pass
-            return self._send(200, {"projects": [{"id": rp.id, "name": rp.name} for rp in new_running],
-                                    "source": new_source})
+                return self._send(200, {"projects": [{"id": rp.id, "name": rp.name} for rp in new_running],
+                                        "source": new_source})
 
         def do_DELETE(self):
             return self._chats("DELETE")
@@ -472,14 +492,10 @@ if __name__ == "__main__":
     secret = os.environ.get("KIROCREW_PROXY_SECRET", "")
     dd = data_dir()
     projects, problem, source, config_has_projects = load_projects(data_dir=dd)
-    running = []
-    for project in projects:
-        held = Holder(project.repository, read_snapshot, open_snapshot, build_plan)
-        store = ChatStore(dd, filename=project.records_file)
-        service = ChatService(store, project.folder, project.folder_reason, secret, held)
-        running.append(RunningProject(project, held, service))
+    running = [make_running_project(p, dd, secret) for p in projects]
     state = RuntimeState(running, problem, source, config_has_projects, config_path, dd, secret)
-    router = ChatRouter(running, secret) if running else None
+    # Pass state so the router re-snapshots on every request; new projects added via POST /setup work immediately.
+    router = ChatRouter(state, secret)
     server = make_server(int(os.environ["PORT"]), state, router)
     for rp in running:
         rp.holder.start()
