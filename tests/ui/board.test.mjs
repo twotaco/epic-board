@@ -528,7 +528,7 @@ const RECORD = { card_id: ALPHA, name: NAME, key: NAME, created: 't' }
 const chatsAnswer = (chats = []) => ({ folder_id: 'f_1', folder_reason: null, chats })
 const row = (key, extra = {}) => ({ key, running: false, pending_approval: false, needs_input: false, interrupted: false, last_ts: 't1', messages: 3, ...extra })
 const detailPath = (key) => `/api/chat/slots/${encodeURIComponent(key)}?limit=1`
-const buttonNamed = (page, label) => findAll(page.tree(), (node) => node.type === 'button' && textOf(node) === label)[0]
+const buttonNamed = (page, label) => findAll(page.tree(), (node) => (node.type === 'button' || node.type === fakeBtn) && textOf(node) === label)[0]
 const click = (page, label) => {
   const button = buttonNamed(page, label)
   assert.ok(button, `no button "${label}"`)
@@ -1777,4 +1777,110 @@ test('panel: a read of the records that does not list the chat does not close th
   assert.equal(anchors(page).length, 0, 'the card has no chat now')
   assert.deepEqual(chatsOf(page, Chat).map((element) => element.props.slotKey), [NAME])
   assert.equal(asideOf(page).props['aria-label'], 'Chat: Card Alpha')
+})
+
+// ---- Board design, group 3: the cards and the Projects panel with a kit ----
+
+const cardKit = () => ({ Btn: fakeBtn, Card: () => null, CardTitle: () => null, Badge: () => null })
+const pressable = (page, label) => findAll(page.tree(), (node) => (node.type === 'button' || node.type === fakeBtn) && textOf(node) === label)[0]
+
+test('kit: the kit is read on every render, so a component that arrives later is drawn from then on', async () => {
+  const kit = {}
+  const page = mount({ kit })
+  await page.awaitProjects()
+  page.fetch.answer(0, 200, plan())
+  page.chatFetch.answer(0, 200, chatsAnswer([]))
+  await flush()
+  const cardClasses = () => findAll(page.tree(), (node) => node.type === 'li').map((li) => li.props.className)
+  assert.ok(cardClasses().every((name) => name === 'eb-card eb-fb'))
+  kit.Card = () => null
+  findAll(page.tree(), (node) => node.props['data-card-id'] === ALPHA)[0].props.onClick() // any change renders again
+  await flush()
+  assert.ok(cardClasses().every((name) => name === 'eb-item'))
+})
+
+test('kit: a card behaves the same with and without the kit, Start is primary and the others are plain', async () => {
+  for (const kit of [undefined, cardKit()]) {
+    const page = mount({ kit })
+    await page.awaitProjects()
+    page.fetch.answer(0, 200, plan())
+    page.chatFetch.answer(0, 200, chatsAnswer([]))
+    await flush()
+    const [main] = findAll(page.tree(), (node) => node.props['data-card-id'] === ALPHA)
+    assert.equal(main.type, 'button')
+    main.props.onClick()
+    await flush()
+    const start = pressable(page, 'Start')
+    const cancel = pressable(page, 'Cancel')
+    if (kit) {
+      assert.deepEqual([start.type === fakeBtn, start.props.primary, cancel.type === fakeBtn, cancel.props.primary], [true, true, true, undefined])
+    } else {
+      assert.deepEqual([start.type, cancel.type], ['button', 'button'])
+    }
+    assert.equal(start.props['data-eb-start'], ALPHA)
+    cancel.props.onClick()
+    await flush()
+    assert.equal(pressable(page, 'Start'), undefined)
+    assert.deepEqual(findAll(page.tree(), (node) => node.props['data-card-id'] === ALPHA).map((node) => node.type), ['button'])
+  }
+})
+
+test('kit: a start, with the buttons as Btn, sends the brief as before', async () => {
+  const page = mount({ kit: cardKit() })
+  await page.awaitProjects()
+  page.fetch.answer(0, 200, plan())
+  page.chatFetch.answer(0, 200, chatsAnswer([]))
+  await flush()
+  findAll(page.tree(), (node) => node.props['data-card-id'] === ALPHA)[0].props.onClick()
+  await flush()
+  pressable(page, 'Start').props.onClick()
+  await flush()
+  assert.equal(page.chatFetch.calls.some(([url, options]) => /\/chats/.test(url) && options.method === 'POST'), true)
+})
+
+test('kit: the panel opens from the Projects button, Close and Cancel close it and focus returns to the button', async () => {
+  for (const label of ['Close', 'Cancel']) {
+    const page = mount({ kit: cardKit() })
+    await page.awaitProjects()
+    page.fetch.answer(0, 200, plan())
+    page.chatFetch.answer(0, 200, chatsAnswer([]))
+    await flush()
+    const focused = []
+    page.document.panel = { focus: () => focused.push('panel') }
+    page.document.setupBtn = { focus: () => focused.push('setup-btn') }
+    setupButtons(page)[0].props.onClick()
+    await flush()
+    assert.equal(findAll(page.tree(), (node) => node.type === 'aside').length, 1)
+    page.gateway.answer('/api/chat/folders', [{ id: 'f1', name: 'Alpha', project_dir: '/a' }])
+    page.chatFetch.answer(1, 200, { source: 'config', config_has_projects: false, projects: [] })
+    await flush()
+    const aside = findAll(page.tree(), (node) => node.type === 'aside')[0]
+    assert.equal(aside.props['aria-label'], 'Projects')
+    assert.equal(findAll(aside, (node) => /^h[1-6]$/.test(String(node.type))).length, 0, 'no heading in the panel')
+    assert.equal(pressable(page, 'Close').type, fakeBtn, 'the panel Close is a Btn')
+    pressable(page, label).props.onClick()
+    await flush()
+    assert.equal(findAll(page.tree(), (node) => node.type === 'aside').length, 0)
+    assert.deepEqual(focused, ['panel', 'setup-btn'])
+  }
+})
+
+test('kit: the folder-read failure shows an error notice with status, and Try again is a plain Btn', async () => {
+  const page = mount({ kit: cardKit() })
+  await page.awaitProjects()
+  page.fetch.answer(0, 200, plan())
+  page.chatFetch.answer(0, 200, chatsAnswer([]))
+  await flush()
+  setupButtons(page)[0].props.onClick()
+  await flush()
+  page.gateway.fail('/api/chat/folders', new Error('no folders'))
+  page.chatFetch.answer(1, 200, { source: 'config', config_has_projects: false, projects: [] })
+  await flush()
+  const notice = findAll(page.tree(), (node) => String(node.props.className ?? '').includes('eb-notice-error'))[0]
+  assert.deepEqual([notice.props.role, textOf(notice)], ['status', 'no folders'])
+  const retry = pressable(page, 'Try again')
+  assert.deepEqual([retry.type === fakeBtn, retry.props.primary], [true, undefined])
+  retry.props.onClick()
+  await flush()
+  assert.match(page.text(), /Loading/)
 })

@@ -851,8 +851,9 @@ export const STYLE = `
 .eb-card.eb-fb { border: 1px solid rgba(128, 128, 128, 0.5); border-radius: 6px; background: rgba(128, 128, 128, 0.1); padding: 8px 12px; }
 .eb-card-name { font-weight: 600; }
 .eb-card-description { margin-top: 4px; font-size: 13px; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; line-clamp: 3; overflow: hidden; }
+.eb-card-meta { margin-top: 4px; font-size: 12px; color: var(--muted, currentColor); overflow-wrap: anywhere; }
 .eb-card-spec, .eb-folder-dir { margin-top: 4px; font-family: var(--mono, monospace); font-size: 12px; color: var(--muted, currentColor); overflow-wrap: anywhere; }
-.eb-card-progress { margin-top: 4px; font-size: 0.9em; }
+.eb-card-progress { margin-top: 4px; }
 .eb-bar { margin-top: 4px; height: 6px; border-radius: 3px; background: var(--border, transparent); overflow: hidden; }
 .eb-bar-fill { height: 100%; background: var(--accent, currentColor); }
 .eb-card-main { all: unset; font-weight: 600; cursor: pointer; overflow-wrap: anywhere; }
@@ -864,14 +865,15 @@ export const STYLE = `
 .eb-card[data-open='true'] { border-color: currentColor; box-shadow: 0 0 0 1px currentColor; }
 .eb-chat-open { margin-left: 8px; font-size: 12px; color: var(--muted, currentColor); }
 .eb-chat-line { margin-top: 6px; }
-.eb-chat-state { display: inline-block; border: 1px solid currentColor; border-radius: 10px; padding: 0 8px; font-size: 0.85em; }
-.eb-chat-state[data-state='needs-you'] { font-weight: 600; }
+.eb-chat-state.eb-fb { display: inline-block; border: 1px solid currentColor; border-radius: 10px; padding: 0 8px; font-size: 0.85em; }
+.eb-chat-state.eb-fb[data-state='needs-you'] { font-weight: 600; }
 .eb-chat-state a { position: relative; z-index: 1; }
 .eb-chat-note { margin: 6px 0 0 0; }
 .eb-question, .eb-chat-controls { position: relative; z-index: 1; margin-top: 8px; }
 .eb-question p, .eb-chat-controls p { margin: 6px 0 0 0; }
-.eb-question button, .eb-chat-controls button { font: inherit; cursor: pointer; margin-top: 6px; }
-.eb-setup { padding: 8px 12px; }
+.eb-question button, .eb-chat-controls button { margin-top: 6px; }
+.eb-question button.eb-fb, .eb-chat-controls button.eb-fb { font: inherit; cursor: pointer; }
+.eb-setup { padding: 8px; }
 .eb-setup ul { margin: 0; padding: 0; }
 .eb-folder { list-style: none; margin: 0; padding: 8px 0; border-bottom: 1px solid var(--border, currentColor); }
 .eb-folder-label { display: flex; align-items: center; gap: 6px; }
@@ -893,23 +895,23 @@ export const STYLE = `
 }
 .eb-shell { container: eb-shell / inline-size; height: 100%; }
 .eb-split { position: relative; height: 100%; }
-.eb-panel { display: flex; flex-direction: column; min-width: 0; min-height: 0; height: 100%; }
-.eb-panel-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 12px; border-bottom: 1px solid currentColor; }
-.eb-panel-title { font-weight: 600; overflow-wrap: anywhere; }
-.eb-panel-head button { font: inherit; cursor: pointer; }
+.eb-panel { display: flex; flex-direction: column; min-width: 0; min-height: 0; height: 100%; background: var(--bg, transparent); }
+.eb-panel-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 0 8px; min-height: 40px; background: var(--bg-elevated, transparent); border-bottom: 1px solid var(--border, currentColor); }
+.eb-panel-title { font-size: 11.5px; font-weight: 600; overflow-wrap: anywhere; }
+.eb-panel-head button.eb-fb { font: inherit; cursor: pointer; }
 .eb-panel-body { flex: 1 1 0; min-height: 0; }
 .eb-shell[data-panel='open'] .eb-panel { position: absolute; inset: 0; }
 .eb-shell[data-panel='open'] .eb-root { visibility: hidden; }
 @container eb-shell (min-width: 1000px) {
   .eb-shell[data-panel='open'] .eb-split { display: flex; }
   .eb-shell[data-panel='open'] .eb-root { visibility: visible; flex: 1 1 0; min-width: 0; }
-  .eb-shell[data-panel='open'] .eb-panel { position: static; flex: 0 0 clamp(380px, 40%, 640px); border-left: 1px solid currentColor; }
+  .eb-shell[data-panel='open'] .eb-panel { position: static; flex: 0 0 clamp(380px, 40%, 640px); border-left: 1px solid var(--border, currentColor); }
 }
 @supports not (container-type: inline-size) {
   @media (min-width: 1000px) {
     .eb-shell[data-panel='open'] .eb-split { display: flex; }
     .eb-shell[data-panel='open'] .eb-root { visibility: visible; flex: 1 1 0; min-width: 0; }
-    .eb-shell[data-panel='open'] .eb-panel { position: static; flex: 0 0 clamp(380px, 40%, 640px); border-left: 1px solid currentColor; }
+    .eb-shell[data-panel='open'] .eb-panel { position: static; flex: 0 0 clamp(380px, 40%, 640px); border-left: 1px solid var(--border, currentColor); }
   }
 }
 `
@@ -1085,41 +1087,61 @@ const NO_ACTIONS = Object.freeze({
   ask() {}, cancel() {}, start() {}, close() {}, sendBrief() {}, resume() {}, startAgain() {}, filter() {}, openChat() {}, switchProject() {},
 })
 
+// A button: the host's Btn (`primary` for the main action only), or a native button marked as a fallback.
+function renderButton(h, Btn, props, text, primary = false) {
+  return Btn
+    ? h(Btn, primary ? { ...props, primary: true } : props, text)
+    : h('button', { ...props, className: 'eb-fb' }, text)
+}
+
+// The Badge variant of each chat state; a Review badge for failed checks is `err`.
+const STATE_VARIANT = Object.freeze({
+  'needs-you': 'warn', interrupted: 'err', working: 'ok', stalled: 'warn', review: 'muted', 'your-turn': 'muted',
+})
+
 // The part of a card below its progress that belongs to the chat: the state word, the question,
 // or the text and controls of a chat that is restoring or not open. Every text is a literal child.
-function renderChatPart(h, card, view, actions) {
+function renderChatPart(h, card, view, actions, parts = {}) {
+  const { Btn, Badge } = parts
   switch (view.mode) {
     case 'chat': {
-      const parts = []
+      const chat = []
       if (view.state || view.open) {
-        parts.push(h('div', { className: 'eb-chat-line', key: 'state' },
-          view.state ? h('span', { className: 'eb-chat-state', 'data-state': view.state },
-            view.stateHref ? h('a', { href: view.stateHref, target: '_blank', rel: 'noopener noreferrer' }, view.stateWord) : view.stateWord) : null,
+        const word = view.stateHref
+          ? h('a', { href: view.stateHref, target: '_blank', rel: 'noopener noreferrer' }, view.stateWord)
+          : view.stateWord
+        const variant = view.state === 'review' && /^Checks failed/.test(view.stateWord ?? '') ? 'err' : STATE_VARIANT[view.state]
+        chat.push(h('div', { className: 'eb-chat-line', key: 'state' },
+          view.state
+            ? (Badge
+              ? h(Badge, { variant, className: 'eb-chat-state', 'data-state': view.state }, word)
+              : h('span', { className: 'eb-chat-state eb-fb', 'data-state': view.state }, word))
+            : null,
           view.open ? h('span', { className: 'eb-chat-open' }, 'Chat open') : null))
       }
       if (view.brief?.kind === 'sending') {
-        parts.push(h('p', { className: 'eb-chat-note', role: 'status', key: 'brief' }, 'Sending the brief…'))
+        chat.push(h('p', { className: 'eb-chat-note', role: 'status', key: 'brief' }, 'Sending the brief…'))
       } else if (view.brief?.kind === 'failed') {
-        parts.push(h('div', { className: 'eb-chat-controls', key: 'brief' },
+        chat.push(h('div', { className: 'eb-chat-controls', key: 'brief' },
           h('p', { className: 'eb-chat-note', role: 'status' }, 'The brief was not sent'),
           view.brief.reason ? h('p', { className: 'eb-chat-note' }, view.brief.reason) : null,
-          h('button', { type: 'button', onClick: () => actions.sendBrief(view.key) }, 'Send the brief again')))
+          renderButton(h, Btn, { type: 'button', onClick: () => actions.sendBrief(view.key) }, 'Send the brief again')))
       }
-      return parts.length > 0 ? parts : null
+      return chat.length > 0 ? chat : null
     }
     case 'restoring':
       return h('p', { className: 'eb-chat-note', role: 'status', key: 'chat' }, 'Restoring chat…')
     case 'not-open':
       return h('div', { className: 'eb-chat-controls', key: 'chat' },
         h('p', { className: 'eb-chat-note', role: 'status' }, 'This chat is not open.'),
-        h('button', { type: 'button', onClick: () => actions.resume(view.key) }, 'Resume chat'))
+        renderButton(h, Btn, { type: 'button', onClick: () => actions.resume(view.key) }, 'Resume chat'))
     case 'resuming':
       return h('p', { className: 'eb-chat-note', role: 'status', key: 'chat' }, 'Resuming…')
     case 'resume-failed':
       return h('div', { className: 'eb-chat-controls', key: 'chat' },
         h('p', { className: 'eb-chat-note', role: 'status' }, 'The chat could not be resumed.'),
         view.reason ? h('p', { className: 'eb-chat-note' }, view.reason) : null,
-        h('button', { type: 'button', onClick: () => actions.startAgain(view.name, card.id) }, 'Start again'))
+        renderButton(h, Btn, { type: 'button', onClick: () => actions.startAgain(view.name, card.id) }, 'Start again'))
     case 'starting':
       return h('p', { className: 'eb-chat-note', role: 'status', key: 'chat' }, 'Starting…')
     case 'question': {
@@ -1129,9 +1151,9 @@ function renderChatPart(h, card, view, actions) {
           ? h('p', { className: 'eb-chat-note', role: 'status' }, `${STEP_TEXT[view.failure.step] ?? 'The start failed'}: ${view.failure.reason}`)
           : null,
         h('p', null, 'Start a conductor on this story?'),
-        h('button', { type: 'button', 'data-eb-start': card.id, onClick: () => actions.start(card.id) }, 'Start'),
+        renderButton(h, Btn, { type: 'button', 'data-eb-start': card.id, onClick: () => actions.start(card.id) }, 'Start', true),
         ' ',
-        h('button', { type: 'button', onClick: () => actions.cancel(card.id) }, 'Cancel'))
+        renderButton(h, Btn, { type: 'button', onClick: () => actions.cancel(card.id) }, 'Cancel'))
     }
     case 'blocked': {
       const { blocked } = view
@@ -1144,14 +1166,14 @@ function renderChatPart(h, card, view, actions) {
             h('p', { key: 'c' }, 'Set ', h('code', null, 'EPIC_BOARD_FOLDER'), ' or ', h('code', null, 'folder_id'), ' in config.json.'),
           ]
           : h('p', null, blocked.message),
-        h('button', { type: 'button', onClick: () => actions.close(card.id) }, 'Close'))
+        renderButton(h, Btn, { type: 'button', onClick: () => actions.close(card.id) }, 'Close'))
     }
     default:
       return null
   }
 }
 
-function renderCard(h, card, index, view, actions) {
+function renderCard(h, card, index, view, actions, parts = {}) {
   const progress = progressOf(card)
   // Without the chats state a card has no controls: the board as the board spec drew it.
   const seen = view.chats ? cardViewOf(card, view.chats, view.ui ?? {}) : { mode: 'plain' }
@@ -1175,19 +1197,29 @@ function renderCard(h, card, index, view, actions) {
       },
     }, card.name)
   }
-  return h('li', { className: 'eb-card eb-fb', 'data-mode': chat.mode, ...(chat.open ? { 'data-open': 'true' } : {}), key: index },
-    h('div', { className: 'eb-card-name' }, name),
+  const children = [
+    parts.CardTitle
+      ? h(parts.CardTitle, { className: 'eb-card-name', role: 'presentation' }, name)
+      : h('div', { className: 'eb-card-name' }, name),
     card.description ? h('div', { className: 'eb-card-description' }, card.description) : null,
     card.spec != null ? h('div', { className: 'eb-card-spec' }, card.spec) : null,
-    h('div', { className: 'eb-card-progress' }, progress.text),
+    progress.fraction !== null && parts.Badge
+      ? h('div', { className: 'eb-card-progress' },
+        h(parts.Badge, { variant: progress.fraction === 1 ? 'ok' : 'muted', className: 'eb-progress' }, progress.text))
+      : h('div', { className: 'eb-card-progress eb-card-meta' }, progress.text),
     progress.fraction !== null
       ? h('div', { className: 'eb-bar', 'aria-hidden': 'true' },
         h('div', { className: 'eb-bar-fill', style: { width: `${progress.fraction * 100}%` } }))
       : null,
-    renderChatPart(h, card, chat, actions))
+    renderChatPart(h, card, chat, actions, parts),
+  ]
+  const marks = { 'data-mode': chat.mode, ...(chat.open ? { 'data-open': 'true' } : {}) }
+  return parts.Card
+    ? h('li', { className: 'eb-item', key: index }, h(parts.Card, { className: 'eb-card', ...marks }, ...children))
+    : h('li', { className: 'eb-card eb-fb', ...marks, key: index }, ...children)
 }
 
-function renderColumn(h, column, view, actions) {
+function renderColumn(h, column, view, actions, parts = {}) {
   return h('div', { className: 'eb-column', 'data-column': column.key, key: column.key },
     h(`h${TITLE_LEVEL + 1}`, { className: 'eb-column-title' },
       h('span', { className: 'eb-dot', 'aria-hidden': 'true' }),
@@ -1198,7 +1230,7 @@ function renderColumn(h, column, view, actions) {
       ? h('p', { className: 'eb-empty-column' }, 'Nothing here')
       : column.groups.map((group, index) => h('div', { className: 'eb-group', key: `${group.key}:${index}` },
         h(`h${TITLE_LEVEL + 2}`, { className: 'eb-group-title' }, group.name ?? 'No epic'),
-        h('ul', { className: 'eb-cards' }, group.cards.map((card, i) => renderCard(h, card, i, view, actions))))))
+        h('ul', { className: 'eb-cards' }, group.cards.map((card, i) => renderCard(h, card, i, view, actions, parts))))))
 }
 
 function renderProblems(h, problems) {
@@ -1305,7 +1337,7 @@ function renderPlanView(h, view, actions, parts = {}) {
       : null,
     view.empty
       ? renderEmpty(h, view, parts.EmptyState)
-      : h('div', { className: 'eb-columns', key: 'columns' }, view.columns.map((column) => renderColumn(h, column, view, actions))),
+      : h('div', { className: 'eb-columns', key: 'columns' }, view.columns.map((column) => renderColumn(h, column, view, actions, parts))),
     view.problems.length > 0 ? renderProblems(h, view.problems) : null,
   ]
 }
@@ -1364,27 +1396,29 @@ function renderBody(h, view, actions, parts) {
 }
 
 // The setup overlay: rendered when setupState.phase is not 'closed'.
-export function renderSetupView(h, setupState, actions) {
+export function renderSetupView(h, setupState, actions, kit = {}) {
   if (setupState.phase === 'closed') return null
+  const { Btn } = kit
 
   if (setupState.phase === 'opening') {
     return h('div', { className: 'eb-setup' },
       h('p', { role: 'status' }, 'Loading…'),
-      h('button', { type: 'button', onClick: () => actions.closeSetup?.() }, 'Close'))
+      renderButton(h, Btn, { type: 'button', onClick: () => actions.closeSetup?.() }, 'Close'))
   }
 
   if (setupState.phase === 'error') {
     return h('div', { className: 'eb-setup' },
-      h('p', { role: 'status' }, setupState.saveError ?? 'Could not load folder list.'),
-      h('button', { type: 'button', onClick: () => actions.tryAgain?.() }, 'Try again'),
-      h('button', { type: 'button', onClick: () => actions.closeSetup?.() }, 'Close'))
+      h('p', { className: 'eb-notice eb-notice-error', role: 'status' }, setupState.saveError ?? 'Could not load folder list.'),
+      h('div', { className: 'eb-setup-actions' },
+        renderButton(h, Btn, { type: 'button', onClick: () => actions.tryAgain?.() }, 'Try again'),
+        renderButton(h, Btn, { type: 'button', onClick: () => actions.closeSetup?.() }, 'Close')))
   }
 
   const folders = setupState.folders ?? []
   if (folders.length === 0) {
     return h('div', { className: 'eb-setup' },
       h('p', null, 'No Crew folders have a project directory. Set a project directory in Crew first.'),
-      h('button', { type: 'button', onClick: () => actions.closeSetup?.() }, 'Close'))
+      renderButton(h, Btn, { type: 'button', onClick: () => actions.closeSetup?.() }, 'Close'))
   }
 
   const isSaving = setupState.phase === 'saving'
@@ -1396,27 +1430,28 @@ export function renderSetupView(h, setupState, actions) {
     checkedFolders.every((f) => (names[f.id] ?? '').trim() !== '')
 
   const configNotice = setupInfo?.source === 'saved' && setupInfo?.config_has_projects
-    ? h('p', { role: 'status', key: 'config-notice' },
+    ? h('p', { className: 'eb-notice', role: 'status', key: 'config-notice' },
         'Your config.json also has projects; they are overridden by this saved setup.')
     : null
 
   return h('div', { className: 'eb-setup' },
     configNotice,
-    setupState.saveError ? h('p', { role: 'status', key: 'save-error' }, setupState.saveError) : null,
+    setupState.saveError ? h('p', { className: 'eb-notice eb-notice-error', role: 'status', key: 'save-error' }, setupState.saveError) : null,
     h('ul', { key: 'folders' }, folders.map((folder) => {
       const checked = !!checks[folder.id]
-      return h('li', { key: folder.id },
-        h('label', null,
+      return h('li', { className: 'eb-folder', key: folder.id },
+        h('label', { className: 'eb-folder-label' },
           h('input', {
             type: 'checkbox',
             checked,
             onChange: (e) => actions.checkFolder?.({ folderId: folder.id, checked: e.target.checked }),
           }),
           folder.name),
-        h('div', null, folder.project_dir),
+        h('div', { className: 'eb-folder-dir' }, folder.project_dir),
         checked
           ? h('input', {
             type: 'text',
+            className: 'eb-folder-name',
             value: names[folder.id] ?? '',
             placeholder: folder.name,
             'aria-label': `Name for ${folder.name}`,
@@ -1424,12 +1459,13 @@ export function renderSetupView(h, setupState, actions) {
           })
           : null)
     })),
-    h('button', {
-      type: 'button',
-      disabled: !saveEnabled,
-      onClick: () => actions.saveSetup?.(checkedFolders),
-    }, isSaving ? 'Saving…' : 'Save'),
-    isSaving ? null : h('button', { type: 'button', onClick: () => actions.closeSetup?.() }, 'Cancel'))
+    h('div', { className: 'eb-setup-actions', key: 'actions' },
+      renderButton(h, Btn, {
+        type: 'button',
+        disabled: !saveEnabled,
+        onClick: () => actions.saveSetup?.(checkedFolders),
+      }, isSaving ? 'Saving…' : 'Save', true),
+      isSaving ? null : renderButton(h, Btn, { type: 'button', onClick: () => actions.closeSetup?.() }, 'Cancel')))
 }
 
 // Builds the page for a view (what `viewOf` returns) with h = createElement.
@@ -1461,12 +1497,12 @@ export function renderBoard(h, view, actions = {}, kit = {}) {
 
 // The Panel: a titled region with a Close button around `content`. `panel` is {title, ariaLabel?}.
 // Chat panels use the default label "Chat: {title}"; pass `ariaLabel` to override.
-export function renderPanel(h, panel, content, actions = {}) {
+export function renderPanel(h, panel, content, actions = {}, kit = {}) {
   const label = panel.ariaLabel ?? `Chat: ${panel.title}`
   return h('aside', { className: 'eb-panel', 'data-eb-panel': 'true', tabIndex: -1, 'aria-label': label },
     h('div', { className: 'eb-panel-head' },
       h('span', { className: 'eb-panel-title' }, panel.title),
-      h('button', { type: 'button', onClick: () => actions.closeChat?.() }, 'Close')),
+      renderButton(h, kit.Btn, { type: 'button', onClick: () => actions.closeChat?.() }, 'Close')),
     h('div', { className: 'eb-panel-body' }, content))
 }
 
@@ -2061,9 +2097,9 @@ export function createBoard(React, env = {}) {
     const chatPanel = !setupOpen ? panelViewOf(view, ui, hasPanel) : null
     let panelTree
     if (setupOpen) {
-      panelTree = renderPanel(h, { title: 'Projects', ariaLabel: 'Projects' }, renderSetupView(h, setupState, setupActionSet), { closeChat: setupActionSet.closeSetup })
+      panelTree = renderPanel(h, { title: 'Projects', ariaLabel: 'Projects' }, renderSetupView(h, setupState, setupActionSet, kit), { closeChat: setupActionSet.closeSetup }, kit)
     } else if (chatPanel) {
-      panelTree = renderPanel(h, chatPanel, h(boundary(), { slotKey: chatPanel.key }, h(ChatPanel, { slotKey: chatPanel.key, conversationOnly: true })), actions)
+      panelTree = renderPanel(h, chatPanel, h(boundary(), { slotKey: chatPanel.key }, h(ChatPanel, { slotKey: chatPanel.key, conversationOnly: true })), actions, kit)
     } else {
       panelTree = null
     }

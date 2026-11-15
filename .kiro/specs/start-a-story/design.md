@@ -328,7 +328,7 @@ The "click anywhere on the card" behaviour needs no script. The card is `positio
 
 What the link does on a click (Requirement 7, criteria 5 and 6) is decided by one handler on the `a`, and the stretched `::after` makes every click on the card reach it. `renderBoard` takes one more action, `openChat(key)`, and the `a`'s `onClick` calls it, and calls `preventDefault`, only when the page was given a chat panel and the click is a plain one: `button` 0 and none of `ctrlKey`, `metaKey`, `shiftKey`, `altKey`. Every other click, and every click when there is no chat panel, is left alone, so the browser follows the link. `work-in-the-chat` owns the panel and what `openChat` does.
 
-`STYLE` gains rules for the pointer cursor, the hover and focus-within tint (`rgba(128, 128, 128, 0.12)`), the state word, the question and the notice, all with `currentColor` or a grey with an alpha between 0 and 1. No rule removes the focus outline.
+`STYLE` gains rules for the pointer cursor, the hover and focus-within tint, the state word, the question and the notice. Colours are `currentColor` or a host theme token as `var(--token, currentColor)`; the greys with an alpha between 0 and 1 (`rgba(128, 128, 128, 0.12)` and the like) belong to the fallbacks only, under the class `eb-fb` (`board-design`, Requirement 5). No rule removes the focus outline.
 
 #### The component
 
