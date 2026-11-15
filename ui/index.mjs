@@ -1206,11 +1206,11 @@ function renderPlanView(h, view, actions, parts = {}) {
   const isSetupOpen = view.setupState?.phase !== 'closed'
   const setupBtn = h('button', {
     type: 'button',
-    'aria-label': 'Set up projects',
+    'data-eb-setup-btn': 'true',
     'aria-expanded': isSetupOpen ? 'true' : 'false',
     onClick: () => actions.openSetup?.(),
     key: 'setup-btn',
-  }, 'Set up projects')
+  }, 'Projects')
   return [
     h('div', { className: 'eb-header', key: 'header' },
       h('span', { className: 'eb-branch' }, view.branch),
@@ -1367,13 +1367,14 @@ export function renderBoard(h, view, actions = {}, parts = {}) {
   return h('div', { className: 'eb-root' },
     h('style', null, STYLE),
     h(`h${TITLE_LEVEL}`, { className: 'eb-title' }, 'Epic Board'),
-    renderBody(h, view, mergedActions, parts),
-    view.setupState ? renderSetupView(h, view.setupState, mergedActions) : null)
+    renderBody(h, view, mergedActions, parts))
 }
 
-// The Panel: a titled region with a Close button around `content` (the Chat_Panel). `panel` is {title}.
+// The Panel: a titled region with a Close button around `content`. `panel` is {title, ariaLabel?}.
+// Chat panels use the default label "Chat: {title}"; pass `ariaLabel` to override.
 export function renderPanel(h, panel, content, actions = {}) {
-  return h('aside', { className: 'eb-panel', 'data-eb-panel': 'true', tabIndex: -1, 'aria-label': `Chat: ${panel.title}` },
+  const label = panel.ariaLabel ?? `Chat: ${panel.title}`
+  return h('aside', { className: 'eb-panel', 'data-eb-panel': 'true', tabIndex: -1, 'aria-label': label },
     h('div', { className: 'eb-panel-head' },
       h('span', { className: 'eb-panel-title' }, panel.title),
       h('button', { type: 'button', onClick: () => actions.closeChat?.() }, 'Close')),
@@ -1582,6 +1583,7 @@ export function createBoard(React, env = {}) {
     latest.current.chats = chats
     latest.current.api = api
     latest.current.hasPanel = hasPanel
+    const prevSetupOpen = useRef(false)
 
     // Read the Project_List once. No plan or chat poller starts until this ends.
     useEffect(() => {
@@ -1735,6 +1737,21 @@ export function createBoard(React, env = {}) {
       if (target && typeof target.focus === 'function') target.focus()
     }, [panelKey])
 
+    // When the setup panel opens, focus it; when it closes, return focus to the Projects button.
+    const setupOpen = setupState.phase !== 'closed'
+    useEffect(() => {
+      const wasOpen = prevSetupOpen.current
+      prevSetupOpen.current = setupOpen
+      const doc = env.document ?? document
+      if (setupOpen && !wasOpen) {
+        const target = doc.querySelector('[data-eb-panel]')
+        if (target && typeof target.focus === 'function') target.focus()
+      } else if (!setupOpen && wasOpen) {
+        const target = doc.querySelector('[data-eb-setup-btn]')
+        if (target && typeof target.focus === 'function') target.focus()
+      }
+    }, [setupOpen])
+
     const refresh = () => latest.current.poller?.visible()
     const live = (fn) => (...args) => { if (latest.current.alive) fn(...args) }
     const ownUi = live(uiDispatch)
@@ -1757,6 +1774,7 @@ export function createBoard(React, env = {}) {
     }
 
     const openSetup = async () => {
+      ownUi({ kind: 'close-chat' })
       setupDispatch({ kind: 'setup-open' })
       const fetchFn = env.fetch ?? fetch
       const setTimer = env.setTimeout ?? setTimeout
@@ -1923,19 +1941,26 @@ export function createBoard(React, env = {}) {
     const projectsView = projectsOptions ? { options: projectsOptions, currentId } : null
     const projectsNotice = projectsPhase === 'failed'
 
+    const setupActionSet = {
+      closeSetup: () => setupDispatch({ kind: 'setup-close' }),
+      tryAgain: openSetup,
+      checkFolder: ({ folderId, checked }) => setupDispatch({ kind: 'setup-check', folderId, checked }),
+      nameFolder: ({ folderId, value }) => setupDispatch({ kind: 'setup-name', folderId, value }),
+      saveSetup,
+    }
     const board = renderBoard(h,
       { ...view, chats, ui, panelAvailable: hasPanel, projects: projectsView, projectsNotice, setupState, unconfigured },
-      { ...actions, filter, switchProject, openSetup, saveSetup,
-        closeSetup: () => setupDispatch({ kind: 'setup-close' }),
-        tryAgain: openSetup,
-        checkFolder: ({ folderId, checked }) => setupDispatch({ kind: 'setup-check', folderId, checked }),
-        nameFolder: ({ folderId, value }) => setupDispatch({ kind: 'setup-name', folderId, value }),
-      },
+      { ...actions, filter, switchProject, openSetup, ...setupActionSet },
       { Select })
-    const panel = panelViewOf(view, ui, hasPanel)
-    const panelTree = panel
-      ? renderPanel(h, panel, h(boundary(), { slotKey: panel.key }, h(ChatPanel, { slotKey: panel.key, conversationOnly: true })), actions)
-      : null
+    const chatPanel = !setupOpen ? panelViewOf(view, ui, hasPanel) : null
+    let panelTree
+    if (setupOpen) {
+      panelTree = renderPanel(h, { title: 'Projects', ariaLabel: 'Projects' }, renderSetupView(h, setupState, setupActionSet), { closeChat: setupActionSet.closeSetup })
+    } else if (chatPanel) {
+      panelTree = renderPanel(h, chatPanel, h(boundary(), { slotKey: chatPanel.key }, h(ChatPanel, { slotKey: chatPanel.key, conversationOnly: true })), actions)
+    } else {
+      panelTree = null
+    }
     return renderShell(h, board, panelTree)
   }
 }
