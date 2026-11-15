@@ -1000,26 +1000,26 @@ test('the state word is shown for each state, with the state in an attribute, an
   const words = { 'needs-you': 'Needs you', working: 'Working', interrupted: 'Interrupted', 'your-turn': 'Your turn', stalled: 'Stalled' }
   for (const [state, word] of Object.entries(words)) {
     const li = theCard(renderWith(chatsView({ chats: withChat('k1', { state }) })))
-    const marks = findAll(li, (n) => n.props.className === 'eb-chat-state')
+    const marks = findAll(li, (n) => /(^| )eb-chat-state( |$)/.test(n.props.className ?? ''))
     assert.equal(marks.length, 1, state)
     assert.equal(textOf(marks[0]), word)
     assert.equal(marks[0].props['data-state'], state)
   }
   const unread = theCard(renderWith(chatsView({ chats: withChat('k1', undefined, { byKey: {} }) })))
-  assert.equal(findAll(unread, (n) => n.props.className === 'eb-chat-state').length, 0)
+  assert.equal(findAll(unread, (n) => /(^| )eb-chat-state( |$)/.test(n.props.className ?? '')).length, 0)
   assert.equal(links(unread).length, 1, 'the link shows before the state is known')
 })
 
 test('a Review state word is a link to its pull request that opens safely, and the other words are plain text', () => {
   const review = { number: 7, url: 'https://github.com/o/r/pull/7', failed: true }
   const li = theCard(renderWith(chatsView({ chats: withChat('k1', { state: 'review', review }) })))
-  const [mark] = findAll(li, (n) => n.props.className === 'eb-chat-state')
+  const [mark] = findAll(li, (n) => /(^| )eb-chat-state( |$)/.test(n.props.className ?? ''))
   assert.equal(textOf(mark), 'Checks failed #7')
   assert.equal(mark.props['data-state'], 'review')
   const inside = findAll(mark, (n) => n.type === 'a')
   assert.deepEqual(inside.map((a) => [a.props.href, a.props.target, a.props.rel]), [[review.url, '_blank', 'noopener noreferrer']])
   const plain = theCard(renderWith(chatsView({ chats: withChat('k1', { state: 'your-turn' }) })))
-  assert.equal(findAll(plain, (n) => n.props.className === 'eb-chat-state').flatMap((m) => findAll(m, (n) => n.type === 'a')).length, 0)
+  assert.equal(findAll(plain, (n) => /(^| )eb-chat-state( |$)/.test(n.props.className ?? '')).flatMap((m) => findAll(m, (n) => n.type === 'a')).length, 0)
 })
 
 test('the link is built only from the percent-encoded key', () => {
@@ -1113,7 +1113,7 @@ test('the notice for a failed chat read has a status role, the board stays, and 
   const found = findAll(failed, (n) => n.props.role === 'status' && textOf(n).includes(notice))
   assert.equal(found.length, 1)
   assert.equal(found[0].props.className, 'eb-notice')
-  assert.equal(findAll(failed, (n) => n.props.className === 'eb-chat-state').length, 1, 'the last known states stay')
+  assert.equal(findAll(failed, (n) => /(^| )eb-chat-state( |$)/.test(n.props.className ?? '')).length, 1, 'the last known states stay')
   assert.equal(findAll(failed, (n) => n.props.className === 'eb-columns').length, 1, 'the columns stay')
   const ok = renderWith(chatsView({ failed: false }))
   assert.equal(findAll(ok, (n) => textOf(n).includes(notice) && n.props.role === 'status').length, 0)
@@ -1175,7 +1175,7 @@ test('while the brief is sent the card keeps its link and its state and says so 
   const li = theCard(renderWith(briefView({ kind: 'sending' })))
   assert.equal(li.props['data-mode'], 'chat')
   assert.equal(links(li)[0].props.href, '/chat?sid=k1')
-  assert.deepEqual(findAll(li, (n) => n.props.className === 'eb-chat-state').map(textOf), ['Needs you'])
+  assert.deepEqual(findAll(li, (n) => /(^| )eb-chat-state( |$)/.test(n.props.className ?? '')).map(textOf), ['Needs you'])
   assert.deepEqual(findAll(li, (n) => n.props.role === 'status').map(textOf), ['Sending the brief…'])
   assert.equal(buttons(li).length, 0)
 })
@@ -1184,7 +1184,7 @@ test('a brief that was not sent: the card keeps its link and state, shows the te
   const { calls, actions } = recorder()
   const li = theCard(renderWith(briefView({ kind: 'failed', reason: 'API 500: boom' }), actions))
   assert.equal(links(li)[0].props.href, '/chat?sid=k1')
-  assert.deepEqual(findAll(li, (n) => n.props.className === 'eb-chat-state').map(textOf), ['Needs you'])
+  assert.deepEqual(findAll(li, (n) => /(^| )eb-chat-state( |$)/.test(n.props.className ?? '')).map(textOf), ['Needs you'])
   assert.deepEqual(findAll(li, (n) => n.props.role === 'status').map(textOf), ['The brief was not sent'])
   assert.ok(textOf(li).includes('API 500: boom'))
   assert.deepEqual(buttons(li).map(labelOf), ['Send the brief again'])
@@ -1680,4 +1680,197 @@ test('every component gets only the props the design names', () => {
       if (name) for (const prop of Object.keys(node.props)) assert.ok(allowed[name].includes(prop), `${name} got ${prop}`)
     }
   }
+})
+
+// ---- Board design, group 3: the cards, the badges, the buttons and the panel's look ----
+
+const cardIn = (tree) => findAll(tree, (node) => node.props?.['data-mode'] !== undefined)[0]
+const inKit = (node, type) => findAll(node, (n) => n.type === type)
+const startable = (kit, over = {}) => renderKit({ ...chatsView(over), panelAvailable: true }, kit)
+
+test('a card with Card: li.eb-item holds a Card with the class and the data attributes; without Card the earlier li', () => {
+  const kit = fakeKit()
+  const view = { ...openView({ card: { spec: 'alpha', tasks: { done: 1, total: 2 }, description: 'about it' } }), panelAvailable: true }
+  const tree = renderKit(view, kit)
+  const [item] = findAll(tree, (node) => node.type === 'li')
+  assert.equal(item.props.className, 'eb-item')
+  const [card] = inKit(item, kit.Card)
+  assert.deepEqual(propsOf(card), { className: 'eb-card', 'data-mode': 'chat', 'data-open': 'true' })
+  const plain = findAll(renderKit(view, fakeKit(['Btn'])), (node) => node.type === 'li')[0]
+  assert.equal(plain.props.className, 'eb-card eb-fb')
+  assert.deepEqual([plain.props['data-mode'], plain.props['data-open']], ['chat', 'true'])
+  const closed = findAll(renderKit(chatsView(), kit), (node) => node.type === 'li')[0]
+  assert.equal('data-open' in propsOf(inKit(closed, kit.Card)[0]), false)
+})
+
+test('the card name is a CardTitle with role presentation and no heading, or the earlier div', () => {
+  const kit = fakeKit()
+  for (const view of [chatsView(), chatsView({ chats: withChat() }), chatsView({ card: { status: 'done' } })]) {
+    const tree = renderKit(view, kit)
+    const [title] = inKit(tree, kit.CardTitle)
+    assert.deepEqual(propsOf(title), { className: 'eb-card-name', role: 'presentation' })
+    assert.deepEqual(findAll(theCardOf(tree, kit), (n) => /^h[1-6]$/.test(String(n.type))), [])
+    const [name] = findAll(renderKit(view, {}), (node) => node.props.className === 'eb-card-name')
+    assert.equal(name.type, 'div')
+  }
+})
+const theCardOf = (tree, kit) => findAll(tree, (node) => node.type === kit.Card)[0]
+
+test('the card keeps the stretched link, the controls and data-card-id where the start spec puts them, with and without a kit', () => {
+  for (const kit of [{}, fakeKit()]) {
+    const tree = renderKit(chatsView(), kit)
+    const [main] = findAll(tree, (node) => node.props.className === 'eb-card-main')
+    assert.deepEqual([main.type, main.props['data-card-id']], ['button', CARD_ID])
+    const [name] = findAll(tree, (node) => node.props.className === 'eb-card-name')
+    assert.equal(findAll(name, (node) => node === main).length, 1)
+  }
+})
+
+test('the progress badge is muted, or ok when every task is ticked; a card with no tasks has a plain meta line', () => {
+  const kit = fakeKit()
+  const badgeOf = (tasks, spec = 'alpha') => inKit(renderKit(chatsView({ card: { spec, tasks } }), kit), kit.Badge)
+  const [some] = badgeOf({ done: 1, total: 2 })
+  assert.deepEqual(propsOf(some), { variant: 'muted', className: 'eb-progress' })
+  assert.equal(textOf(some), '1 of 2 tasks')
+  assert.equal(badgeOf({ done: 2, total: 2 })[0].props.variant, 'ok')
+  assert.deepEqual(badgeOf({ done: 0, total: 0 }), [])
+  assert.deepEqual(badgeOf(null), [])
+  assert.deepEqual(badgeOf(null, null), [])
+  const [meta] = findAll(renderKit(chatsView({ card: { spec: null } }), kit), (node) => /(^| )eb-card-progress( |$)/.test(node.props.className ?? ''))
+  assert.equal(meta.props.className, 'eb-card-progress eb-card-meta')
+  assert.equal(textOf(meta), 'No spec yet')
+  const without = findAll(renderKit(chatsView({ card: { spec: 'a', tasks: { done: 1, total: 2 } } }), {}), (node) => /(^| )eb-card-progress( |$)/.test(node.props.className ?? ''))
+  assert.equal(textOf(without[0]), '1 of 2 tasks')
+  const bar = findAll(renderKit(chatsView({ card: { spec: 'a', tasks: { done: 1, total: 2 } } }), kit), (node) => node.props.className === 'eb-bar')
+  assert.equal(bar[0].props['aria-hidden'], 'true')
+})
+
+test('the state word is a Badge with the variant of its state, and the earlier span without one', () => {
+  const kit = fakeKit()
+  const variants = { 'needs-you': 'warn', interrupted: 'err', working: 'ok', stalled: 'warn', 'your-turn': 'muted' }
+  for (const [state, variant] of Object.entries(variants)) {
+    const [badge] = inKit(renderKit(chatsView({ chats: withChat('k1', { state }) }), kit), kit.Badge)
+    assert.deepEqual(propsOf(badge), { variant, className: 'eb-chat-state', 'data-state': state }, state)
+  }
+  const review = (failed) => ({ state: 'review', review: { number: 7, url: 'https://github.com/o/r/pull/7', failed } })
+  assert.equal(inKit(renderKit(chatsView({ chats: withChat('k1', review(false)) }), kit), kit.Badge)[0].props.variant, 'muted')
+  const [failed] = inKit(renderKit(chatsView({ chats: withChat('k1', review(true)) }), kit), kit.Badge)
+  assert.equal(failed.props.variant, 'err')
+  assert.equal(textOf(failed), 'Checks failed #7')
+  assert.equal(inKit(failed, 'a').length, 1, 'the word is still the link')
+  const [span] = findAll(renderKit(chatsView({ chats: withChat('k1', { state: 'working' }) }), {}), (node) => node.props['data-state'] === 'working')
+  assert.deepEqual([span.type, span.props.className], ['span', 'eb-chat-state eb-fb'])
+})
+
+test('every card button is a Btn, with Start primary and the rest plain, or a native button.eb-fb', () => {
+  const kit = fakeKit()
+  const cases = [
+    [chatsView({ ui: { asking: CARD_ID } }), ['Start', 'Cancel']],
+    [chatsView({ ui: { asking: CARD_ID }, chats: { folder: { id: null, reason: null } } }), ['Close']],
+    [chatsView({ chats: missing(60000) }), ['Resume chat']],
+    [chatsView({ chats: missing(60000), ui: { resumes: { k1: { kind: 'failed', reason: 'x' } } } }), ['Start again']],
+    [chatsView({ chats: withChat(), ui: { briefs: { k1: { kind: 'failed', reason: 'x' } } } }), ['Send the brief again']],
+  ]
+  for (const [view, labels] of cases) {
+    const found = findAll(renderKit(view, kit), (node) => node.type === kit.Btn && node.props['data-eb-setup-btn'] === undefined)
+    assert.deepEqual(found.map(textOf), labels)
+    for (const btn of found) {
+      assert.equal(btn.props.type, 'button')
+      assert.equal(btn.props.primary, textOf(btn) === 'Start' ? true : undefined)
+      assert.equal(btn.props.busy, undefined)
+      assert.deepEqual(Object.keys(btn.props).filter((p) => !['type', 'onClick', 'primary', 'data-eb-start'].includes(p)), [])
+    }
+    const native = findAll(renderKit(view, {}), (node) => node.type === 'button' && node.props['data-card-id'] === undefined && node.props['data-eb-setup-btn'] === undefined)
+    assert.deepEqual(native.map(textOf), labels)
+    assert.ok(native.every((node) => node.props.className === 'eb-fb'))
+  }
+})
+
+test('a card button calls its action with and without a kit', () => {
+  const { calls, actions } = recorder()
+  const kit = fakeKit()
+  const tree = renderBoard(h, chatsView({ ui: { asking: CARD_ID } }), actions, kit)
+  for (const btn of findAll(tree, (node) => node.type === kit.Btn && node.props['data-eb-setup-btn'] === undefined)) btn.props.onClick()
+  assert.deepEqual(calls, [['start', CARD_ID], ['cancel', CARD_ID]])
+})
+
+test('every card keeps the same words and headings with the whole kit', () => {
+  const kit = fakeKit()
+  const views = [chatsView(), chatsView({ ui: { asking: CARD_ID } }), chatsView({ chats: withChat('k1', { state: 'working' }) }), chatsView({ chats: missing(60000) })]
+  for (const view of views) {
+    const plain = textOf(renderKit(view, {}))
+    const full = textOf(renderKit(view, kit))
+    for (const word of ['Story', 'Start', 'Cancel', 'Working', 'Resume chat']) assert.equal(full.includes(word), plain.includes(word), word)
+    assert.deepEqual(headingLevels(renderKit(view, kit)).filter((l) => l > TITLE_LEVEL), headingLevels(renderKit(view, {})).filter((l) => l > TITLE_LEVEL))
+  }
+})
+
+test('the Panel with a kit: the same elements for a chat and for the Projects view, with a plain Btn for Close', () => {
+  const kit = fakeKit()
+  const closed = []
+  for (const content of [h(FakeChat, { slotKey: 'k1', conversationOnly: true }), h('div', { className: 'eb-setup' })]) {
+    const withKit = renderPanel(h, { title: 'T' }, content, { closeChat: () => closed.push(1) }, kit)
+    const without = renderPanel(h, { title: 'T' }, content, { closeChat: () => closed.push(2) })
+    assert.deepEqual(withKit.children.map((node) => node.props.className), ['eb-panel-head', 'eb-panel-body'])
+    assert.deepEqual(withKit.children[0].children.map((node) => node.props.className ?? 'close'), ['eb-panel-title', 'close'])
+    const [btn] = inKit(withKit, kit.Btn)
+    assert.deepEqual(Object.keys(btn.props).sort(), ['onClick', 'type'])
+    assert.equal(textOf(btn), 'Close')
+    btn.props.onClick()
+    const [native] = buttons(without)
+    assert.deepEqual([native.props.className, textOf(native)], ['eb-fb', 'Close'])
+  }
+  assert.deepEqual(closed, [1, 1])
+})
+
+// The body of the first rule whose selector list holds `selector`.
+const ruleOf = (selector) => {
+  for (const rule of STYLE.matchAll(/([^{}@]+)\{([^{}]*)\}/g)) {
+    if (rule[1].split(',').map((part) => part.trim()).includes(selector)) return rule[2]
+  }
+  return null
+}
+
+test('STYLE: the panel has the head bar, the border line and the page background, all as tokens', () => {
+  assert.deepEqual(themeProblems(STYLE), [])
+  const head = ruleOf('.eb-panel-head')
+  assert.match(head, /background:\s*var\(--bg-elevated, transparent\)/)
+  assert.match(head, /border-bottom:\s*1px solid var\(--border, currentColor\)/)
+  assert.match(head, /padding:\s*0 8px/)
+  assert.match(head, /min-height:\s*40px/)
+  assert.doesNotMatch(head, /currentColor\s*;|solid currentColor/)
+  const title = ruleOf('.eb-panel-title')
+  assert.match(title, /font-size:\s*11\.5px/)
+  assert.match(title, /font-weight:\s*600/)
+  assert.doesNotMatch(title, /color/)
+  assert.match(ruleOf('.eb-panel'), /background:\s*var\(--bg, transparent\)/)
+  assert.doesNotMatch(ruleOf('.eb-panel'), /border/)
+  assert.doesNotMatch(STYLE, /outline:\s*none/)
+})
+
+test('STYLE: the left border of the panel is a --border line, only in the two beside-the-board rules', () => {
+  const lines = STYLE.split('\n').filter((line) => /border-left/.test(line))
+  assert.equal(lines.length, 2)
+  for (const line of lines) {
+    assert.match(line, /\.eb-panel \{[^}]*border-left:\s*1px solid var\(--border, currentColor\)/)
+    assert.match(line, /position: static/)
+  }
+  assert.match(blockBody(STYLE, '@container eb-shell (min-width: 1000px)'), /border-left:\s*1px solid var\(--border, currentColor\)/)
+  assert.doesNotMatch(STYLE, /\.eb-panel[^{]*\{[^}]*border[^}]*solid currentColor/)
+})
+
+test('STYLE: no rule selects inside the panel body, and the body keeps its two lines', () => {
+  const selectors = [...STYLE.matchAll(/([^{}@]+)\{/g)].flatMap((rule) => rule[1].split(',').map((part) => part.trim()))
+  assert.deepEqual(selectors.filter((selector) => selector.includes('.eb-panel-body')), ['.eb-panel-body'])
+  assert.equal(ruleOf('.eb-panel-body').trim(), 'flex: 1 1 0; min-height: 0;')
+  assert.deepEqual(STYLE.match(/\.eb-panel-(head|title)[^{]*\{[^}]*\}/g).map((rule) => (rule.match(/font-size:\s*[\d.]+px/g) ?? []).join()), ['', 'font-size: 11.5px', ''])
+})
+
+test('STYLE: the fallback looks sit under .eb-fb, so a Crew component is never drawn over them', () => {
+  for (const selector of ['.eb-chat-state.eb-fb', '.eb-panel-head button.eb-fb', '.eb-question button.eb-fb']) assert.ok(ruleOf(selector) !== null, selector)
+  assert.doesNotMatch(STYLE, /(^|\n)\.eb-chat-state\s*[{,]/)
+  assert.match(ruleOf('.eb-card-meta'), /font-size:\s*12px[^}]*var\(--muted, currentColor\)/)
+  assert.match(ruleOf('.eb-card[data-open=\'true\']'), /border-color:\s*currentColor[^}]*box-shadow:\s*0 0 0 1px currentColor/)
+  assert.match(ruleOf('.eb-card'), /position:\s*relative[^}]*margin-bottom:\s*0/)
+  assert.match(ruleOf('.eb-card-description'), /-webkit-line-clamp:\s*3/)
 })

@@ -65,40 +65,40 @@ The projects parts (Requirement 6) are written against the code that "Switch pro
     - Run `python3 -m unittest discover -s tests -t .` and `node --test tests/ui/*.test.mjs` and report the counts run, passed and skipped for each
     - _Requirements: 1.2, 1.3, 2.1, 2.2, 2.3, 2.4, 2.5, 4.1, 4.2, 4.3, 4.4, 4.5, 4.6, 6.1, 6.5, 6.6, 6.7, 6.8_
 
-- [ ] 3. Page: the cards, the badges and the buttons
-  - [ ] 3.1 Draw them in `ui/index.mjs`
+- [x] 3. Page: the cards, the badges and the buttons
+  - [x] 3.1 Draw them in `ui/index.mjs`
     - `li.eb-item` with a `Card` (class, `data-mode`, `data-open`), or the fallback `li.eb-card.eb-fb` with the same attributes; the name in a `CardTitle` with `role="presentation"`, or `div.eb-card-name`
     - The meta lines, the description, the progress in a `Badge` (variant `muted`, or `ok` when every task is ticked) with the bar, and the state word in a `Badge` (Needs you `warn`, Interrupted `err`, Working `ok`, Stalled `warn`, Review `muted` or `err` for Checks failed, Your turn `muted`) with its `data-state`
     - Every button of the earlier specs as a `Btn` (on a card, `primary` for "Start" only) or the fallback button, with the same text, handler and keyboard behaviour; the panel's "Close" the same. The buttons of the Projects parts are in 2.3 and 3.6
     - The open card's mark as the design gives it (a ring, no padding change) and the edits of "Edits" to the chat design's two paragraphs
     - _Requirements: 1.3, 1.4, 3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 3.7, 3.8, 3.9_
-  - [ ] 3.2 Check the markup in `tests/ui/render.test.mjs`
+  - [x] 3.2 Check the markup in `tests/ui/render.test.mjs`
     - The card with and without `Card`, the name's `role="presentation"` and the absence of a card heading, the meta and description classes and the three-line rule, the progress and state badges and their variants, each button as a `Btn` and as a fallback, and that the stretched link, the controls above it and `data-card-id` are where the start spec puts them
     - Update the tests that find a card by `li.eb-card`
     - _Requirements: 3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 3.7, 3.8, 3.9_
-  - [ ] 3.3 Check the wiring in `tests/ui/board.test.mjs`
+  - [x] 3.3 Check the wiring in `tests/ui/board.test.mjs`
     - `createBoard` with a fake kit through `env.kit`: it is read on every render and a component that arrives later is picked up; a card's click, keyboard and focus behaviour is the same with and without the kit; "Start" is `primary` and the others are plain; "Close" is a `Btn`; a start, a resume and a retry of the brief behave as before
     - _Requirements: 1.1, 1.2, 3.1, 3.7_
-  - [ ] 3.4 Write property test for the kit's effect in `tests/ui/kit.test.mjs`
+  - [x] 3.4 Write property test for the kit's effect in `tests/ui/kit.test.mjs`
     - **Property 1: The kit changes the look, never the words or the structure**
     - Seeded subsets of the seven components as fakes, and seeded views and `ui` covering every card mode, column and state, with and without a panel, with and without the project dropdown, the Unconfigured state, and the Projects view in each phase (opening, error, no folders, ready, saving); at least 100 iterations with the seed printed on failure
     - **Validates: Requirements 1.2, 1.3, 1.6, 2.4, 3.1, 3.2, 3.7, 4.1, 4.4, 4.5, 6.1, 6.4, 6.6, 6.7, 6.8**
-  - [ ] 3.5 Bring the earlier specs' text in line
+  - [x] 3.5 Bring the earlier specs' text in line
     - Edit the colour sentences of the board design's "Layout and theme" and of the start design's description of `STYLE` to say that the greys are the fallbacks'; tick nothing in those specs
     - _Requirements: 5.1, 5.2_
-  - [ ] 3.6 Draw the Projects panel in `ui/index.mjs`
+  - [x] 3.6 Draw the Projects panel in `ui/index.mjs`
     - `renderSetupView(h, setupState, actions, kit = {})` takes the kit as `renderBoard` does, and `createBoard` passes it; the panel itself stays the chat's `renderPanel`, with "Close" a `Btn` or the fallback button as in 3.1. Add no panel, no heading and no second layout
     - The folder row as the design's table gives it: `li.eb-folder` with `label.eb-folder-label` (native checkbox, then the name), `div.eb-folder-dir` with the directory as literal text, and the native name field when ticked; the labels, `aria-label` and placeholder of the setup spec unchanged
     - "Save" as a `Btn` with `primary` (still `disabled` by the setup spec's rule, still "Saving…" while saving, never `busy`) and "Cancel" as a plain `Btn`, in one `div.eb-setup-actions`; "Try again" and the view's "Close" as plain `Btn`; with no `Btn`, `button.eb-fb`
     - The config line and the two errors: keep their `p[role=status]` and text, add the class `eb-notice`, and `eb-notice-error` for the errors; draw no `ErrorNotice` for them
     - Check the props at `v0.12.2` as in 2.3; the page's checkbox and name field stay native (design, Open Question 10)
     - _Requirements: 6.2, 6.3, 6.4, 6.5, 6.8_
-  - [ ] 3.7 Check the panel in `tests/ui/setup.test.mjs` and `tests/ui/board.test.mjs`
+  - [x] 3.7 Check the panel in `tests/ui/setup.test.mjs` and `tests/ui/board.test.mjs`
     - `renderSetupView` in each phase with a fake kit and with none: the folder row's parts in order, the directory as text in the meta class, the name field only when ticked, "Save" `primary` and not `busy`, `disabled` as before, "Cancel" plain and absent while saving, both in one `div.eb-setup-actions`, "Try again" and "Close" plain, the three notices with `status`, the classes `eb-notice` and `eb-notice-error`, and no `alert` and no `ErrorNotice`
     - `createBoard` with a fake kit: the panel opens from the "Projects" button, and "Close" and "Cancel" close it and put focus back on that button; a save, a failed save and a retry of the folder read behave as before; the heading structure is the same as with no panel
     - Update `buttons(tree)` and the other finders in `tests/ui/setup.test.mjs` that assume a `button` element, as "Edits to earlier specs and checks" lists
     - _Requirements: 6.2, 6.3, 6.4, 6.5, 6.8_
-  - [ ] 3.8 Give the panel Crew's look in `STYLE` and `renderPanel`
+  - [x] 3.8 Give the panel Crew's look in `STYLE` and `renderPanel`
     - Applies to the panel with a chat and with the Projects view alike. The markup of `renderPanel` does not change (`aside.eb-panel`, `div.eb-panel-head` with `span.eb-panel-title` and the "Close", `div.eb-panel-body`); read `STYLE` and `renderPanel` first, and use the rows "Panel head", "Panel title", "Panel edge and background" and "Panel body" of the design's table
     - Check the sources at `v0.12.2` before writing the values: `SidePanel.tsx` (the strip and the root) and `PanelSectionHeader` in `components/ui.tsx`; `ChatPanel` in `app-sdk/ChatPanel.tsx`
     - `.eb-panel-head`: `var(--bg-elevated)` background, `var(--border)` bottom border in place of `currentColor`, `padding: 0 8px`, `min-height: 40px`; `.eb-panel-title`: 11.5px, weight 600, no colour rule
@@ -107,12 +107,12 @@ The projects parts (Requirement 6) are written against the code that "Switch pro
     - The Projects view body takes `padding: 8px`, so it lines up with the head (the row "Projects view body")
     - Edit the chat design's paragraph on the panel's look in place to match, as "Edits to earlier specs and checks" says; tick nothing in that spec
     - _Requirements: 5.1, 5.4, 5.5, 6.2, 6.9, 6.10, 6.11_
-  - [ ] 3.9 Check the panel in `tests/ui/render.test.mjs` and `tests/ui/board.test.mjs`
+  - [x] 3.9 Check the panel in `tests/ui/render.test.mjs` and `tests/ui/board.test.mjs`
     - `STYLE` scans: the head has the elevated background and the `var(--border)` bottom border; the left border is `var(--border)` and appears only in the two beside-the-board rules; the panel's background is `var(--bg)`; every colour is `var(--token, currentColor)`; no `currentColor` border is left on `.eb-panel` or `.eb-panel-head`; no `outline: none`
     - No rule in `STYLE` selects a descendant of `.eb-panel-body`, and the sizes of the head and the title are those of the table and no others
     - `renderPanel` draws the same elements for a chat and for the Projects view, with "Close" a plain `Btn` and with no kit; `createBoard` gives `ChatPanel` exactly `slotKey` and `conversationOnly`, and the chat and the Projects panel open, close and take focus as before
     - _Requirements: 5.1, 5.4, 5.5, 6.2, 6.9, 6.10, 6.11_
-  - [ ] 3.10 Run the tests
+  - [x] 3.10 Run the tests
     - Run `python3 -m unittest discover -s tests -t .` and `node --test tests/ui/*.test.mjs` and report the counts run, passed and skipped for each
     - _Requirements: 1.1, 1.2, 1.3, 1.4, 1.6, 3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 3.7, 3.8, 3.9, 6.2, 6.3, 6.4, 6.5, 6.8, 6.9, 6.10, 6.11_
 

@@ -101,6 +101,7 @@ renderPanel(h, panel, content, actions)   // panel = {title, key}; content = the
 //   <div class="eb-panel-head"><span class="eb-panel-title">{title}</span><button type="button">Close</button></div>
 //   <div class="eb-panel-body">{content}</div>
 // </aside>
+// "Close" is a plain Crew Btn when the page has one (a fifth argument, the kit), else the native button.
 
 renderShell(h, board, panelTree)
 // <div class="eb-shell" data-panel="open|closed"><div class="eb-split">{board}{panelTree}</div></div>
@@ -110,15 +111,15 @@ renderShell(h, board, panelTree)
 
 ### Styles
 
-All new rules use `currentColor` or no colour, and none removes an outline.
+All new rules use `currentColor`, a host theme token as `var(--token, currentColor)`, or no colour, and none removes an outline. The panel's look is Crew's (`board-design`, Requirement 6, criteria 9 to 11): the head is a bar on `--bg-elevated` with a `--border` line under it, the title takes the section-label size and weight, the left edge is a `--border` line, and the panel's background is `--bg`.
 
 ```css
 .eb-shell { container: eb-shell / inline-size; height: 100%; }
 .eb-split { position: relative; height: 100%; }
-.eb-panel { display: flex; flex-direction: column; min-width: 0; min-height: 0; height: 100%; }
-.eb-panel-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 12px; border-bottom: 1px solid currentColor; }
-.eb-panel-title { font-weight: 600; overflow-wrap: anywhere; }
-.eb-panel-head .eb-fb { font: inherit; cursor: pointer; }   /* the "Close" is a Crew Btn when the page has one (board-design) */
+.eb-panel { display: flex; flex-direction: column; min-width: 0; min-height: 0; height: 100%; background: var(--bg, transparent); }
+.eb-panel-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 0 8px; min-height: 40px; background: var(--bg-elevated, transparent); border-bottom: 1px solid var(--border, currentColor); }
+.eb-panel-title { font-size: 11.5px; font-weight: 600; overflow-wrap: anywhere; }
+.eb-panel-head button.eb-fb { font: inherit; cursor: pointer; }   /* the "Close" is a Crew Btn when the page has one (board-design); the rule is for the fallback only */
 .eb-panel-body { flex: 1 1 0; min-height: 0; }
 .eb-card[data-open='true'] { border-color: currentColor; box-shadow: 0 0 0 1px currentColor; }
 .eb-chat-open { margin-left: 8px; font-size: 0.85em; font-weight: 600; }
@@ -131,7 +132,7 @@ All new rules use `currentColor` or no colour, and none removes an outline.
 @container eb-shell (min-width: 1000px) {
   .eb-shell[data-panel='open'] .eb-split { display: flex; }
   .eb-shell[data-panel='open'] .eb-root { visibility: visible; flex: 1 1 0; min-width: 0; }
-  .eb-shell[data-panel='open'] .eb-panel { position: static; flex: 0 0 clamp(380px, 40%, 640px); border-left: 1px solid currentColor; }
+  .eb-shell[data-panel='open'] .eb-panel { position: static; flex: 0 0 clamp(380px, 40%, 640px); border-left: 1px solid var(--border, currentColor); }
 }
 @supports not (container-type: inline-size) {
   @media (min-width: 1000px) { /* the same three rules */ }

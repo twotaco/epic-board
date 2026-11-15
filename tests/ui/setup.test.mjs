@@ -356,3 +356,96 @@ test('renderSetupView: a ticked folder shows a text input; an unticked one does 
   assert.equal(textInputs.length, 1, 'one text input for the ticked folder')
   assert.equal(textInputs[0].props.value, 'My Project')
 })
+
+// ---- Board design, group 3: the Projects view with a kit ----
+
+const Btn = () => null
+const KIT = { Btn }
+// The buttons of a tree, whether they are native or a Btn.
+const pressables = (tree) => findAll(tree, (n) => n.type === 'button' || n.type === Btn)
+const FOLDERS = [{ id: 'f1', name: 'Alpha', project_dir: '/a/alpha' }, { id: 'f2', name: 'Beta', project_dir: '/b/beta' }]
+const readyState = (over = {}) => ({
+  ...initialSetup, phase: 'ready', folders: FOLDERS, checks: { f1: true, f2: false }, names: { f1: 'Alpha', f2: '' }, setupInfo: null, ...over,
+})
+const classOf = (node) => String(node.props.className ?? '').split(' ')
+
+test('the folder row: label with the checkbox and the name, the directory as text, the name field only when ticked', () => {
+  for (const kit of [{}, KIT]) {
+    const tree = renderSetupView(h, readyState(), {}, kit)
+    const rows = findAll(tree, (n) => n.type === 'li')
+    assert.deepEqual(rows.map((row) => row.props.className), ['eb-folder', 'eb-folder'])
+    const [first, second] = rows
+    assert.deepEqual(first.children.map((node) => node.props.className), ['eb-folder-label', 'eb-folder-dir', 'eb-folder-name'])
+    assert.deepEqual(second.children.map((node) => node.props.className), ['eb-folder-label', 'eb-folder-dir'])
+    assert.deepEqual(first.children[0].children.map((node) => node.type ?? node), ['input', 'Alpha'])
+    assert.deepEqual(first.children[0].children[0].props.type, 'checkbox')
+    assert.deepEqual(first.children[1].children, ['/a/alpha'])
+    const field = first.children[2]
+    assert.deepEqual([field.type, field.props.type, field.props['aria-label'], field.props.placeholder], ['input', 'text', 'Name for Alpha', 'Alpha'])
+  }
+})
+
+test('Save is primary and not busy, Cancel is plain, both in one div.eb-setup-actions, and with no kit they are button.eb-fb', () => {
+  const calls = []
+  const actions = { saveSetup: () => calls.push('save'), closeSetup: () => calls.push('cancel') }
+  const tree = renderSetupView(h, readyState(), actions, KIT)
+  const [box] = findAll(tree, (n) => n.props.className === 'eb-setup-actions')
+  assert.deepEqual(box.children.map((node) => [node.type === Btn, textOf(node)]), [[true, 'Save'], [true, 'Cancel']])
+  const [save, cancel] = box.children
+  assert.deepEqual(Object.keys(save.props).sort(), ['disabled', 'onClick', 'primary', 'type'])
+  assert.deepEqual([save.props.primary, save.props.disabled, save.props.busy], [true, false, undefined])
+  assert.deepEqual(Object.keys(cancel.props).sort(), ['onClick', 'type'])
+  save.props.onClick()
+  cancel.props.onClick()
+  assert.deepEqual(calls, ['save', 'cancel'])
+  const nothing = renderSetupView(h, readyState({ checks: {} }), actions, KIT)
+  assert.equal(findAll(nothing, (n) => n.type === Btn)[0].props.disabled, true)
+  const saving = renderSetupView(h, readyState({ phase: 'saving' }), actions, KIT)
+  assert.deepEqual(pressables(saving).map((node) => [textOf(node), node.props.disabled, node.props.busy]), [['Saving…', true, undefined]])
+  const plain = renderSetupView(h, readyState(), actions, {})
+  assert.deepEqual(buttons(plain).map((node) => [textOf(node), node.props.className]), [['Save', 'eb-fb'], ['Cancel', 'eb-fb']])
+})
+
+test('Try again and Close are plain in every phase, with a kit and without', () => {
+  const phases = [
+    [{ ...initialSetup, phase: 'opening' }, ['Close']],
+    [{ ...initialSetup, phase: 'error', saveError: 'Oops' }, ['Try again', 'Close']],
+    [{ ...initialSetup, phase: 'ready', folders: [] }, ['Close']],
+  ]
+  for (const [state, labels] of phases) {
+    const withKit = pressables(renderSetupView(h, state, {}, KIT))
+    assert.deepEqual(withKit.map(textOf), labels)
+    assert.ok(withKit.every((node) => node.type === Btn && node.props.primary === undefined && node.props.type === 'button'))
+    const without = buttons(renderSetupView(h, state, {}, {}))
+    assert.deepEqual(without.map(textOf), labels)
+    assert.ok(without.every((node) => node.props.className === 'eb-fb'))
+  }
+})
+
+test('the three notices keep the role status, take eb-notice (and eb-notice-error for the errors), and are no alert', () => {
+  const config = readyState({ setupInfo: { source: 'saved', config_has_projects: true, projects: [] } })
+  const cases = [
+    [config, ['eb-notice']],
+    [readyState({ saveError: 'Could not save' }), ['eb-notice', 'eb-notice-error']],
+    [{ ...initialSetup, phase: 'error', saveError: 'Could not read' }, ['eb-notice', 'eb-notice-error']],
+  ]
+  for (const kit of [{}, KIT]) {
+    for (const [state, classes] of cases) {
+      const tree = renderSetupView(h, state, {}, kit)
+      const notices = findAll(tree, (n) => classOf(n).includes('eb-notice'))
+      assert.equal(notices.length, 1)
+      assert.deepEqual([notices[0].type, notices[0].props.role, classOf(notices[0])], ['p', 'status', classes])
+      assert.equal(findAll(tree, (n) => n.props.role === 'alert').length, 0)
+    }
+  }
+})
+
+test('the Projects view adds no heading and no ErrorNotice, with every kit component present', () => {
+  const kit = Object.fromEntries(['Btn', 'Card', 'CardTitle', 'Badge', 'PageHeader', 'EmptyState', 'ErrorNotice', 'Select'].map((name) => [name, () => null]))
+  for (const state of [readyState({ saveError: 'x' }), { ...initialSetup, phase: 'error', saveError: 'x' }, { ...initialSetup, phase: 'opening' }]) {
+    const tree = renderSetupView(h, state, {}, kit)
+    assert.equal(findAll(tree, (n) => /^h[1-6]$/.test(String(n.type))).length, 0)
+    assert.equal(findAll(tree, (n) => n.type === kit.ErrorNotice).length, 0)
+    assert.equal(findAll(tree, (n) => [kit.Card, kit.Badge, kit.Select].includes(n.type)).length, 0)
+  }
+})
