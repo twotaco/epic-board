@@ -128,14 +128,14 @@ Group 1 is all backend and changes nothing the page uses except an added `id` on
     - Run `python3 -m unittest discover -s tests -t .` and `node --test tests/ui/*.test.mjs` and report the counts run, passed and skipped for each
     - _Requirements: 1.3, 2.1, 2.2, 2.3, 2.4, 4.6, 6.7, 6.8, 7.1, 8.4, 9.1, 9.2, 9.3, 9.4, 9.5, 9.6_
 
-- [ ] 4. Check it works end to end
+- [x] 4. Check it works end to end
   - [x] 4.1 Run the backend on throwaway data
     - Start `backend/server.py` with `PORT`, `EPIC_BOARD_REPOSITORY` set to a throwaway clone, `EPIC_BOARD_FOLDER` set to a made-up id, `KIROCREW_HOME` set to a temporary folder and `KIROCREW_PROXY_SECRET` set to a test value; sign each request with the documented rule using a few lines of Python
     - Check: `GET /chats` is empty and the folder is reported; `POST /chats` for a planned card with no spec returns the no-spec brief, and for a card with a spec returns the with-spec brief; the file `chats.json` appears in `<KIROCREW_HOME>/apps/epic-board/data/` as `reserved`; `started` makes it `started`; a second `POST /chats` for that card is 409 `chat_exists`; a Done card is 409 `card_done`; an unknown id is 409 `card_not_found`; `DELETE` removes the record; stopping and starting the backend keeps the records
     - Check the refusals: no signature, a stale signature and a wrong signature answer 401; no secret answers 503; an unreadable `chats.json` answers 500 `chats_unreadable` and the file is unchanged; `plan` and `health` still answer unsigned
     - Do not change this repository's own `config.json`, and read nothing from the real Crew data folder
     - _Requirements: 1.1, 1.4, 3.2, 3.3, 4.2, 5.1, 5.2, 5.3, 5.4, 5.5, 5.6, 5.7_
-  - [ ] 4.2 Install the app in Kiro Crew and check the page (done by you in the app)
+  - [x] 4.2 Install the app in Kiro Crew and check the page (done by you in the app)
     - Install the app on a throwaway project with its own git remote, set `EPIC_BOARD_REPOSITORY`, and set the Crew folder id (`EPIC_BOARD_FOLDER` or `folder_id` in `config.json`) to a Crew folder whose project is that checkout (the ids come from `GET /api/chat/folders`)
     - **Check that the board receives every chat's row and keeps only the keys in `chats.json`, and never shows another chat's preview.** In the page's network log, open the answer of `GET /api/chat/slots`: it holds a row for every chat you have open, not only the ones the board started. Confirm that the board's cards show only the chats listed in `chats.json`, that no other chat's preview or title appears anywhere on the page, and that the page sends no request about any chat whose key is not in `chats.json`
     - **Check that `/chat?sid=` opens our chat.** Click a started card and a Done card's chat, and confirm each opens the right chat in the host; try the keyboard (Tab to the link, Enter) and the browser's back button
@@ -147,6 +147,7 @@ Group 1 is all backend and changes nothing the page uses except an added `id` on
     - Check the host details the design still leaves open: the backend receives `KIROCREW_PROXY_SECRET` and a valid v1 `X-KiroCrew-Proxy` on the page's `chats` requests (starting works); the data folder is writable by the backend (the record survives a backend restart)
     - Check light and dark themes, the focus ring on every new control, and that the plan keeps updating while a chat read fails (stop the gateway's chat routes or block them) and the other way round
     - _Requirements: 1.3, 1.4, 2.1, 2.2, 2.3, 4.1, 4.3, 4.4, 4.5, 4.7, 4.9, 5.3, 5.7, 6.1, 6.2, 6.4, 6.6, 7.1, 7.2, 8.1, 8.2, 8.3, 8.4, 8.5, 9.1, 9.3, 9.6_
+    - _Checked on the Crew host on 15 November 2026. Checked on the epic-board project itself, not a throwaway one. Escape did nothing straight after a mouse click, because focus stayed on the card; fixed by moving focus to "Start" (Requirement 2, criterion 3). Not reproducible on this host, covered by tests: a failed brief send. The bullet on the four states and "Idle" was replaced by task 6.5._
 
 - [x] 5. Save the chat before its brief is sent
   - [x] 5.1 Change the order of `startStory` in `ui/index.mjs` and add `sendBrief` and `retryBrief`
@@ -202,11 +203,17 @@ Group 1 is all backend and changes nothing the page uses except an added `id` on
   - [x] 6.4 Run the tests
     - Run `python3 -m unittest discover -s tests -t .` and `node --test tests/ui/*.test.mjs` and report the counts run, passed and skipped for each
     - _Requirements: 6.1, 6.2, 6.3, 6.4, 6.5, 8.1_
-  - [ ] 6.5 Check the six states on a real conductor (done by you in the app)
+  - [x] 6.5 Check the six states on a real conductor (done by you in the app)
     - With workers running: Working, though the conductor's own chat is idle; a worker waiting for an approval: Needs you on the card; a stalled ledger item: Stalled; an open pull request: "Review #N" linking to it, and "Checks failed #N" when its checks failed; none of these: Your turn
     - Confirm in the network log that the list read is `GET /api/chat/slots?crew=all`, that it holds the workers' rows, and that no worker's text appears on the page
     - Confirm that `source_links` carries `state` (and `ci`) for the app's token on a private repository. When it does not, the card shows Your turn where it should show Review
     - _Requirements: 6.1, 6.2, 6.4_
+    - _Checked on the Crew host on 15 November 2026. Seen: Working while only a worker ran, Needs you, Review #33 linking to its pull request, Your turn, and the list read `GET /api/chat/slots?crew=all` with no worker text on the page. Not reproducible on this host, covered by tests: Checks failed #N (epic-board has no CI), Stalled, Interrupted, and `source_links` on a private repository (epic-board is public)._
+
+- [x] 7. Put focus on "Start" when the question opens
+  - The question's "Start" button carries `data-eb-start` with its card id, and `createBoard` focuses it when `ui.asking` changes, so that Escape closes the question straight after a mouse click
+  - `tests/ui/board.test.mjs`: opening the question focuses this card's Start and no other card's, and Escape then closes it and returns focus to the card
+  - _Requirements: 2.3_
 
 ## Notes
 

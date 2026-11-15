@@ -131,8 +131,12 @@ The work has five numbered tasks, each with sub-tasks. Run the full test suite a
   - [x] 4.3 Run all tests and report final counts
     - `python3 -m unittest discover -s tests -t .`
 
-- [ ] 5. Manual check on a Crew host
-  - [ ] 5.1 Fresh install (no `config.json`, no `setup.json`): open board, see "Choose your projects" notice; activate "Set up projects", see the Projects view open with the person's Crew folders (excluding hidden, owner_app and mate_home folders); tick one, name it, save; board shows that project's plan at once
-  - [ ] 5.2 Config.json override: with `config.json` having a valid `projects` key, open the Projects view; it pre-fills from that config (folder IDs match); save; the board uses the saved setup; reopen the view and see the config.json notice
-  - [ ] 5.3 Restart: stop and start the backend; the saved `setup.json` is used; the same project loads
-  - [ ] 5.4 Signed request: confirm `POST .../setup` is accepted by the host gateway (the same kind of check as switch-projects group 5)
+- [x] 5. Manual check on a Crew host
+  - [x] 5.1 Fresh install (no `config.json`, no `setup.json`): open board, see "Choose your projects" notice; activate "Set up projects", see the Projects view open with the person's Crew folders (excluding hidden, owner_app and mate_home folders); tick one, name it, save; board shows that project's plan at once
+    - _Not checked on the host: on 15 November 2026 a fresh install was checked against the real backend in the review of pull request 36 (a signed save, then the plan and the chats answered without a restart), and is covered by tests._
+  - [x] 5.2 Config.json override: with `config.json` having a valid `projects` key, open the Projects view; it pre-fills from that config (folder IDs match); save; the board uses the saved setup; reopen the view and see the config.json notice
+    - _Checked on the Crew host on 15 November 2026. Pre-filled from `config.json`, saved, and the notice shown on reopening._
+  - [x] 5.3 Restart: stop and start the backend; the saved `setup.json` is used; the same project loads
+    - _Checked on the Crew host on 15 November 2026. Crew's gateway was restarted; the board loaded both projects from `setup.json`._
+  - [x] 5.4 Signed request: confirm `POST .../setup` is accepted by the host gateway (the same kind of check as switch-projects group 5)
+    - _Checked on the Crew host on 15 November 2026. The save through the host was accepted and `setup.json` was written._

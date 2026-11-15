@@ -27,20 +27,25 @@ On the machine that runs Kiro Crew:
    git clone https://github.com/twotaco/epic-board.git ~/epic-board
    ```
 
-2. Add a `config.json` in that folder (see [Configure](#configure)).
-3. Install it:
+2. Install it:
 
    ```sh
    kirocrew app install ~/epic-board
    ```
 
-4. Enable **Epic Board** in Crew's App Store. It appears in the sidebar under Apps.
+3. Enable **Epic Board** in Crew's App Store, and approve the permissions it asks for. It appears in the sidebar under Apps.
 
-## Configure
+## Choose your projects
 
-Each project needs a clone of its repository on the Crew machine, with an `origin` remote. The board reads the plan from `origin`'s main branch and checks for changes every minute.
+Each project needs a clone of its repository on the Crew machine, with an `origin` remote, and a Crew folder whose project directory is that clone. Make the folder in Crew's Sessions view, grouped by folder. The board reads the plan from `origin`'s main branch and checks for changes every minute, and a conductor you start from a card is created in the project's folder, so it works in the right repository.
 
-Each project also names a Crew folder whose project directory is that clone. A conductor you start from a card is created in that folder, so it works in the right repository.
+Then open the board and press **Projects**. Tick the Crew folders you want on the board, give each project a name, and press **Save**. The board switches to them at once, and remembers them.
+
+On a fresh install the board shows "Choose your projects" and takes you to the same place.
+
+## Configure with a file
+
+You can also list projects in a `config.json` in the app's folder. The board uses it until you save from **Projects**; after that, the saved choice wins.
 
 One project:
 
@@ -62,17 +67,13 @@ Several projects:
 }
 ```
 
-Make the folder in Crew's Sessions view, grouped by folder, and set its project directory to the clone. To find its id, look in `~/.kiro/crew/folders.json` on the Crew machine: each folder is listed with its `id`, `name` and `project_dir`.
-
-After changing `config.json`, apply it:
+A folder's id is in `~/.kiro/crew/folders.json` on the Crew machine, with its `name` and `project_dir`. After changing `config.json`, apply it:
 
 ```sh
 kirocrew app update epic-board --source ~/epic-board
 ```
 
 `config.json` holds paths on your machine, so it is ignored by git and never committed.
-
-A coming story, "Set up projects", replaces this step: you will pick your projects from your Crew folders on the board itself.
 
 ## Development
 
