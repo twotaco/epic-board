@@ -870,6 +870,11 @@ export const STYLE = `
 .eb-chat-state a { position: relative; z-index: 1; }
 .eb-chat-note { margin: 6px 0 0 0; }
 .eb-question, .eb-chat-controls { position: relative; z-index: 1; margin-top: 8px; }
+/* Crew's Card has the class card-glow, whose rule '.card-glow > * { position: relative; z-index: 1 }' makes every
+   child of the card its own positioned box. The stretched link would then cover only the title. Inside a card the
+   children stay static, so the link covers the whole card, and the card's own controls stay above it. */
+.eb-root .eb-card > * { position: static; z-index: auto; }
+.eb-root .eb-card > .eb-question, .eb-root .eb-card > .eb-chat-controls { position: relative; z-index: 1; }
 .eb-question p, .eb-chat-controls p { margin: 6px 0 0 0; }
 .eb-question button, .eb-chat-controls button { margin-top: 6px; }
 .eb-question button.eb-fb, .eb-chat-controls button.eb-fb { font: inherit; cursor: pointer; }
