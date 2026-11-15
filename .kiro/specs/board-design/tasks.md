@@ -116,8 +116,8 @@ The projects parts (Requirement 6) are written against the code that "Switch pro
     - Run `python3 -m unittest discover -s tests -t .` and `node --test tests/ui/*.test.mjs` and report the counts run, passed and skipped for each
     - _Requirements: 1.1, 1.2, 1.3, 1.4, 1.6, 3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 3.7, 3.8, 3.9, 6.2, 6.3, 6.4, 6.5, 6.8, 6.9, 6.10, 6.11_
 
-- [ ] 4. Check it on a Crew host
-  - [ ] 4.1 Install the app in Kiro Crew and check the look (done by you in the app)
+- [x] 4. Check it on a Crew host
+  - [x] 4.1 Install the app in Kiro Crew and check the look (done by you in the app)
     - Use Crew 0.12.2 or later and the throwaway project of the start spec's task 4.2, with a plan that has cards in all three columns, a long description, a story with a chat in each of the four states, an empty column and a story with no spec
     - Check the components: the header, the cards, the badges, the buttons and the empty and error states look like Crew's own; open the browser's inspector and confirm they are Crew's elements (`card-glow`, `animate-rise` and the like) and not the page's fallbacks
     - Check the column headers beside Crew's Sessions board: dot, capitals, count, bar, box and radius match; the dot colours read well in both themes (design, Open Question 3)
@@ -134,6 +134,7 @@ The projects parts (Requirement 6) are written against the code that "Switch pro
     - Check the fallbacks: in the console, delete one component (and `Select`) from `window.__kirocrew_modules['@kirocrew/ui']` before the page loads (each in turn, and the whole module), and confirm that part is drawn as it was and the rest of the page still works
     - Check the open questions of the design that only the host can answer, and write the owner's answers into the design
     - _Requirements: 1.1, 1.2, 1.3, 2.1, 2.2, 2.3, 2.5, 3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 3.9, 4.1, 4.2, 4.3, 4.4, 5.1, 5.3, 5.5, 6.1, 6.2, 6.3, 6.4, 6.5, 6.6, 6.7, 6.9, 6.10, 6.11_
+    - _Checked on the Crew host on 15 November 2026, on epic-board itself, beside Crew's Sessions board: the header, the column headers, the cards, the badges, the buttons, both dropdowns in one row, the Projects panel and the chat panel's frame look like Crew's own, in light and dark. The owner's answers to the open questions are in the design. Not checked on the host, covered by tests: the fallbacks with components deleted in the console, the accessibility tree, the header's alignment at 700, 800 and 1,200 pixels, the load and save error notices, and the Checks failed and Stalled badges. Found on the host: the Projects view's config line still used the page's old words; it now uses the setup spec's (set-up-projects, Requirement 4, criterion 3)._
 
 ## Notes
 

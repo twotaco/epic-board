@@ -249,3 +249,15 @@ For the owner, with the choice made in this spec for each.
 9. **The notice look.** Crew 0.12.2 exports no neutral notice, so the neutral tone is the page's own: `--border` and `--bg-elevated`, in the geometry of `ErrorNotice`. The error tone uses `--danger` for the border, where `ErrorNotice` has `border-danger/40`, because the style sheet may not use `color-mix()` or an alpha of its own. The border may read stronger than Crew's. To be seen on the host.
 10. **The name field is native.** `Input` is exported by `@kirocrew/ui` and would make the Projects view's name field look like Crew's own fields. The request names `Btn` and does not name `Input`, so this spec leaves the field native (Requirement 6, criterion 3). Using `Input` would add it as an eighth Kit_Component with a fallback.
 11. **The panel's colours.** Crew has no panel component with a title and a close button, so the head is built from its side panel's strip and the `PanelSectionHeader` label. The owner has decided both choices. The title leaves out the label's muted colour and takes the host's text colour. The background is `--bg`, the colour of Crew's side panel, because the chat column's own background was not found in the sources read (the column takes the shell's). The `--bg` choice is checked on the host next to a Crew chat in task 4.1; if the chat column differs, the owner decides again.
+
+### The owner's answers, after the host check (15 November 2026)
+
+1. The card's inset: keep `Card`'s own.
+2. `CardTitle` as an `h3` with `role="presentation"`: keep.
+3. The dot colours: they read well; keep.
+4. The state badges: keep. On a Done card the state is noise; a later change to the start spec shows it there only for Needs you and Working.
+6. The page gutter: the header's left edge lines up with the columns; keep.
+7. The column and the card share a background: the cards stand apart; keep.
+9. The notice look: the neutral tone reads well; keep.
+10. The name field: on the host the native field looks like plain text, not like a field. Use Crew's `Input`, in a later change.
+11. The panel's colours: the head, the edge and the background match Crew's side panel; keep.

@@ -327,7 +327,9 @@ test('renderSetupView: config.json notice shown when source=saved and config_has
   }
   const tree = renderSetupView(h, state, {})
   const statusNodes = findAll(tree, (n) => n.props.role === 'status')
-  assert.ok(statusNodes.some((n) => allText(n).includes('config.json')), 'config.json notice shown')
+  // The exact words of set-up-projects, Requirement 4, criterion 3.
+  assert.ok(statusNodes.some((n) => allText(n) === 'config.json also has a projects list; this saved setup takes priority.'),
+    'config.json notice shown, in the words of the spec')
 })
 
 test('renderSetupView: config.json notice NOT shown when source is not saved', () => {
