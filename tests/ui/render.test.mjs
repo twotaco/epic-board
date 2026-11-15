@@ -1193,6 +1193,18 @@ test('a brief that was not sent: the card keeps its link and state, shows the te
   assert.deepEqual(calls, [['sendBrief', 'k1']])
 })
 
+test('inside Crew\'s Card the stretched link still covers the whole card (card-glow makes children positioned)', () => {
+  // Crew 0.12.2: '.card-glow>*{position:relative;z-index:1}'. Ours must win on specificity (two classes over one).
+  assert.match(blockBody(STYLE, '.eb-root .eb-card > * ') ?? '', /position:\s*static/)
+  assert.match(blockBody(STYLE, '.eb-root .eb-card > * ') ?? '', /z-index:\s*auto/)
+  // The card's own controls stay above the link.
+  const controls = blockBody(STYLE, '.eb-root .eb-card > .eb-question, .eb-root .eb-card > .eb-chat-controls') ?? ''
+  assert.match(controls, /position:\s*relative/)
+  assert.match(controls, /z-index:\s*1/)
+  // The static rule comes before the controls rule, so the controls win.
+  assert.ok(STYLE.indexOf('.eb-root .eb-card > * ') < STYLE.indexOf('.eb-root .eb-card > .eb-question'))
+})
+
 test('the button of a failed brief sits in the controls layer above the stretched link', () => {
   const li = theCard(renderWith(briefView({ kind: 'failed', reason: 'x' })))
   const controls = findAll(li, (n) => n.props.className === 'eb-chat-controls')
