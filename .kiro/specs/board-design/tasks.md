@@ -6,7 +6,7 @@ The work is four task groups. Each group is one pull request on its own branch, 
 
 Start this story after "Work in the chat" (`.kiro/specs/work-in-the-chat/`) has been built and has landed on main, because both change the card's markup and the panel's button and mark, and this story's tasks are written against the code that story leaves.
 
-Group 1 is the kit lookup and the fallback marker, with no change to what the page draws. Group 2 draws the header, the column headers and the empty and error states, and with them the filter row, the header's "Projects" button and the first-run notice. Group 3 draws the cards, the badges and the buttons, and with them the Projects panel. Group 4 checks the whole on a Crew host, which is the only place the look, the tokens and the themes can be confirmed.
+Group 1 is the kit lookup and the fallback marker, with no change to what the page draws. Group 2 draws the header, the column headers and the empty and error states, and with them the filter row, the header's "Projects" button and the first-run notice. Group 3 draws the cards, the badges and the buttons, and with them the Projects panel and the look of the panel for the chat and the Projects view alike. Group 4 checks the whole on a Crew host, which is the only place the look, the tokens and the themes can be confirmed.
 
 The projects parts (Requirement 6) are written against the code that "Switch projects" and "Set up projects" left on main: `renderProjects`, `renderFilters`, `renderSetupView`, `renderPanel`, the `eb-notice` markup and the `data-eb-setup-btn` button. Where a task names a function, read it first: if a name has changed, use the new name and keep the behaviour.
 
@@ -98,9 +98,23 @@ The projects parts (Requirement 6) are written against the code that "Switch pro
     - `createBoard` with a fake kit: the panel opens from the "Projects" button, and "Close" and "Cancel" close it and put focus back on that button; a save, a failed save and a retry of the folder read behave as before; the heading structure is the same as with no panel
     - Update `buttons(tree)` and the other finders in `tests/ui/setup.test.mjs` that assume a `button` element, as "Edits to earlier specs and checks" lists
     - _Requirements: 6.2, 6.3, 6.4, 6.5, 6.8_
-  - [ ] 3.8 Run the tests
+  - [ ] 3.8 Give the panel Crew's look in `STYLE` and `renderPanel`
+    - Applies to the panel with a chat and with the Projects view alike. The markup of `renderPanel` does not change (`aside.eb-panel`, `div.eb-panel-head` with `span.eb-panel-title` and the "Close", `div.eb-panel-body`); read `STYLE` and `renderPanel` first, and use the rows "Panel head", "Panel title", "Panel edge and background" and "Panel body" of the design's table
+    - Check the sources at `v0.12.2` before writing the values: `SidePanel.tsx` (the strip and the root) and `PanelSectionHeader` in `components/ui.tsx`; `ChatPanel` in `app-sdk/ChatPanel.tsx`
+    - `.eb-panel-head`: `var(--bg-elevated)` background, `var(--border)` bottom border in place of `currentColor`, `padding: 0 8px`, `min-height: 40px`; `.eb-panel-title`: 11.5px, weight 600, no colour rule
+    - `.eb-panel`: `background: var(--bg)`. Replace the `currentColor` left border with `var(--border)` in both copies of the beside-the-board rule (the `@container` rule and the `@supports not` copy), and add none where the panel is over the board
+    - `.eb-panel-body` keeps `flex: 1 1 0; min-height: 0` and gets no other rule; add no rule that selects inside it, and give `ChatPanel` only `slotKey` and `conversationOnly`, as today. The embedded chat stays as Crew draws it
+    - The Projects view body takes `padding: 8px`, so it lines up with the head (the row "Projects view body")
+    - Edit the chat design's paragraph on the panel's look in place to match, as "Edits to earlier specs and checks" says; tick nothing in that spec
+    - _Requirements: 5.1, 5.4, 5.5, 6.2, 6.9, 6.10, 6.11_
+  - [ ] 3.9 Check the panel in `tests/ui/render.test.mjs` and `tests/ui/board.test.mjs`
+    - `STYLE` scans: the head has the elevated background and the `var(--border)` bottom border; the left border is `var(--border)` and appears only in the two beside-the-board rules; the panel's background is `var(--bg)`; every colour is `var(--token, currentColor)`; no `currentColor` border is left on `.eb-panel` or `.eb-panel-head`; no `outline: none`
+    - No rule in `STYLE` selects a descendant of `.eb-panel-body`, and the sizes of the head and the title are those of the table and no others
+    - `renderPanel` draws the same elements for a chat and for the Projects view, with "Close" a plain `Btn` and with no kit; `createBoard` gives `ChatPanel` exactly `slotKey` and `conversationOnly`, and the chat and the Projects panel open, close and take focus as before
+    - _Requirements: 5.1, 5.4, 5.5, 6.2, 6.9, 6.10, 6.11_
+  - [ ] 3.10 Run the tests
     - Run `python3 -m unittest discover -s tests -t .` and `node --test tests/ui/*.test.mjs` and report the counts run, passed and skipped for each
-    - _Requirements: 1.1, 1.2, 1.3, 1.4, 1.6, 3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 3.7, 3.8, 3.9, 6.2, 6.3, 6.4, 6.5, 6.8_
+    - _Requirements: 1.1, 1.2, 1.3, 1.4, 1.6, 3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 3.7, 3.8, 3.9, 6.2, 6.3, 6.4, 6.5, 6.8, 6.9, 6.10, 6.11_
 
 - [ ] 4. Check it on a Crew host
   - [ ] 4.1 Install the app in Kiro Crew and check the look (done by you in the app)
@@ -113,12 +127,13 @@ The projects parts (Requirement 6) are written against the code that "Switch pro
     - Check the heading structure in the browser's accessibility tree: one `h1`, three `h2`, `h3` for the groups, and no heading for a card (Open Question 2); check that no `alert` appears except for the two errors
     - Check the projects parts with two projects in `config.json` or a saved setup: the Project dropdown and the epic dropdown are both Crew's `Select`, in one row, the same height, with the 8px gap, and the open list of each is themed; with one project only the epic dropdown shows
     - Check the Projects panel: it opens as the chat's panel does (beside the board from 1,000 pixels, over it below), each folder is a row with checkbox, name and directory, the directory is quieter and monospace like a card's spec folder, a ticked folder shows its name field; "Save" is the accent button, "Cancel" is plain, there is space between them, and the focus ring shows on both, the checkbox and the field
+    - Check the panel for a chat and for the Projects view next to Crew's own side panel and chat column: the head is an elevated bar with a line under it and the title in the section-label size and weight, "Close" is a plain Crew button, the left edge is a `--border` line beside the board, and the background matches the chat column in light and dark and one other palette (design, Open Question 11); confirm the embedded chat is exactly as Crew draws it, with no rule of the page inside it
     - Check the notices: the first-run notice with "Set up projects" as the accent button, the config line when `config.json` also has projects, a load error (make the folder read fail) and a save error (save a path that is not a checkout), all in one look, in light and dark and one other palette; the neutral tone is readable and the error tone's border is not too strong (design, Open Question 9); confirm in the accessibility tree that none of them is an `alert`
     - Check the header's "Projects" button is a plain Crew button beside "Checking for updates…", and that the columns still do not move when the text appears
     - Check the themes: light and dark, and one other Crew palette, with no clash and no unreadable text, and the focus ring on the card's control, "Start", "Cancel" and "Close"
     - Check the fallbacks: in the console, delete one component (and `Select`) from `window.__kirocrew_modules['@kirocrew/ui']` before the page loads (each in turn, and the whole module), and confirm that part is drawn as it was and the rest of the page still works
     - Check the open questions of the design that only the host can answer, and write the owner's answers into the design
-    - _Requirements: 1.1, 1.2, 1.3, 2.1, 2.2, 2.3, 2.5, 3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 3.9, 4.1, 4.2, 4.3, 4.4, 5.1, 5.3, 5.5, 6.1, 6.2, 6.3, 6.4, 6.5, 6.6, 6.7_
+    - _Requirements: 1.1, 1.2, 1.3, 2.1, 2.2, 2.3, 2.5, 3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 3.9, 4.1, 4.2, 4.3, 4.4, 5.1, 5.3, 5.5, 6.1, 6.2, 6.3, 6.4, 6.5, 6.6, 6.7, 6.9, 6.10, 6.11_
 
 ## Notes
 
@@ -141,9 +156,9 @@ The projects parts (Requirement 6) are written against the code that "Switch pro
     { "id": 6, "tasks": ["2.4"] },
     { "id": 7, "tasks": ["2.5"] },
     { "id": 8, "tasks": ["3.1"] },
-    { "id": 9, "tasks": ["3.2", "3.3", "3.4", "3.5", "3.6"] },
-    { "id": 10, "tasks": ["3.7"] },
-    { "id": 11, "tasks": ["3.8"] },
+    { "id": 9, "tasks": ["3.2", "3.3", "3.4", "3.5", "3.6", "3.8"] },
+    { "id": 10, "tasks": ["3.7", "3.9"] },
+    { "id": 11, "tasks": ["3.10"] },
     { "id": 12, "tasks": ["4.1"] }
   ]
 }
