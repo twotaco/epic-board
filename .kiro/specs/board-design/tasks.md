@@ -38,30 +38,30 @@ The projects parts (Requirement 6) are written against the code that "Switch pro
     - Run `python3 -m unittest discover -s tests -t .` and `node --test tests/ui/*.test.mjs` and report the counts run, passed and skipped for each
     - _Requirements: 1.1, 1.2, 1.3, 1.5, 5.1, 5.2, 5.5_
 
-- [ ] 2. Page: the header, the column headers and the empty and error states
-  - [ ] 2.1 Draw them in `ui/index.mjs`
+- [x] 2. Page: the header, the column headers and the empty and error states
+  - [x] 2.1 Draw them in `ui/index.mjs`
     - The header with `PageHeader` as the design's table gives it (the `h1` inside the title, the one-line subtitle, the always-present "Checking for updates…" in the actions), and the fallback header as it is
     - The column box, the header bar, `span.eb-dot` with `aria-hidden`, the name and the count, with the dot's colour by column key (`planned`, `in-progress`, `done` as `columnsOf` names them); the heading element and level stay; the group heading's look
     - The empty plan with `EmptyState` and the icon; the backend error and the unreachable state with `ErrorNotice` (message, and a footer with the code and the `settings` entries as `code` text), with no `askAgent`
     - The notices with the role `status`, "Loading…" and the disclosure keep their markup
     - _Requirements: 1.3, 2.1, 2.2, 2.3, 2.4, 2.5, 4.1, 4.2, 4.3, 4.4, 4.5, 4.6_
-  - [ ] 2.2 Check the markup in `tests/ui/render.test.mjs`
+  - [x] 2.2 Check the markup in `tests/ui/render.test.mjs`
     - With a fake kit and without: the header's props and subtitle text, the `visibility` slot, the column header's order and `aria-hidden`, the capitals by style and not by text, the heading levels in every view, the empty and error trees, the roles (`alert` only on the two errors, `status` on the rest), and that no component gets a prop the design does not name
     - Add the cases for a kit that has only some of the components
     - _Requirements: 1.2, 1.3, 1.4, 2.1, 2.2, 2.3, 2.4, 2.5, 4.1, 4.2, 4.3, 4.4, 4.5, 4.6_
-  - [ ] 2.3 Draw the filter row, the header's "Projects" button and the first-run notice in `ui/index.mjs`
+  - [x] 2.3 Draw the filter row, the header's "Projects" button and the first-run notice in `ui/index.mjs`
     - Check the props at `v0.12.2` before writing them: `Select` takes `options`, `optionLabels`, `value`, `onChange` and `aria-label` (`website/src/kirocrew-ui/Select.tsx`), and `Btn` takes `primary`, `danger`, `busy` and every button attribute (`website/src/components/ui.tsx`, re-exported by `kirocrew-ui/index.ts`); pass nothing else
     - `renderFilters`: both dropdowns are drawn through the one `Select` of `parts.Select`, each in its own `div.eb-filter`, project first, inside the one `div.eb-filters`, with the same five props and no `className`; with no `Select` both are the native `select` carrying `eb-fb`. Make `renderProjects` and `renderFilter` take their control from one small function so the two cannot drift
     - The header's "Projects" button as a plain `Btn` (`type`, `aria-expanded`, `data-eb-setup-btn`, `onClick`) in the `PageHeader` actions after "Checking for updates…", and as `button.eb-fb` in the fallback header; keep it in the states that draw it today, and add it to no other. The page draws it in the plan view only, while the setup spec's Requirement 2, criterion 6 says every state: report that gap to the owner, and do not close it in this story
     - The first-run notice: keep `div.eb-notice[role=status]` and the text "Choose your projects", and draw "Set up projects" as a `Btn` with `primary` (keeping `aria-label` and `aria-expanded`), or `button.eb-fb`
     - Draw the failed project list notice and the other `status` notices with the `eb-notice` class as they have it; they take the Notice_Style from `STYLE`
     - _Requirements: 6.1, 6.5, 6.6, 6.7, 6.8_
-  - [ ] 2.4 Check them in `tests/ui/render.test.mjs`, `tests/ui/board.test.mjs` and `tests/ui/projects.test.mjs`
+  - [x] 2.4 Check them in `tests/ui/render.test.mjs`, `tests/ui/board.test.mjs` and `tests/ui/projects.test.mjs`
     - Both dropdowns with a fake `Select`: exactly the five props, strings in `options`, the names in `optionLabels`, no `className`, the project first in the one row, the epic dropdown hidden where the filter spec hides it, and with no `Select` the two native selects with `eb-fb`
     - The "Projects" button with and without a kit: plain, in the actions after "Checking for updates…", present in the same states as with no kit, `aria-expanded` and `data-eb-setup-btn` on the element, and focus back on it when the view closes
     - The first-run notice: `status`, no `alert`, "Set up projects" `primary` with its accessible name, and the same with no kit; update the tests listed under "Edits to earlier specs and checks" that find these buttons as `button` elements
     - _Requirements: 6.1, 6.5, 6.6, 6.7, 6.8_
-  - [ ] 2.5 Run the tests
+  - [x] 2.5 Run the tests
     - Run `python3 -m unittest discover -s tests -t .` and `node --test tests/ui/*.test.mjs` and report the counts run, passed and skipped for each
     - _Requirements: 1.2, 1.3, 2.1, 2.2, 2.3, 2.4, 2.5, 4.1, 4.2, 4.3, 4.4, 4.5, 4.6, 6.1, 6.5, 6.6, 6.7, 6.8_
 

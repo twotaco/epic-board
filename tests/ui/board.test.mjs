@@ -162,7 +162,7 @@ const httpError = (status, error = null) => Object.assign(new Error(`API ${statu
 // dependencies changed; unmount runs every cleanup. `fetch` is routed by URL: the plan route to
 // `page.fetch` (what the plan tests use), the backend's chats routes to `page.chatFetch`. Crew's client
 // is `page.gateway`, or none with `api: null`.
-function mount({ hidden = false, api, storage, ChatPanel } = {}) {
+function mount({ hidden = false, api, storage, ChatPanel, kit } = {}) {
   const clock = makeClock()
   const planFetch = makeFetch()
   const chatFetch = makeFetch()
@@ -238,6 +238,7 @@ function mount({ hidden = false, api, storage, ChatPanel } = {}) {
     now: () => clock.now(),
     useAppApi: () => (api === undefined ? gateway : api),
     storage,
+    kit,
     Select: null,
   })
   function render() {
@@ -1351,6 +1352,68 @@ test('setup: opening focuses the panel, closing returns focus to the Projects bu
 
   click(page, 'Close')
   assert.deepEqual(focused, ['panel', 'setup-btn'], 'Projects button focused on close')
+})
+
+// ---- Board design: the header's Projects button and the first-run notice with a kit ----
+
+const fakeBtn = () => null
+const fakePageHeader = () => null
+const kitOf = () => ({ Btn: fakeBtn, PageHeader: fakePageHeader })
+// The fake PageHeader draws nothing, so its `actions` prop is where its buttons are.
+const setupButtons = (page) => [
+  ...findAll(page.tree(), (node) => node.type === fakePageHeader).flatMap((node) => node.props.actions ?? []),
+  ...findAll(page.tree(), (node) => true),
+].filter((node) => node.props?.['data-eb-setup-btn'] !== undefined)
+
+test('kit: the Projects button is a plain Btn in the PageHeader actions, after the checking text', async () => {
+  const page = mount({ kit: kitOf() })
+  await page.awaitProjects()
+  page.fetch.answer(0, 200, plan())
+  page.chatFetch.answer(0, 200, chatsAnswer([]))
+  await flush()
+  const [header] = findAll(page.tree(), (node) => node.type === fakePageHeader)
+  const [checking, projects] = header.props.actions
+  assert.equal(checking.props.className, 'eb-checking')
+  assert.equal(projects.type, fakeBtn)
+  assert.equal(projects.props.primary, undefined)
+  assert.equal(projects.props['aria-expanded'], 'false')
+  assert.deepEqual(setupButtons(page), [projects])
+})
+
+test('kit: the Projects button opens the view and focus goes back to it when the view closes', async () => {
+  const page = mount({ kit: kitOf() })
+  await page.awaitProjects()
+  page.fetch.answer(0, 200, plan())
+  page.chatFetch.answer(0, 200, chatsAnswer([]))
+  await flush()
+  const focused = []
+  page.document.panel = { focus: () => focused.push('panel') }
+  page.document.setupBtn = { focus: () => focused.push('setup-btn') }
+
+  setupButtons(page)[0].props.onClick()
+  await flush()
+  assert.deepEqual(focused, ['panel'])
+  assert.equal(setupButtons(page)[0].props['aria-expanded'], 'true')
+  page.gateway.answer('/api/chat/folders', [])
+  page.chatFetch.answer(1, 200, { source: 'config', config_has_projects: false, projects: [] })
+  await flush()
+  click(page, 'Close')
+  assert.deepEqual(focused, ['panel', 'setup-btn'])
+})
+
+test('kit: the first-run notice has a primary "Set up projects" that opens the view, and still no alert', async () => {
+  const page = mount({ kit: kitOf() })
+  await page.awaitProjects([])
+  const [notice] = findAll(page.tree(), (node) => node.props?.className === 'eb-notice')
+  assert.equal(notice.props.role, 'status')
+  const button = notice.children.find((node) => node.type === fakeBtn)
+  assert.equal(button.type, fakeBtn)
+  assert.equal(button.props.primary, true)
+  assert.equal(button.props['aria-label'], 'Set up projects')
+  assert.equal(findAll(page.tree(), (node) => node.props?.role === 'alert').length, 0)
+  button.props.onClick()
+  await flush()
+  assert.match(page.text(), /Loading/)
 })
 
 // ---- The default export ----

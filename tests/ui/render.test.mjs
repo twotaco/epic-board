@@ -403,7 +403,8 @@ test('a bar is drawn only with a fraction, and is hidden from assistive technolo
     }],
   })
   const tree = render(planView(plan))
-  const bars = findAll(tree, (node) => node.props['aria-hidden'] !== undefined)
+  // The column's status dot is aria-hidden too (board-design), so the bars are found by their class.
+  const bars = findAll(tree, (node) => node.props.className === 'eb-bar')
   assert.equal(bars.length, 2)
   for (const bar of bars) assert.equal(bar.props['aria-hidden'], 'true')
   const items = cardItems(tree)
@@ -761,8 +762,10 @@ test('STYLE stacks the columns, puts them side by side from 720px in a container
   // The wide rules come after the base rule, so they win.
   assert.ok(STYLE.indexOf('@container (min-width: 720px)') > STYLE.indexOf('.eb-columns {'))
   assert.ok(STYLE.indexOf('@supports not') > STYLE.indexOf('.eb-columns {'))
-  // The media queries are only inside fallbacks: the columns' (720px) and the panel's (1000px, work-in-the-chat).
-  assert.equal(STYLE.split('@media').length - 1, 2)
+  // The media queries inside fallbacks: the columns' (720px) and the panel's (1000px, work-in-the-chat). The third
+  // is the body's gutter from 768px, which matches Tailwind's `md` in PageHeader (board-design design, "Styles").
+  assert.equal(STYLE.split('@media').length - 1, 3)
+  assert.match(blockBody(STYLE, '@media (min-width: 768px)') ?? '', /\.eb-body\s*\{[^}]*padding:\s*0 24px/)
   assert.equal(STYLE.split('@supports not (container-type: inline-size)').length - 1, 2)
 })
 
@@ -1457,5 +1460,224 @@ test('STYLE: narrow covers the board with visibility hidden, wide sits beside it
     assert.match(body, /\.eb-split\s*\{[^}]*display:\s*flex/)
     assert.match(body, /\.eb-root\s*\{[^}]*visibility:\s*visible/)
     assert.match(body, /\.eb-panel\s*\{[^}]*position:\s*static[^}]*clamp\(380px, 40%, 640px\)/)
+  }
+})
+
+// ---- Board design, group 2: the header, the column headers, the empty and error states, the filter row ----
+
+// A fake Crew component: a function that draws nothing. The tree holds its props.
+const fake = () => () => null
+const FAKES = ['Btn', 'Card', 'CardTitle', 'Badge', 'PageHeader', 'EmptyState', 'ErrorNotice', 'Select']
+const fakeKit = (names = FAKES) => Object.fromEntries(names.map((name) => [name, fake()]))
+const renderKit = (view, kit) => renderBoard(h, view, {}, kit)
+// `key` is not a prop in React, so it is left out when the props are compared.
+const propsOf = (node) => Object.fromEntries(Object.entries(node.props).filter(([name]) => name !== 'key'))
+const ofType = (tree, type) => findAll(tree, (node) => node.type === type)
+const nativeSelects = (tree) => findAll(tree, (node) => node.type === 'select')
+const PROJECTS = { options: [{ key: 'a', label: 'Alpha' }, { key: 'b', label: 'Beta' }], currentId: 'b' }
+
+test('the header with PageHeader: the title is the h1, the subtitle is one line, the actions are the checking text and a plain Projects button', () => {
+  for (const refreshing of [false, true]) {
+    const kit = fakeKit()
+    const view = planView(planBody({ refreshing }))
+    const tree = renderKit(view, kit)
+    const [header] = ofType(tree, kit.PageHeader)
+    assert.ok(header, 'PageHeader is drawn')
+    assert.deepEqual(Object.keys(header.props).sort(), ['actions', 'subtitle', 'title'])
+    assert.equal(header.props.title.type, `h${TITLE_LEVEL}`)
+    assert.equal(textOf(header.props.title), 'Epic Board')
+    assert.equal(header.props.subtitle, `main · ${COMMIT.slice(0, 7)} · Updated less than a minute ago`)
+    const [checking, projects] = header.props.actions
+    assert.equal(checking.props.className, 'eb-checking')
+    assert.equal(checking.props.style.visibility, refreshing ? 'visible' : 'hidden')
+    assert.equal(textOf(checking), 'Checking for updates…')
+    assert.equal(projects.type, kit.Btn)
+    assert.equal(projects.props.primary, undefined, 'the Projects button is plain')
+    assert.equal(projects.props['data-eb-setup-btn'], 'true')
+    assert.equal(projects.props.type, 'button')
+    assert.ok(['true', 'false'].includes(projects.props['aria-expanded']))
+    assert.equal(textOf(projects), 'Projects')
+    // Nothing of the header is drawn twice.
+    assert.equal(findAll(tree, (node) => node.props.className === 'eb-header').length, 0)
+    assert.equal(findAll(tree, (node) => node.type === `h${TITLE_LEVEL}`).length, 0, 'the h1 is a prop of PageHeader, drawn by the host')
+  }
+})
+
+test('the header with PageHeader: the other states draw the title alone and no Projects button', () => {
+  const kit = fakeKit()
+  for (const view of [loadingView(), unreachableView(), errorView(), { ...loadingView(), unconfigured: true }]) {
+    const tree = renderKit(view, kit)
+    const [header] = ofType(tree, kit.PageHeader)
+    assert.deepEqual(Object.keys(header.props), ['title'])
+    assert.equal(findAll(tree, (node) => node.props['data-eb-setup-btn'] !== undefined).length, 0)
+  }
+})
+
+test('the header without PageHeader is the earlier header, with a Btn or a native button for Projects', () => {
+  for (const kit of [{}, fakeKit(['Btn'])]) {
+    const tree = renderKit(planView(planBody()), kit)
+    const [header] = findAll(tree, (node) => node.props.className === 'eb-header')
+    assert.deepEqual(header.children.slice(0, 3).map((node) => node.props.className), ['eb-branch', 'eb-commit', 'eb-age'])
+    assert.equal(header.children[3].props.className, 'eb-checking')
+    const button = header.children[4]
+    assert.equal(button.props['data-eb-setup-btn'], 'true')
+    if (kit.Btn) assert.equal(button.type, kit.Btn)
+    else assert.deepEqual([button.type, button.props.className], ['button', 'eb-fb'])
+  }
+})
+
+test('the page takes its own gutter only when it has PageHeader', () => {
+  assert.equal(render(loadingView()).props.className, 'eb-root')
+  assert.equal(findAll(render(planView(planBody())), (node) => node.props.className === 'eb-body').length, 0)
+  const tree = renderKit(loadingView(), fakeKit())
+  assert.equal(tree.props.className, 'eb-root eb-has-header')
+  assert.equal(tree.children.at(-1).props.className, 'eb-body')
+})
+
+test('the column header holds an aria-hidden dot, the name and the count, with the capitals in the style sheet', () => {
+  const tree = render(planView(planBody()))
+  const headings = findAll(tree, (node) => node.type === `h${TITLE_LEVEL + 1}`)
+  assert.equal(headings.length, 3)
+  headings.forEach((heading, i) => {
+    const [dot, name, , count] = heading.children
+    assert.deepEqual([dot.props.className, dot.props['aria-hidden'], dot.children], ['eb-dot', 'true', []])
+    assert.equal(name.props.className, 'eb-column-name')
+    assert.equal(name.children[0], ['Planned', 'In progress', 'Done'][i], 'the name is not in capitals')
+    assert.equal(count.props.className, 'eb-count')
+    assert.equal(textOf(heading), `${name.children[0]} ${count.children[0]}`)
+  })
+  assert.deepEqual(findAll(tree, (node) => node.props['data-column'] !== undefined).map((node) => node.props['data-column']), ['planned', 'in progress', 'done'])
+  assert.match(STYLE, /\.eb-column-title\s*\{[^}]*text-transform:\s*uppercase/)
+  assert.match(STYLE, /\.eb-column\s*\{[^}]*--eb-lane:\s*var\(--muted, currentColor\)/)
+  assert.match(STYLE, /\.eb-column\[data-column='in progress'\]\s*\{[^}]*var\(--accent, currentColor\)/)
+  assert.match(STYLE, /\.eb-column\[data-column='done'\]\s*\{[^}]*var\(--ok, currentColor\)/)
+  assert.match(STYLE, /\.eb-dot\s*\{[^}]*width:\s*8px[^}]*height:\s*8px[^}]*border-radius:\s*50%/)
+})
+
+test('the empty plan with EmptyState: title, subtitle and, when the page has one, the icon', () => {
+  const kit = fakeKit()
+  const view = planView(planBody({ groups: [] }))
+  const [empty] = ofType(renderKit(view, kit), kit.EmptyState)
+  assert.deepEqual(propsOf(empty), { title: 'No specs or epics were found on main.', subtitle: 'Specs are read from .kiro/specs/ and epics from docs/epics/.' })
+  const icon = { type: 'svg', props: {}, children: [] }
+  const [withIcon] = ofType(renderKit({ ...view, icon }, kit), kit.EmptyState)
+  assert.equal(withIcon.props.icon, icon)
+  assert.deepEqual(Object.keys(propsOf(withIcon)).sort(), ['icon', 'subtitle', 'title'])
+  // Without it: the two paragraphs, as before.
+  const fallback = findAll(render(view), (node) => node.props.className === 'eb-empty')[0]
+  assert.deepEqual(fallback.children.map((node) => node.type), ['p', 'p'])
+})
+
+test('the errors with ErrorNotice: the message, a footer with the code and the settings as code, no hand-off', () => {
+  const kit = fakeKit()
+  const [notice] = ofType(renderKit(errorView(true), kit), kit.ErrorNotice)
+  assert.deepEqual(Object.keys(propsOf(notice)).sort(), ['footer', 'message'])
+  assert.equal(notice.props.message, 'No repository is set.')
+  assert.equal(textOf(notice.props.footer), 'repository_not_configuredEPIC_BOARD_REPOSITORY/Users/me/.kiro/epic-board.json')
+  assert.deepEqual(findAll(notice.props.footer, (node) => node.type === 'code').map(textOf), ['EPIC_BOARD_REPOSITORY', '/Users/me/.kiro/epic-board.json'])
+  const [bare] = ofType(renderKit(errorView(false), kit), kit.ErrorNotice)
+  assert.equal(findAll(bare.props.footer, (node) => node.type === 'ul').length, 0)
+  const [unreachable] = ofType(renderKit(unreachableView(), kit), kit.ErrorNotice)
+  assert.deepEqual(propsOf(unreachable), { message: 'Could not reach the backend.' })
+})
+
+test('the roles: alert only on the two errors, without a kit and with one; status on the rest', () => {
+  for (const kit of [{}, fakeKit(['PageHeader', 'Btn', 'EmptyState'])]) {
+    const roles = (view) => rolesOf(renderKit(view, kit)).filter((role) => role === 'alert' || role === 'status')
+    assert.deepEqual(roles(errorView()), ['alert'])
+    assert.deepEqual(roles(unreachableView()), ['alert'])
+    assert.deepEqual(roles(loadingView()), ['status'])
+    assert.deepEqual(roles(planView(planBody({ fetch: { ok: false, reason: 'x' } }), { unreachable: true })), ['status', 'status'])
+    assert.deepEqual(roles({ ...loadingView(), unconfigured: true }), ['status'])
+  }
+})
+
+test('a kit with only some components draws those and the earlier markup for the rest, and the headings do not change', () => {
+  const views = [planView(planBody()), planView(planBody({ groups: [] })), errorView(), unreachableView(), loadingView()]
+  for (const view of views) {
+    const none = headingLevels(renderKit(view, {}))
+    for (const names of [['PageHeader'], ['EmptyState'], ['ErrorNotice'], ['Btn', 'Select'], FAKES]) {
+      assert.deepEqual(headingLevels(renderKit(view, fakeKit(names))).filter((level) => level > TITLE_LEVEL), none.filter((level) => level > TITLE_LEVEL), names.join())
+    }
+  }
+  const kit = fakeKit(['ErrorNotice'])
+  assert.equal(ofType(renderKit(planView(planBody({ groups: [] })), kit), kit.ErrorNotice).length, 0)
+  assert.equal(findAll(renderKit(planView(planBody({ groups: [] })), kit), (node) => node.props.className === 'eb-empty').length, 1)
+  const header = fakeKit(['PageHeader'])
+  assert.equal(findAll(renderKit(errorView(), header), (node) => node.props.className === 'eb-error').length, 1)
+})
+
+test('the filter row: both dropdowns are one Select with the same five props and no className, the project first', () => {
+  const kit = fakeKit()
+  const view = { ...planView(planBody()), projects: PROJECTS }
+  const tree = renderKit(view, { ...kit })
+  const [row] = findAll(tree, (node) => node.props.className === 'eb-filters')
+  assert.deepEqual(row.children.map((box) => box.props.className), ['eb-filter', 'eb-filter'])
+  const [project, epic] = row.children.map((box) => box.children[0])
+  assert.equal(project.type, kit.Select)
+  assert.equal(epic.type, kit.Select)
+  for (const select of [project, epic]) {
+    assert.deepEqual(Object.keys(select.props).sort(), ['aria-label', 'onChange', 'optionLabels', 'options', 'value'])
+    assert.ok(select.props.options.every((option) => typeof option === 'string'))
+  }
+  assert.deepEqual([project.props['aria-label'], project.props.value, project.props.options, project.props.optionLabels], ['Project', 'b', ['a', 'b'], ['Alpha', 'Beta']])
+  assert.equal(epic.props['aria-label'], 'Epic')
+  assert.equal(epic.props.options[0], 'all')
+  assert.equal(epic.props.optionLabels[0], 'All epics')
+  const seen = []
+  const wired = renderBoard(h, view, { switchProject: (id) => seen.push(['project', id]), filter: (key) => seen.push(['epic', key]) }, kit)
+  const [p, e] = findAll(wired, (node) => node.props.className === 'eb-filter').map((box) => box.children[0])
+  p.props.onChange('a')
+  e.props.onChange('all')
+  assert.deepEqual(seen, [['project', 'a'], ['epic', 'all']])
+})
+
+test('the filter row: the epic dropdown is hidden for an empty plan, and the project dropdown stays', () => {
+  const kit = fakeKit()
+  const view = { ...planView(planBody({ groups: [] })), projects: PROJECTS }
+  const boxes = findAll(renderKit(view, kit), (node) => node.props.className === 'eb-filter')
+  assert.deepEqual(boxes.map((box) => box.children[0].props['aria-label']), ['Project'])
+  assert.equal(findAll(renderKit(planView(planBody({ groups: [] })), kit), (node) => node.props.className === 'eb-filters').length, 0)
+})
+
+test('the filter row without Select: two native selects that carry eb-fb, with the same names and options', () => {
+  const view = { ...planView(planBody()), projects: PROJECTS }
+  for (const kit of [{}, fakeKit(FAKES.filter((name) => name !== 'Select'))]) {
+    const selects = nativeSelects(renderKit(view, kit))
+    assert.deepEqual(selects.map((node) => [node.props['aria-label'], node.props.className]), [['Project', 'eb-fb'], ['Epic', 'eb-fb']])
+    assert.deepEqual(selects[0].children.map((option) => [option.props.value, textOf(option)]), [['a', 'Alpha'], ['b', 'Beta']])
+  }
+})
+
+test('the first-run notice: status, no alert, and "Set up projects" is primary with its accessible name', () => {
+  const view = { ...loadingView(), unconfigured: true, setupState: { phase: 'closed' } }
+  const kit = fakeKit()
+  const [notice] = findAll(renderKit(view, kit), (node) => node.props.className === 'eb-notice')
+  assert.equal(notice.props.role, 'status')
+  assert.equal(textOf(notice.children[0]), 'Choose your projects')
+  const button = notice.children[1]
+  assert.equal(button.type, kit.Btn)
+  assert.deepEqual(Object.keys(button.props).sort(), ['aria-expanded', 'aria-label', 'onClick', 'primary', 'type'])
+  assert.deepEqual([button.props.primary, button.props['aria-label'], button.props['aria-expanded'], textOf(button)], [true, 'Set up projects', 'false', 'Set up projects'])
+  assert.equal(rolesOf(renderKit(view, kit)).includes('alert'), false)
+  const plain = findAll(render(view), (node) => node.props.className === 'eb-notice')[0].children[1]
+  assert.deepEqual([plain.type, plain.props.className, plain.props['aria-label']], ['button', 'eb-fb', 'Set up projects'])
+})
+
+test('every component gets only the props the design names', () => {
+  const kit = fakeKit()
+  const views = [planView(planBody()), planView(planBody({ groups: [] })), errorView(), unreachableView(), loadingView(), { ...loadingView(), unconfigured: true }]
+  const allowed = {
+    PageHeader: ['title', 'subtitle', 'actions'],
+    Btn: ['type', 'aria-expanded', 'aria-label', 'data-eb-setup-btn', 'onClick', 'primary', 'key'],
+    EmptyState: ['title', 'subtitle', 'icon', 'key'],
+    ErrorNotice: ['message', 'footer', 'key'],
+    Select: ['aria-label', 'value', 'options', 'optionLabels', 'onChange'],
+  }
+  for (const view of views) {
+    for (const node of elements(renderKit({ ...view, projects: PROJECTS }, kit))) {
+      const name = Object.keys(allowed).find((key) => kit[key] === node.type)
+      if (name) for (const prop of Object.keys(node.props)) assert.ok(allowed[name].includes(prop), `${name} got ${prop}`)
+    }
   }
 })
