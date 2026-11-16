@@ -62,6 +62,8 @@ def _rules(branch):
         f"- Never merge a pull request, never push to {branch}, never turn on auto-merge. The person reviews and merges.",
         "- Open exactly one pull request. When it is open, write its address in this chat and stop.",
         "- If you are blocked or unsure, ask in this chat. Do not guess.",
+        "- Report the exact commands you ran and their results, including how many tests ran, how many passed and how many were skipped. Never claim a check you did not run.",
+        "- If a check was skipped, say so.",
     ]
 
 
@@ -69,33 +71,69 @@ def _numbered(steps):
     return [f"{number}. {text}" for number, text in enumerate(steps, 1)]
 
 
-def build_brief(card, epic_file, branch, taken=()):
+_CONFIRM = "Confirm in this chat which project files you read."
+_NAME_CHECK = ("Before opening the pull request, list every table, column, function, file, setting, endpoint and "
+               "command your change adds or relies on. Mark each as existing (with the file where you found it) or "
+               "new (with the task that creates it). Fix anything that is neither found nor created. "
+               "Put the list in the PR description.")
+
+
+def build_brief(card, epic_file, branch, taken=(), instructions=None):
     """The first message of a conductor chat, as plain text built only from the card's name and spec
     folder, the epic file and the main branch. The same inputs give the same text. It never includes
     the story's description or any task text."""
     name = _quoted(card.get("name", ""))
     branch = _inline(branch)
+    story_name = _inline(card.get("name", ""), limit=BRIEF_NAME_MAX_CHARS)
     epic = f"Epic page: docs/epics/{_inline(epic_file)}" if epic_file else "Epic page: none, this story has no epic"
     opening = ["You are the conductor for one story of this project. Work in the checkout you were opened in.", "",
                f"Story: {name}", epic]
+    has_instructions = bool(instructions and instructions.strip())
+    if has_instructions:
+        from plan import INSTRUCTIONS_THRESHOLD, extract_headings
+        opening.append("")
+        if len(instructions) <= INSTRUCTIONS_THRESHOLD:
+            opening.append("Project instructions (from AGENTS.md on main):")
+            opening.append(instructions)
+        else:
+            opening.append("Project instructions (from AGENTS.md on main — read the full file before anything else):")
+            for heading in extract_headings(instructions):
+                opening.append(heading)
+    provenance = (f" End each commit message with the trailer: Built-with: Kiro Crew, Epic Board (story: {story_name}). "
+                  f"End the PR description with: Built with Kiro Crew, started from Epic Board · Story: {story_name} · "
+                  '<your harness>, <your model>. Write "unknown" for harness or model unless the brief or Crew states them.')
     spec = card.get("spec")
     if spec is None:
         folder = slugify(card.get("name", ""), taken)
+        if has_instructions:
+            step1 = f"Read the story's entry in the epic page. {_CONFIRM}" if epic_file else _CONFIRM
+        else:
+            if epic_file:
+                step1 = ("Read the story's entry in the epic page, and the project's AGENTS.md and steering files. "
+                         f"Follow them for how specs, branches and checks work. {_CONFIRM}")
+            else:
+                step1 = ("Read the project's AGENTS.md and steering files. "
+                         f"Follow them for how specs, branches and checks work. {_CONFIRM}")
         steps = [
-            ("Read the story's entry in the epic page, and the project's AGENTS.md and steering files. "
-             "Follow them for how specs, branches and checks work." if epic_file else
-             "Read the project's AGENTS.md and steering files. Follow them for how specs, branches and checks work."),
+            step1,
             f"Create a branch named story/{folder} from origin/{branch}. If the project names branches another way, follow the project.",
             f"Write requirements.md, design.md and tasks.md in .kiro/specs/{folder}/, in the project's usual spec format.",
         ]
         if epic_file:
             steps.append(f"Change the story's line in the epic page to link to .kiro/specs/{folder}/. Set its status to in progress.")
-        steps.append(f"Commit, push the branch, and open one pull request into {branch}.")
+        steps.append(_NAME_CHECK)
+        steps.append(f"Commit, push the branch, and open one pull request into {branch}.{provenance}")
         lines = opening + [f"Main branch: {branch}", "Your job: write this story's spec. It has none yet.", ""] + _numbered(steps)
     else:
         spec = _inline(spec)
+        if has_instructions:
+            step1 = f"Read requirements.md, design.md and tasks.md in .kiro/specs/{spec}/"
+            step1 += f", and the epic page. {_CONFIRM}" if epic_file else f". {_CONFIRM}"
+        else:
+            step1 = f"Read the project's AGENTS.md and steering files, then requirements.md, design.md and tasks.md in .kiro/specs/{spec}/"
+            step1 += f", and the epic page. {_CONFIRM}" if epic_file else f". {_CONFIRM}"
         steps = [
-            f"Read the project's AGENTS.md and steering files, then requirements.md, design.md and tasks.md in .kiro/specs/{spec}/, and the epic page.",
+            step1,
             "Find the first top-level task group that has a task not ticked yet. Build only that group. "
             "If every task is ticked, change nothing and say so in this chat.",
             "If the spec has no tasks, write tasks.md as the only change of your pull request and build nothing.",
@@ -106,7 +144,8 @@ def build_brief(card, epic_file, branch, taken=()):
         if epic_file:
             steps.append("If your group ticks the last task in tasks.md, set the story's line in the epic page to done, "
                          "in the same pull request.")
-        steps.append(f"Commit, push the branch, and open one pull request into {branch}.")
+        steps.append(_NAME_CHECK)
+        steps.append(f"Commit, push the branch, and open one pull request into {branch}.{provenance}")
         lines = opening + [f"Spec: .kiro/specs/{spec}/", f"Main branch: {branch}",
                            "Your job: build the next task group of this story's spec.", ""] + _numbered(steps)
     return "\n".join(lines + [""] + _rules(branch))

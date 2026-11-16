@@ -143,5 +143,7 @@ class Holder:
             return True
 
     def _plan_body(self, snapshot, fetch, groups, problems):
+        from plan import read_instructions
         return {"repository": self._repository, "branch": snapshot.branch, "ref": snapshot.ref,
-                "commit": snapshot.commit, "fetch": fetch, "groups": groups, "problems": problems}
+                "commit": snapshot.commit, "fetch": fetch, "groups": groups, "problems": problems,
+                "instructions": read_instructions(snapshot)}

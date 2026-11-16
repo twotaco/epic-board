@@ -73,8 +73,8 @@ class BriefTests(unittest.TestCase):
                      "in the same pull request.")
         self.assertIn(done_step, text)
         steps = [l for l in lines_of(text) if re.match(r"^\d+\. ", l)]
-        # the step sits after the ticking and before the commit and pull request
-        self.assertTrue(steps[-2].endswith(done_step), steps)
+        # the done step sits before the name-check step and the commit step
+        self.assertTrue(steps[-3].endswith(done_step), steps)
         self.assertIn("open one pull request into main", steps[-1])
         numbers = [l.split(".")[0] for l in steps]
         self.assertEqual(numbers, [str(i) for i in range(1, len(numbers) + 1)])
@@ -129,19 +129,219 @@ class BriefTests(unittest.TestCase):
         self.assertNotIn("ma\nin", text)
         self.assertIn("ma?in", text)
 
-    def test_length_stays_under_6000_with_every_inserted_name_at_its_largest(self):
-        worst_name = "\x01" * 200  # every character is escaped to six
+    def test_length_stays_under_10000_with_instructions_and_worst_case_names(self):
+        worst_name = "\x01" * 200
+        threshold_instructions = "x" * 3000
         for card in (dict(NO_SPEC, name=worst_name), dict(WITH_SPEC, name=worst_name, spec="s" * 400)):
-            text = build_brief(card, "e" * 400, "b" * 400)
-            self.assertLess(len(text), 6000)
-        # and the plain templates are about 1,500 characters before the names go in
+            text = build_brief(card, "e" * 400, "b" * 400, instructions=threshold_instructions)
+            self.assertLess(len(text), 10000)
         for card in (NO_SPEC, WITH_SPEC):
-            self.assertLess(len(build_brief(card, "e.md", "main")), 2000)
+            self.assertLess(len(build_brief(card, "e.md", "main")), 3000)
 
     def test_taken_spec_folders_change_the_new_folder_name(self):
         text = build_brief(NO_SPEC, "e.md", "main", taken={"filter-by-epic"})
         self.assertIn("story/filter-by-epic-2", text)
         self.assertIn(".kiro/specs/filter-by-epic-2/", text)
+
+
+class InstructionsBriefTests(unittest.TestCase):
+    """Tests for the new brief sections: instructions, confirmation, name check, honest reporting, provenance."""
+
+    def test_full_instructions_within_threshold(self):
+        instructions = "# Rules\nDo this and that."
+        text = build_brief(NO_SPEC, "epic-board.md", "main", instructions=instructions)
+        self.assertIn("Project instructions (from AGENTS.md on main):", text)
+        self.assertIn("# Rules\nDo this and that.", text)
+        self.assertNotIn("read the full file before anything else", text)
+
+    def test_headings_summary_above_threshold(self):
+        instructions = "# Rules\n## Testing\n" + "x" * 3001
+        text = build_brief(NO_SPEC, "epic-board.md", "main", instructions=instructions)
+        self.assertIn("read the full file before anything else", text)
+        self.assertIn("# Rules", text)
+        self.assertIn("## Testing", text)
+        self.assertNotIn("x" * 100, text)
+
+    def test_no_section_when_instructions_none(self):
+        text = build_brief(NO_SPEC, "epic-board.md", "main", instructions=None)
+        self.assertNotIn("Project instructions", text)
+
+    def test_no_section_when_instructions_empty(self):
+        text = build_brief(NO_SPEC, "epic-board.md", "main", instructions="")
+        self.assertNotIn("Project instructions", text)
+
+    def test_no_section_when_instructions_whitespace(self):
+        text = build_brief(NO_SPEC, "epic-board.md", "main", instructions="   \n  ")
+        self.assertNotIn("Project instructions", text)
+
+    def test_above_threshold_no_headings_only_header(self):
+        instructions = "x" * 3001
+        text = build_brief(NO_SPEC, "epic-board.md", "main", instructions=instructions)
+        self.assertIn("read the full file before anything else", text)
+        self.assertNotIn("x" * 100, text)
+
+    # Step 1 variants (design table)
+    def test_step1_no_spec_with_epic_instructions_present(self):
+        text = build_brief(NO_SPEC, "epic-board.md", "main", instructions="rules")
+        step1 = [l for l in lines_of(text) if l.startswith("1. ")][0]
+        self.assertIn("Read the story's entry in the epic page.", step1)
+        self.assertIn("Confirm in this chat which project files you read.", step1)
+        self.assertNotIn("AGENTS.md", step1)
+
+    def test_step1_no_spec_no_epic_instructions_present(self):
+        text = build_brief(NO_SPEC, None, "main", instructions="rules")
+        step1 = [l for l in lines_of(text) if l.startswith("1. ")][0]
+        self.assertEqual(step1, "1. Confirm in this chat which project files you read.")
+
+    def test_step1_with_spec_with_epic_instructions_present(self):
+        text = build_brief(WITH_SPEC, "epic-board.md", "main", instructions="rules")
+        step1 = [l for l in lines_of(text) if l.startswith("1. ")][0]
+        self.assertIn("requirements.md, design.md and tasks.md in .kiro/specs/start-a-story/", step1)
+        self.assertIn("the epic page", step1)
+        self.assertIn("Confirm in this chat which project files you read.", step1)
+        self.assertNotIn("AGENTS.md", step1)
+
+    def test_step1_with_spec_no_epic_instructions_present(self):
+        text = build_brief(WITH_SPEC, None, "main", instructions="rules")
+        step1 = [l for l in lines_of(text) if l.startswith("1. ")][0]
+        self.assertIn("requirements.md, design.md and tasks.md in .kiro/specs/start-a-story/", step1)
+        self.assertNotIn("epic page", step1)
+        self.assertIn("Confirm in this chat which project files you read.", step1)
+        self.assertNotIn("AGENTS.md", step1)
+
+    def test_step1_no_spec_with_epic_instructions_absent(self):
+        text = build_brief(NO_SPEC, "epic-board.md", "main", instructions=None)
+        step1 = [l for l in lines_of(text) if l.startswith("1. ")][0]
+        self.assertIn("AGENTS.md", step1)
+        self.assertIn("Confirm in this chat which project files you read.", step1)
+
+    def test_step1_no_spec_no_epic_instructions_absent(self):
+        text = build_brief(NO_SPEC, None, "main", instructions=None)
+        step1 = [l for l in lines_of(text) if l.startswith("1. ")][0]
+        self.assertIn("AGENTS.md", step1)
+        self.assertIn("Confirm in this chat which project files you read.", step1)
+
+    def test_step1_with_spec_with_epic_instructions_absent(self):
+        text = build_brief(WITH_SPEC, "epic-board.md", "main", instructions=None)
+        step1 = [l for l in lines_of(text) if l.startswith("1. ")][0]
+        self.assertIn("AGENTS.md", step1)
+        self.assertIn("the epic page", step1)
+        self.assertIn("Confirm in this chat which project files you read.", step1)
+
+    def test_step1_with_spec_no_epic_instructions_absent(self):
+        text = build_brief(WITH_SPEC, None, "main", instructions=None)
+        step1 = [l for l in lines_of(text) if l.startswith("1. ")][0]
+        self.assertIn("AGENTS.md", step1)
+        self.assertNotIn("epic page", step1)
+        self.assertIn("Confirm in this chat which project files you read.", step1)
+
+    # Name check step
+    def test_name_check_step_in_no_spec_variant(self):
+        text = build_brief(NO_SPEC, "epic-board.md", "main")
+        self.assertIn("Before opening the pull request, list every table, column, function, file", text)
+        self.assertIn("Put the list in the PR description.", text)
+
+    def test_name_check_step_in_with_spec_variant(self):
+        text = build_brief(WITH_SPEC, "epic-board.md", "main")
+        self.assertIn("Before opening the pull request, list every table, column, function, file", text)
+
+    # Honest reporting rules
+    def test_honest_reporting_rules_in_no_spec(self):
+        text = build_brief(NO_SPEC, "epic-board.md", "main")
+        self.assertIn("Report the exact commands you ran and their results", text)
+        self.assertIn("Never claim a check you did not run.", text)
+        self.assertIn("If a check was skipped, say so.", text)
+
+    def test_honest_reporting_rules_in_with_spec(self):
+        text = build_brief(WITH_SPEC, "epic-board.md", "main")
+        self.assertIn("Report the exact commands you ran and their results", text)
+        self.assertIn("If a check was skipped, say so.", text)
+
+    # Commit trailer and PR footer
+    def test_commit_trailer_rule(self):
+        text = build_brief(NO_SPEC, "epic-board.md", "main")
+        self.assertIn("Built-with: Kiro Crew, Epic Board (story: Filter by epic)", text)
+
+    def test_pr_footer_rule(self):
+        text = build_brief(NO_SPEC, "epic-board.md", "main")
+        self.assertIn("Built with Kiro Crew, started from Epic Board", text)
+        self.assertIn('<your harness>, <your model>', text)
+        self.assertIn('Write "unknown" for harness or model unless the brief or Crew states them.', text)
+
+    def test_provenance_uses_plain_text_name_not_json(self):
+        text = build_brief(NO_SPEC, "epic-board.md", "main")
+        self.assertIn("story: Filter by epic)", text)
+        self.assertNotIn('story: "Filter by epic")', text)
+
+    def test_provenance_name_has_no_control_characters(self):
+        card = dict(NO_SPEC, name="test\x00name\nnewline")
+        text = build_brief(card, "e.md", "main")
+        trailer = [l for l in lines_of(text) if "Built-with:" in l]
+        for line in trailer:
+            self.assertNotIn("\x00", line)
+            self.assertFalse(line != line.split("\n")[0])
+
+    # Existing rules unchanged
+    def test_existing_three_rules_unchanged(self):
+        text = build_brief(NO_SPEC, "epic-board.md", "main")
+        self.assertIn("Never merge a pull request", text)
+        self.assertIn("Open exactly one pull request", text)
+        self.assertIn("If you are blocked or unsure, ask in this chat. Do not guess.", text)
+
+    # Instructions section in with-spec variant too
+    def test_instructions_section_in_with_spec(self):
+        text = build_brief(WITH_SPEC, "epic-board.md", "main", instructions="# Project rules\nBuild carefully.")
+        self.assertIn("Project instructions (from AGENTS.md on main):", text)
+        self.assertIn("# Project rules\nBuild carefully.", text)
+
+
+class BriefPropertyTests(unittest.TestCase):
+    """Seeded property tests for the brief."""
+
+    def test_property1_threshold(self):
+        import random
+        seed = random.randrange(2**32)
+        rng = random.Random(seed)
+        full_header = "Project instructions (from AGENTS.md on main):"
+        summary_header = "read the full file before anything else"
+        for _ in range(100):
+            length = rng.randint(0, 10000)
+            text = "# H\n" * (length // 4) + "x" * (length % 4)
+            text = text[:length] if length > 0 else ""
+            for card_args in ((NO_SPEC, "e.md"), (NO_SPEC, None), (WITH_SPEC, "e.md"), (WITH_SPEC, None)):
+                card, epic = card_args
+                brief = build_brief(card, epic, "main", instructions=text if text else None)
+                if text and text.strip() and len(text) <= 3000:
+                    self.assertIn(full_header, brief, f"seed={seed}, len={length}")
+                    self.assertIn(text, brief, f"seed={seed}, len={length}")
+                    self.assertNotIn(summary_header, brief, f"seed={seed}, len={length}")
+                elif text and text.strip() and len(text) > 3000:
+                    self.assertIn(summary_header, brief, f"seed={seed}, len={length}")
+                if not text or not text.strip():
+                    self.assertNotIn("Project instructions", brief, f"seed={seed}")
+
+    def test_property2_never_breaks(self):
+        import random
+        from gitsource import SourceError
+        from plan import read_instructions
+        seed = random.randrange(2**32)
+        rng = random.Random(seed)
+        exceptions = [SourceError("read_failed", "x"), OSError("y"), ValueError("z")]
+        for _ in range(100):
+            exc = rng.choice(exceptions)
+            class BadSource:
+                def read_file(self, path):
+                    raise exc
+            self.assertIsNone(read_instructions(BadSource()), f"seed={seed}")
+            instructions = rng.choice([None, "", "\x00" * 10000, "x" * 5000])
+            for card_args in ((NO_SPEC, "e.md"), (WITH_SPEC, "e.md")):
+                card, epic = card_args
+                brief = build_brief(card, epic, "main", instructions=instructions)
+                self.assertIsInstance(brief, str, f"seed={seed}")
+                self.assertTrue(brief.startswith("You are the conductor"), f"seed={seed}")
+                self.assertIn("Rules:", brief, f"seed={seed}")
+                self.assertNotIn("None", brief, f"seed={seed}")
+                self.assertNotIn("NaN", brief, f"seed={seed}")
 
 
 class SlugTests(unittest.TestCase):

@@ -115,7 +115,7 @@ def plan_response(holder, error, config_path):
                 message = f"{message.rstrip('.')}. Check {ENV_NAME} or the repository value in {config_path}."
                 return STATUS[code], error_body(code, message, config_path)
             return STATUS[code], error_body(code, message)
-        return 200, value
+        return 200, {k: v for k, v in value.items() if k != "instructions"}
     except Exception:
         return 500, error_body("internal", "The plan could not be built.")
 
@@ -288,7 +288,8 @@ class ChatService:
             raise ChatError("card_done", 409, "That story is done.")
         record = self.store.reserve(card_id)
         return {"card_id": card_id, "name": record["name"], "folder_id": self.folder,
-                "brief": build_brief(card, epic_file, plan["branch"], spec_folders(plan))}
+                "brief": build_brief(card, epic_file, plan["branch"], spec_folders(plan),
+                                      instructions=plan.get("instructions"))}
 
 
 class ChatRouter:

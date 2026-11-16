@@ -91,7 +91,7 @@ class FirstReadTests(unittest.TestCase):
         self.assertEqual(state.plan, {
             "repository": REPOSITORY, "branch": "main", "ref": "origin/main", "commit": "9f2c1d0aaaa",
             "fetch": {"ok": None}, "groups": [{"epic": None, "cards": [{"name": "A"}]}],
-            "problems": [{"file": "x", "reason": "y"}]})
+            "problems": [{"file": "x", "reason": "y"}], "instructions": None})
         self.assertIsNone(state.error)
         self.assertIsNone(state.fetched_at)
         self.assertTrue(state.first_read_ended)
@@ -574,6 +574,31 @@ class IntervalTests(unittest.TestCase):
         h.now = 105
         h.holder.request()
         self.assertEqual(len(h.jobs), 1)
+
+
+class InstructionsInPlanTests(unittest.TestCase):
+    def test_plan_body_includes_instructions_when_agents_md_exists(self):
+        h = Harness()
+        h.read = FakeSnapshot()
+        h.read.read_file = lambda path: "# Rules\nTest." if path == "AGENTS.md" else (_ for _ in ()).throw(Exception("no"))
+        h.first_read()
+        self.assertEqual(h.state.plan["instructions"], "# Rules\nTest.")
+
+    def test_plan_body_has_none_when_agents_md_missing(self):
+        h = Harness()
+        h.first_read()
+        self.assertIsNone(h.state.plan["instructions"])
+
+    def test_plan_response_excludes_instructions(self):
+        import server
+        h = Harness()
+        h.first_read()
+        kind, body = h.holder.request()
+        self.assertIn("instructions", h.state.plan)
+        status, response = server.plan_response(h.holder, None, "/config.json")
+        self.assertEqual(status, 200)
+        self.assertNotIn("instructions", response)
+        self.assertIn("groups", response)
 
 
 if __name__ == "__main__":
