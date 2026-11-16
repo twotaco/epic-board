@@ -10,8 +10,7 @@ This story changes the board so that each started story works in its own git wor
 
 ## Glossary
 
-- **Worktree_Path**: the absolute path of a story's git worktree, computed from the repository path and the branch name. The worktree is a sibling of the checkout: `<parent-of-checkout>/<checkout-basename>--<branch-name>`, where `<branch-name>` is `story/<spec-folder>` with `/` replaced by `--` (e.g. `story--filter-by-epic`).
-- **Worktree_Branch**: the git branch the worktree is checked out on: `story/<spec-folder>` for a spec or `story/<spec-folder>-g<N>` for a task group, freshly cut from `origin/<main-branch>`.
+- **Worktree_Path**: the absolute path of a story's git worktree, computed from the repository path and the Chat_Record's name. The worktree is a sibling of the checkout: `<parent-of-checkout>/<checkout-basename>--<record-name>` (e.g. `my-project--epic-board-a3f2b1c4`).
 - **Worktree_Setting**: the per-project "Start each story in its own worktree" flag, stored in `setup.json` as `"worktree": true|false`. Default is `true` when absent.
 - **Worktree_Folder**: the Crew subfolder created for a worktree card, with `project_dir` set to the Worktree_Path. Its `id` is stored in the Chat_Record so the board can remove it when the worktree is cleaned up.
 - **Setup_Step**: the brief step that tells the conductor to run the project's setup commands inside the worktree before anything else (for example `npm ci`).
@@ -41,11 +40,11 @@ This story changes the board so that each started story works in its own git wor
 #### Acceptance Criteria
 
 1. WHEN the person activates "Start" on a project with `worktree: true` THEN the start sequence SHALL, before creating the Crew chat:
-   a. Tell the backend to fetch `origin` and create a git worktree at the Worktree_Path on a new Worktree_Branch freshly cut from `origin/<main-branch>`.
+   a. Tell the backend to fetch `origin` and create a detached git worktree at the Worktree_Path from `origin/<main-branch>`.
    b. Create a Crew subfolder (the Worktree_Folder) with `project_dir` equal to the Worktree_Path, as a child of the project's Crew_Folder.
    c. Create the Crew chat in the Worktree_Folder (not the project's Crew_Folder).
-2. THE backend SHALL create the worktree by running `git fetch origin` then `git worktree add --no-checkout <path> -b <branch> origin/<main-branch>` then `git checkout` in the worktree, via the same subprocess pattern as `gitsource.py`. THE backend SHALL run no other git command on the shared checkout during this sequence.
-3. THE Worktree_Path SHALL be `<parent-of-checkout>/<checkout-basename>--<branch-slug>`, where `<branch-slug>` is the Worktree_Branch with `/` replaced by `--`. Example: checkout at `/home/alice/my-project`, branch `story/filter-by-epic` → path `/home/alice/my-project--story--filter-by-epic`.
+2. THE backend SHALL create the worktree by running `git fetch origin` then `git worktree add --detach <path> origin/<main-branch>`, via the same subprocess pattern as `gitsource.py`. The worktree starts with a detached HEAD at the latest origin/main commit; the conductor creates its own branch inside as the brief says. THE backend SHALL run no other git command on the shared checkout during this sequence.
+3. THE Worktree_Path SHALL be `<parent-of-checkout>/<checkout-basename>--<record-name>`, where `<record-name>` is the Chat_Record's name (e.g. `epic-board-a3f2b1c4`). Example: checkout at `/home/alice/my-project`, record name `epic-board-a3f2b1c4` → path `/home/alice/my-project--epic-board-a3f2b1c4`.
 4. WHEN the backend finds that a worktree already exists at the Worktree_Path (a `reserved` record from a previous attempt) THEN it SHALL reuse it, not create a second one.
 5. THE Chat_Record SHALL gain two nullable fields: `worktree_path` (the absolute path as text, or `null`) and `worktree_folder_id` (the Crew subfolder id as text, or `null`). Both are `null` for non-worktree starts.
 6. AFTER the chat is saved and started (the start spec's Requirement 4, criterion 4), the page SHALL save the `worktree_folder_id` alongside the chat key in the `POST .../chats/<name>/started` request.
@@ -73,7 +72,7 @@ This story changes the board so that each started story works in its own git wor
 #### Acceptance Criteria
 
 1. WHEN a card's chat is reopened (the chat already has a `started` Chat_Record with a `worktree_path`) THEN the board SHALL NOT create a new worktree. The conductor resumes in the worktree the record names.
-2. WHEN a new task group is started on a card whose previous group has a `started` record THEN the board SHALL treat it as a new start: a new Chat_Record, a new worktree at the new Worktree_Branch's path, a new Worktree_Folder and a new chat.
+2. WHEN a new task group is started on a card whose previous group has a `started` record THEN the board SHALL treat it as a new start: a new Chat_Record (with a new record name), a new worktree at the new record's Worktree_Path, a new Worktree_Folder and a new chat.
 
 ### Requirement 5: Cleanup
 

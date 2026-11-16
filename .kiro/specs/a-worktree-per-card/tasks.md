@@ -4,23 +4,20 @@
 
 The work is four task groups. Each group is one pull request on its own branch, named `story/a-worktree-per-card-g1` to `story/a-worktree-per-card-g4`, cut from the latest main after the previous group's pull request is merged. Each group lands green on its own and leaves the app working.
 
-**Before starting group 1:** confirm the answers to Open Questions A, B and C in the design. The build MUST NOT start until A is confirmed, because the start flow depends on how the conductor chat gets its working directory.
+**Before starting group 1:** confirm the answers to Open Questions B and C in the design (A is resolved). Task 1.1 covers this.
 
 Group 1 covers all backend changes: git worktree operations, chat record fields, brief steps, project/setup setting, and new routes. Group 2 covers the page start flow: Projects view checkbox, start question, and start sequence creating the Worktree_Folder. Group 3 covers the page cleanup flow: detecting a merged or closed PR and removing the worktree. Group 4 is the check on a Crew host.
 
 ## Tasks
 
 - [ ] 1. Backend: worktree operations, routes, setting and brief
-  - [ ] 1.1 Confirm Open Questions A, B and C
-    - Read Crew's source at `src/kiro_crew/dashboard/chat_folders_routes.py` to confirm whether `POST /api/chat/folders` accepts `project_dir` for apps
-    - If not, check `chat_slots_routes.py` for a `project` parameter in `POST /api/chat/slots`
-    - Read `website/src/types/index.chat.ts` or the app-kit docs to confirm whether `DELETE /api/chat/folders/<id>` exists for apps
-    - Confirm whether `/api/chat/folders` in `app.json` covers POST and DELETE, or whether separate entries are needed
-    - Write the answers into the design's Open Questions section (A, B and C)
-    - _Requirements: 2.1, 2.8, 5.3, 7.1_
+  - [ ] 1.1 Confirm Open Questions B and C
+    - Confirm whether `DELETE /api/chat/folders/<id>` exists for apps (design Open Question B); check `chat_folders_routes.py` or the app-kit docs; update the design's Open Question B with the answer
+    - Confirm whether `/api/chat/folders` in `app.json` covers POST and DELETE as well as GET (Open Question C); if separate entries are needed, add them to `app.json` and update the start spec's Requirement 1, criterion 3; update the design's Open Question C with the answer
+    - _Requirements: 2.1, 2.8, 5.3_
   - [ ] 1.2 Add `worktree_path` and `create_worktree` / `remove_worktree` to `backend/gitsource.py`
-    - Add pure function `worktree_path(repository, branch)`: returns `<parent>/<basename>--<branch-slug>` where branch-slug replaces `/` with `--`
-    - Add `create_worktree(repository, path, branch, main_branch)`: runs `git fetch origin` then `git worktree add -b <branch> <path> origin/<main_branch>`; returns `(True, None)` on success, `(False, error_text)` on failure; if path already exists as a worktree, returns `(True, None)`; on `worktree add` failure, force-removes the partial path
+    - Add pure function `worktree_path(repository, name)`: returns `<parent>/<basename>--<name>` where `name` is the Chat_Record's name (e.g. `epic-board-a3f2b1c4`)
+    - Add `create_worktree(repository, path, main_branch)`: runs `git fetch origin` then `git worktree add --detach <path> origin/<main_branch>`; returns `(True, None)` on success, `(False, error_text)` on failure; if path already exists as a worktree, returns `(True, None)`; on `worktree add` failure, force-removes the partial path
     - Add `remove_worktree(repository, path, force=False)`: runs `git worktree remove [--force] <path>`; returns `(True, None)` or `(False, error_text)`
     - _Requirements: 2.2, 2.3, 2.4, 5.2, 6.5_
   - [ ] 1.3 Update `chats.py`: Chat_Record fields and `build_brief`
@@ -42,8 +39,8 @@ Group 1 covers all backend changes: git worktree operations, chat record fields,
     - Add `DELETE /chats/<name>/worktree` route: requires gateway signature; calls `remove_worktree`; on success answers 200 `{"ok": true}` and sets `worktree_path` to `null` in the record; on `git worktree remove` failing with uncommitted changes, answers 409 `{"code": "worktree_has_changes", "path": "...", "message": "..."}`.
     - _Requirements: 2.1–2.7, 5.2, 5.6, 5.7, 6.1–6.5_
   - [ ] 1.6 Test `gitsource.py` additions in `tests/test_gitsource.py`
-    - `worktree_path` pure-function cases: separates by `--`; replaces `/` with `--`; different checkouts and branches
-    - `create_worktree` with mock `run_git`: success path; fetch failure returns `(False, error)`; `worktree add` failure returns `(False, error)` and cleans up; path already exists returns `(True, None)`
+    - `worktree_path` pure-function cases: appends `--<name>` to the checkout basename; different repositories and record names; path is under the checkout's parent; never includes a branch slug
+    - `create_worktree` with mock `run_git`: success path uses `--detach` and `origin/<main_branch>`; fetch failure returns `(False, error)`; `worktree add` failure returns `(False, error)` and cleans up; path already exists returns `(True, None)`
     - `remove_worktree` without `--force` and with `--force`; failure path
     - Property 1 as a seeded test with at least 50 iterations
     - _Requirements: 2.2, 2.3, 2.4, 5.2_
@@ -114,11 +111,10 @@ Group 1 covers all backend changes: git worktree operations, chat record fields,
     - _All requirements of group 3_
 
 - [ ] 4. Check on a Crew host
-  - [ ] 4.1 Confirm Open Questions A, B and C on the host (required before group 1 starts; this task records the results)
-    - Confirm which of the two folder/project approaches works (see design Open Question A)
-    - Confirm that `DELETE /api/chat/folders/<id>` works for the app (Open Question B)
-    - Confirm that `/api/chat/folders` in `app.json` covers POST and DELETE (Open Question C); if not, add the needed entries and push a fix PR
-    - Write the final answers into the design and update the requirements if needed
+  - [ ] 4.1 Confirm Open Questions B and C on the host (builds on task 1.1 which checks the source)
+    - Confirm that `DELETE /api/chat/folders/<id>` works for the app on a live install (Open Question B); update the design if the route is absent
+    - Confirm that `/api/chat/folders` in `app.json` covers POST and DELETE as the live host enforces them (Open Question C); verify that the worktree subfolder was created with `owner_app` set
+    - Write the final answers into the design
     - _Requirements: 2.1, 2.8, 5.3_
   - [ ] 4.2 Check start flow on the host
     - Start a story on a project with `worktree: true` and confirm: the worktree is created beside the checkout; the conductor's chat opens with `project_dir` set to the worktree; the brief carries the Setup_Step and Catch_Up_Step; the Projects view shows the checkbox and saves correctly
@@ -131,7 +127,7 @@ Group 1 covers all backend changes: git worktree operations, chat record fields,
 ## Notes
 
 - Each group is one pull request and is merged by the owner; start the next group from the updated main
-- Group 1 must be built only after Open Questions A, B and C are confirmed (task 1.1); update the design before writing any code
+- Group 1 must be built only after Open Questions B and C are confirmed (task 1.1; A is resolved); update the design before writing any code
 - The existing start tests (no worktree) pass unchanged because `worktree_path=None` leaves the brief and the start sequence identical to today's
 - The `app.json` permission change (if any, from Open Question C) is part of group 1
 

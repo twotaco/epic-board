@@ -57,17 +57,16 @@ flowchart LR
 ### Git worktree operations (`gitsource.py`)
 
 ```python
-def worktree_path(repository, branch):
-    """The Worktree_Path: <parent>/<basename>--<branch-slug>.
-    branch-slug replaces '/' with '--'. Example:
-      repository=/home/alice/my-project, branch=story/filter-by-epic
-      → /home/alice/my-project--story--filter-by-epic"""
+def worktree_path(repository, name):
+    """The Worktree_Path: <parent>/<basename>--<name>. Example:
+      repository=/home/alice/my-project, name=epic-board-a3f2b1c4
+      → /home/alice/my-project--epic-board-a3f2b1c4"""
 
-def create_worktree(repository, path, branch, main_branch):
-    """Fetch origin and create a worktree at path on a new branch cut from origin/main_branch.
+def create_worktree(repository, path, main_branch):
+    """Fetch origin and create a detached worktree at path at origin/main_branch.
     Returns (True, None) on success or (False, error_text) on failure.
     If path already exists as a worktree, returns (True, None) without re-creating.
-    Runs: git fetch origin; git worktree add -b branch path origin/main_branch.
+    Runs: git fetch origin; git worktree add --detach path origin/main_branch.
     If the worktree add fails and the path was partially created, force-removes it."""
 
 def remove_worktree(repository, path, force=False):
@@ -75,7 +74,7 @@ def remove_worktree(repository, path, force=False):
     Runs: git worktree remove [--force] path."""
 ```
 
-`create_worktree` uses the `run_git` helper already in `gitsource.py`. It runs three commands sequentially: `git fetch origin`, then `git worktree add -b <branch> <path> origin/<main_branch>`. On failure of `worktree add`, it attempts to clean up with `git worktree remove --force <path>`.
+`create_worktree` uses the `run_git` helper already in `gitsource.py`. It runs two commands: `git fetch origin`, then `git worktree add --detach <path> origin/<main_branch>`. The worktree starts with a detached HEAD at the latest origin/main commit; the conductor creates its own branch inside as the brief says. On failure of `worktree add`, it attempts to clean up with `git worktree remove --force <path>`.
 
 `worktree_path` is a pure function (no subprocess) so it can be used in tests and in `build_brief` without side effects.
 
@@ -122,8 +121,8 @@ The `ChatService.reserve` method gains worktree support:
 def reserve(self, card_id, project):
     ...
     # When project.worktree is True:
-    wt_path = worktree_path(project.repository, f"story/{folder}")
-    ok, err = create_worktree(project.repository, wt_path, f"story/{folder}", branch)
+    wt_path = worktree_path(project.repository, record_name)   # record_name = generated chat name
+    ok, err = create_worktree(project.repository, wt_path, branch)
     if not ok:
         raise ChatError("worktree_failed", 409, f"Could not create worktree: {err}")
     # brief includes wt_path
@@ -176,9 +175,7 @@ Crew sets `owner_app` automatically. The response includes the new folder's `id`
 
 The subfolder id is saved in `POST /chats/<name>/started` as `worktree_folder_id`.
 
-**Open Question A.** Does `POST /api/chat/folders` accept a `project_dir` field for apps? This must be confirmed in Crew's source (`chat_folders_routes.py`) before building. If apps cannot set `project_dir`, the alternative is to pass a `project` path in `POST /api/chat/slots` — confirm whether that field exists and is honoured for apps (`chat_slots_routes.py`). The build must not start until one of these two paths is confirmed.
-
-If neither is available, the worktree runs but all chats still run in the shared checkout (which degrades gracefully to today's behaviour), and this open question is updated to explain the limitation.
+Confirmed from Crew 0.12.2's source: `POST /api/chat/folders` accepts `project_dir` from apps and Crew marks the folder `owner_app`. `POST /api/chat/slots` has no directory field, only `folder_id`. The subfolder-per-card approach is therefore the decided design.
 
 ### Cleanup in the page (`ui/index.mjs`)
 
@@ -198,7 +195,7 @@ The start question line reads:
 
 ### Property 1: Worktree_Path is a pure function
 
-For any `repository` path and `branch` string, `worktree_path(repository, branch)` returns a deterministic non-empty path under the same parent directory as the checkout, independent of filesystem state.
+For any `repository` path and `name` string, `worktree_path(repository, name)` returns a deterministic non-empty path under the same parent directory as the checkout, independent of filesystem state.
 
 At least 50 iterations with the seed printed on failure.
 
@@ -228,7 +225,7 @@ At least 100 iterations with the seed printed on failure.
 
 | Where | Change |
 |---|---|
-| Epic page (`docs/epics/epic-board.md`) | Story line links to `.kiro/specs/a-worktree-per-card/` and is set to in progress |
+| Epic page (`docs/epics/epic-board.md`) | Story line links to `.kiro/specs/a-worktree-per-card/` and is set to in progress; "Not in this epic" updated to allow one app-owned subfolder per started card |
 | Start spec (`start-a-story`), Requirement 4 | Reserve response may include `worktree_path`; `started` body may include `worktree_folder_id`; start sequence creates Worktree_Folder when setting is on |
 
 No earlier test stops being true. `build_brief` with no `worktree_path` argument is unchanged. Old `chats.json` records without the new fields are readable.
@@ -260,19 +257,19 @@ No earlier test stops being true. `build_brief` with no `worktree_path` argument
 ## Design Decisions
 
 - **Worktree beside the checkout, not in the data folder.** git worktrees should live outside the checkout tree. A sibling path keeps the layout predictable, matches what the terminal user would expect, and makes manual cleanup straightforward.
-- **Subfolder per worktree, not a `project` override.** The page creates a Crew subfolder with `project_dir = Worktree_Path`. This is the confirmed capability (apps may create folders). The `project` parameter in `POST /api/chat/slots` is unconfirmed for apps (Open Question A). The build task must resolve this before work starts.
+- **Subfolder per worktree, confirmed approach.** `POST /api/chat/folders` accepts `project_dir` from apps (Crew 0.12.2, `chat_folders_routes.py`); `POST /api/chat/slots` has no directory field. The page creates one `owner_app` Crew subfolder per started card with `project_dir = Worktree_Path`, opens the chat there, and removes the subfolder on cleanup.
 - **Worktree creation in the reserve step.** Reserve is the backend step that runs before any Crew call. Creating the worktree there means: if it fails, nothing is orphaned in Crew. If it succeeds and the Crew calls fail, the worktree is reused on the next retry (criterion 2.4).
 - **Old records without new fields stay readable.** `_check_records` treats missing `worktree_path` and `worktree_folder_id` as `null`. Adding these fields to the writer always ensures the file stays in a known form after any write.
 - **Default `worktree: true`.** The story says the setting is "on by default". Existing installations that have no `worktree` key in `setup.json` get the new behaviour automatically, which matches the epic's intent.
-- **Worktree_Path as a pure function.** `worktree_path(repository, branch)` does no filesystem access. This lets the brief builder and the page compute the path without subprocess cost, and makes it easy to test.
+- **Worktree named after the record, not the branch.** Using the chat record's name (`epic-board-xxxxxxxx`) as the path component avoids the failure where `git worktree add -b story/<spec>` fails because that branch already exists after the spec PR merged. The conductor creates its branch inside the detached worktree as the brief says. The record name is unique per start, so each retry and each new group gets its own path.
+- **Worktree_Path as a pure function.** `worktree_path(repository, name)` does no filesystem access. This lets the brief builder and the page compute the path without subprocess cost, and makes it easy to test.
 
 ## Open Questions
 
-**A. Creating a Crew subfolder with `project_dir`.**
-Does `POST /api/chat/folders` accept a `project_dir` field for apps, and does Crew use it as the conductor's working directory? Confirm in Crew's source at `src/kiro_crew/dashboard/chat_folders_routes.py` before building. If not available, check whether `POST /api/chat/slots` supports a `project` parameter for apps (`chat_slots_routes.py`). The build MUST NOT start until one of these two is confirmed. If neither works, the worktree is created but the chat still runs in the shared checkout; update this question and Requirements 2 and 3 to match.
+**A. Resolved.** `POST /api/chat/folders` accepts `project_dir` from apps (confirmed from Crew 0.12.2, `chat_folders_routes.py`). Crew marks the folder `owner_app`. `POST /api/chat/slots` has no directory field. The subfolder-per-card approach is the decided design.
 
 **B. Deleting a Crew subfolder.**
-Does `DELETE /api/chat/folders/<id>` exist and work for apps? This is used in cleanup (Requirement 5, criterion 3). If it does not exist, skip the subfolder deletion and leave the note "folder not removed" in the cleanup response. Update Requirement 5, criterion 3 to match.
+Does `DELETE /api/chat/folders/<id>` exist and work for apps? This is used in cleanup (Requirement 5, criterion 3). Task 1.1 confirms it. If it does not exist, skip the subfolder deletion and leave the note "folder not removed" in the cleanup response. Update Requirement 5, criterion 3 to match.
 
 **C. The permissions entry.**
-`app.json` already lists `/api/chat/folders`. Does that cover `POST` and `DELETE` requests as well as `GET`? Confirm from the host's `useAppApi` or `permissions.api` documentation. If a separate entry is needed, add it and update the start spec's Requirement 1, criterion 3 (edited in place by the set-up-projects spec).
+`app.json` already lists `/api/chat/folders`. Does that cover `POST` and `DELETE` requests as well as `GET`? Task 1.1 confirms. If a separate entry is needed, add it and update the start spec's Requirement 1, criterion 3 (edited in place by the set-up-projects spec).

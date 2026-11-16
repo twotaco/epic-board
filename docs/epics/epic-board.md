@@ -13,7 +13,7 @@ It matters now because the plan already lives in files on main, and nothing show
 - Editing the plan from the board: moving cards, changing statuses or writing epic files.
 - The board following a conductor's work for the person. The board shows one of six states for the story's chat and its workers and embeds Crew's own chat for the person to use. The board's own code does not read the chat's messages, and does not approve or answer anything for the conductor.
 - Merging. The conductor opens pull requests and the person reviews and merges them.
-- Creating or renaming Crew folders, or editing a folder's project directory. The board reads folders; Crew manages them.
+- Creating or renaming the person's Crew folders, or editing their project directories. The board reads the person's folders; Crew manages them. Exception: when "Start each story in its own worktree" is on for a project, the board creates one app-owned (`owner_app`) Crew subfolder per started card to set that card's working directory, and removes it on cleanup.
 
 ## Stories
 
