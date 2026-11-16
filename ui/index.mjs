@@ -504,6 +504,12 @@ export async function readChats({ backend, gateway, previous = initialChats, now
       const state = stateOf(row, role, workers, now())
       byKey[key] = { state, lastTs: row.last_ts, messages: row.messages, role, roleRead }
       if (state === 'review') byKey[key].review = reviewOf(row)
+      if (previous.byKey?.[key]?.state === 'review') {
+        const rowLinks = Array.isArray(row.source_links) ? row.source_links : []
+        if (rowLinks.some((link) => isObject(link) && (link.state === 'merged' || link.state === 'closed'))) {
+          byKey[key].prTerminated = true
+        }
+      }
       continue
     }
     const detail = await detailOf(key)
@@ -603,6 +609,7 @@ export function cardViewOf(card, chats, ui = {}, nowMs = chats.at) {
       stateHref: entry?.state === 'review' && entry.review ? entry.review.url : null,
       brief: ui.briefs?.[key] ?? null,
       open: ui.open?.key === key,
+      cleanup: ui.cleanups?.[record.name] ?? null,
     }
   }
   if (card.status === 'done') return { mode: 'plain' }
@@ -1133,6 +1140,7 @@ const STEP_TEXT = {
 
 const NO_ACTIONS = Object.freeze({
   ask() {}, cancel() {}, start() {}, close() {}, sendBrief() {}, resume() {}, startAgain() {}, filter() {}, openChat() {}, switchProject() {},
+  removeWorktree() {},
 })
 
 // A button: the host's Btn (`primary` for the main action only), or a native button marked as a fallback.
@@ -1153,6 +1161,11 @@ function renderChatPart(h, card, view, actions, parts = {}, projectWorktree = tr
   const { Btn, Badge } = parts
   switch (view.mode) {
     case 'chat': {
+      if (view.cleanup?.kind === 'kept') {
+        return h('div', { className: 'eb-chat-controls', key: 'cleanup' },
+          h('p', { role: 'status', className: 'eb-chat-note' }, `Worktree kept: uncommitted changes at ${view.cleanup.path}.`),
+          renderButton(h, Btn, { type: 'button', onClick: () => actions.removeWorktree(view.name, true) }, 'Remove anyway'))
+      }
       const chat = []
       if (view.state || view.open) {
         const word = view.stateHref
@@ -1592,6 +1605,7 @@ const BACKEND_BASE = '/apps/epic-board/api'
 //                                               with `focus` ask for focus on the card that was open
 export const initialUi = Object.freeze({
   asking: null, flows: Object.freeze({}), resumes: Object.freeze({}), briefs: Object.freeze({}), focus: null, open: null,
+  cleanups: Object.freeze({}),
 })
 
 function without(object, key) {
@@ -1638,6 +1652,10 @@ export function uiReduce(state, action) {
       return { ...state, briefs: { ...state.briefs, [action.key]: { kind: 'failed', reason: action.reason } } }
     case 'brief-sent':
       return { ...state, briefs: without(state.briefs, action.key) }
+    case 'worktree-kept':
+      return { ...state, cleanups: { ...state.cleanups, [action.name]: { kind: 'kept', path: action.path } } }
+    case 'cleanup-done':
+      return { ...state, cleanups: without(state.cleanups, action.name) }
     case 'open-chat':
       return state.open?.key === action.key ? state : { ...state, open: { cardId: action.cardId, key: action.key } }
     case 'close-chat': {
@@ -1676,6 +1694,7 @@ export function makeBackend(fetchFn, projectId = null) {
     get: (path, init) => call('GET', path, undefined, init),
     post: (path, body, init) => call('POST', path, body, init),
     del: (path, init) => call('DELETE', path, undefined, init),
+    patch: (path, body, init) => call('PATCH', path, body, init),
   }
 }
 
@@ -1773,7 +1792,7 @@ export function createBoard(React, env = {}) {
     // `projectId` tracks the project of the active effect run; old callbacks compare against it.
     const latest = useRef(null)
     if (latest.current === null) {
-      latest.current = { starts: new Set(), briefs: new Map(), sending: new Set(), timers: new Set(), poller: null, alive: false, projectId: null }
+      latest.current = { starts: new Set(), briefs: new Map(), sending: new Set(), timers: new Set(), poller: null, alive: false, projectId: null, cleanups: new Set(), cleanupRecord: null }
     }
     latest.current.chats = chats
     latest.current.api = api
@@ -1872,6 +1891,7 @@ export function createBoard(React, env = {}) {
       const gateway = {
         get: (path, init) => (latest.current.api ? latest.current.api.get(path, init) : Promise.reject(new Error(NO_CLIENT))),
         post: (path, ...rest) => (latest.current.api ? latest.current.api.post(path, ...rest) : Promise.reject(new Error(NO_CLIENT))),
+        patch: (path, ...rest) => (latest.current.api ? latest.current.api.patch(path, ...rest) : Promise.reject(new Error(NO_CLIENT))),
       }
       latest.current.backend = backend
       latest.current.gateway = gateway
@@ -1897,7 +1917,20 @@ export function createBoard(React, env = {}) {
         hidden: () => doc.hidden,
         setTimer: (fn, ms) => setTimer(fn, ms),
         clearTimer: (handle) => clearTimer(handle),
-        onResult: (result) => { if (live()) chatsDispatch(result) },
+        onResult: (result) => {
+          if (!live()) return
+          chatsDispatch(result)
+          if (result.kind === 'chats') {
+            const { cleanups, cleanupRecord: doCleanup } = latest.current
+            for (const [key, entry] of Object.entries(result.read.byKey)) {
+              if (entry.prTerminated && !cleanups.has(key)) {
+                cleanups.add(key)
+                const record = result.read.chats.find((r) => r.key === key)
+                if (record && doCleanup) doCleanup(record)
+              }
+            }
+          }
+        },
         classifyAnswer: classifyChats,
         delay: chatDelay,
       })
@@ -1961,6 +1994,47 @@ export function createBoard(React, env = {}) {
     const live = (fn) => (...args) => { if (latest.current.alive) fn(...args) }
     const ownUi = live(uiDispatch)
     const ownChats = live(chatsDispatch)
+
+    const finishCleanup = async (record, isLive, backend, gateway) => {
+      const { name } = record
+      const folderId = typeof record.worktree_folder_id === 'string' && record.worktree_folder_id ? record.worktree_folder_id : null
+      if (folderId) {
+        try {
+          await gateway.patch(`/api/chat/folders/${encodeURIComponent(folderId)}`, { project_dir: '' })
+        } catch { /* ignore */ }
+      }
+      if (!isLive()) return
+      try {
+        await backend.del(`/chats/${encodeURIComponent(name)}`)
+        if (!isLive()) return
+        ownChats({ kind: 'removed', name })
+        ownUi({ kind: 'cleanup-done', name })
+        ownUi({ kind: 'close-chat', key: record.key })
+      } catch { /* ignore */ }
+    }
+
+    const cleanupRecord = async (record) => {
+      const cleanProjectId = latest.current.projectId
+      const isLive = () => latest.current.projectId === cleanProjectId && latest.current.alive
+      const backend = latest.current.backend
+      const gateway = latest.current.gateway
+      const { name } = record
+      const worktreePath = typeof record.worktree_path === 'string' && record.worktree_path ? record.worktree_path : null
+      if (worktreePath) {
+        try {
+          await backend.del(`/chats/${encodeURIComponent(name)}/worktree`)
+        } catch (error) {
+          if (!isLive()) return
+          if (error?.error?.code === 'worktree_has_changes') {
+            ownUi({ kind: 'worktree-kept', name, path: worktreePath })
+            return
+          }
+        }
+        if (!isLive()) return
+      }
+      await finishCleanup(record, isLive, backend, gateway)
+    }
+    latest.current.cleanupRecord = cleanupRecord
 
     const filter = (key) => {
       setFilterKey(key)
@@ -2129,6 +2203,28 @@ export function createBoard(React, env = {}) {
         } catch (error) {
           if (record) ownUi({ kind: 'resume-failed', key: record.key, reason: error.reason ?? String(error?.message ?? error) })
         }
+      },
+      async removeWorktree(name, force = false) {
+        const record = latest.current.chats.records.find((candidate) => candidate.name === name)
+        if (!record) return
+        const worktreePath = typeof record.worktree_path === 'string' && record.worktree_path ? record.worktree_path : null
+        if (!worktreePath) return
+        const removeProjectId = latest.current.projectId
+        const isLive = () => latest.current.projectId === removeProjectId && latest.current.alive
+        const backend = latest.current.backend
+        const gateway = latest.current.gateway
+        const path = `/chats/${encodeURIComponent(name)}/worktree${force ? '?force=true' : ''}`
+        try {
+          await backend.del(path)
+        } catch (error) {
+          if (!isLive()) return
+          if (error?.error?.code === 'worktree_has_changes') {
+            ownUi({ kind: 'worktree-kept', name, path: worktreePath })
+          }
+          return
+        }
+        if (!isLive()) return
+        await finishCleanup(record, isLive, backend, gateway)
       },
     }
 

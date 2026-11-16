@@ -137,6 +137,7 @@ function makeGateway() {
     calls,
     get: send('get'),
     post: send('post'),
+    patch: send('patch'),
     paths: () => calls.map(([, path]) => path),
     // Settles the oldest pending call on `path`.
     answer(path, value) {
@@ -1499,7 +1500,8 @@ test('the page source has no innerHTML, script injection, other network paths or
   // The page never deletes anything in Crew: all `.del(` calls go to the app's own backend.
   const dels = source.match(/[A-Za-z_.]+\.del\(/g) ?? []
   assert.ok(dels.length >= 1 && dels.every((d) => d === 'backend.del('), 'only the backend client deletes')
-  assert.equal(/\.(del|delete|put|patch)\(\s*['"`]\/api\//.test(source), false, 'no write but post to Crew')
+  // PATCH /api/chat/folders/<id> is intentional (cleanup clears project_dir); del/delete/put are still forbidden on Crew paths.
+  assert.equal(/\.(del|delete|put)\(\s*['"`]\/api\//.test(source), false, 'no delete or put to Crew')
   assert.equal(/slots\/\$\{[^}]*\}\/(?!resume)/.test(source), false, 'the only per-chat route built in a template is resume')
 })
 
@@ -1883,4 +1885,136 @@ test('kit: the folder-read failure shows an error notice with status, and Try ag
   retry.props.onClick()
   await flush()
   assert.match(page.text(), /Loading/)
+})
+
+// ---- Cleanup flow (a-worktree-per-card Requirements 5.1-5.5, 7.2) ----
+
+const WT_PATH = '/home/alice/my-project--epic-board-aaaa1111'
+const WT_FOLDER_ID = 'wf_123'
+const WRECORD = { card_id: ALPHA, name: NAME, key: NAME, created: 't', worktree_path: WT_PATH, worktree_folder_id: WT_FOLDER_ID }
+const openPr = { kind: 'change', number: 1, url: 'https://github.com/o/r/pull/1', state: 'open' }
+const mergedPr = { kind: 'change', number: 1, url: 'https://github.com/o/r/pull/1', state: 'merged' }
+
+// One read cycle: answer the records fetch then the Crew list, return the index after.
+async function chatCycleWith(page, records, crewRows) {
+  const idx = page.chatFetch.calls.length - 1
+  page.chatFetch.answer(idx, 200, chatsAnswer(records))
+  await flush()
+  page.gateway.answer('/api/chat/slots?crew=all', crewRows)
+  await flush()
+}
+
+// Drive a chat into review state (open PR, needs detail read), return the index used.
+async function reviewCycle(page, records, extraRow = {}) {
+  await chatCycleWith(page, records, [row(NAME, { source_links: [openPr], ...extraRow })])
+  page.gateway.answer(detailPath(NAME), { messages: [{ role: 'assistant' }] })
+  await flush()
+}
+
+test('cleanup: PR merged → worktree route called, subfolder PATCHed, record deleted, card resets', async () => {
+  const page = await ready({}, [WRECORD])
+  // Cycle 1: open PR → review state (caches roleRead)
+  await reviewCycle(page, [WRECORD])
+  assert.match(page.text(), /Review #1/)
+
+  // Advance to trigger the next read (review state uses 15 s delay)
+  page.clock.advance(15000)
+  // Cycle 2: same records, merged PR → prTerminated detected
+  await chatCycleWith(page, [WRECORD], [row(NAME, { source_links: [mergedPr] })])
+
+  // cleanupRecord starts: DELETE /chats/name/worktree
+  const worktreeIdx = page.chatFetch.calls.length - 1
+  page.chatFetch.answer(worktreeIdx, 200, { ok: true })
+  await flush()
+
+  // Then PATCH /api/chat/folders/wf_123
+  assert.ok(page.gateway.calls.some(([verb, path]) => verb === 'patch' && path === `/api/chat/folders/${WT_FOLDER_ID}`), 'PATCH called on worktree folder')
+  page.gateway.answer(`/api/chat/folders/${WT_FOLDER_ID}`, {})
+  await flush()
+
+  // Then DELETE /chats/name
+  const deleteIdx = page.chatFetch.calls.length - 1
+  page.chatFetch.answer(deleteIdx, 200, { removed: true })
+  await flush()
+
+  // Card resets: no link, Start button available (after clicking the card)
+  assert.equal(anchors(page).filter((a) => a.props.href === `/chat?sid=${NAME}`).length, 0, 'link gone after cleanup')
+  click(page, 'Card Alpha')
+  assert.match(page.text(), /Start a conductor on this story\?/)
+})
+
+test('cleanup: worktree_has_changes → "Worktree kept" shown with role=status, "Remove anyway" button present', async () => {
+  const page = await ready({}, [WRECORD])
+  await reviewCycle(page, [WRECORD])
+
+  page.clock.advance(15000)
+  await chatCycleWith(page, [WRECORD], [row(NAME, { source_links: [mergedPr] })])
+
+  // DELETE /chats/name/worktree → 409 worktree_has_changes
+  const worktreeIdx = page.chatFetch.calls.length - 1
+  page.chatFetch.answer(worktreeIdx, 409, { error: { code: 'worktree_has_changes', message: 'has changes', path: WT_PATH } })
+  await flush()
+
+  assert.match(page.text(), /Worktree kept/)
+  assert.match(page.text(), new RegExp(WT_PATH.replace(/\//g, '\\/')))
+  const statusEls = findAll(page.tree(), (n) => n.props?.role === 'status')
+  assert.ok(statusEls.some((el) => textOf(el).includes('Worktree kept')), 'Worktree kept text has role=status')
+  const removeAnyway = buttonNamed(page, 'Remove anyway')
+  assert.ok(removeAnyway, '"Remove anyway" button present')
+  assert.equal(removeAnyway.type, 'button', '"Remove anyway" is a native button when no Btn kit')
+})
+
+test('cleanup: "Remove anyway" force-removes the worktree and resets the card', async () => {
+  const page = await ready({}, [WRECORD])
+  await reviewCycle(page, [WRECORD])
+
+  page.clock.advance(15000)
+  await chatCycleWith(page, [WRECORD], [row(NAME, { source_links: [mergedPr] })])
+
+  // 409 → "Worktree kept" state
+  page.chatFetch.answer(page.chatFetch.calls.length - 1, 409, { error: { code: 'worktree_has_changes', message: 'has changes', path: WT_PATH } })
+  await flush()
+  assert.ok(buttonNamed(page, 'Remove anyway'))
+
+  // Click "Remove anyway"
+  click(page, 'Remove anyway')
+  await flush()
+
+  // DELETE /chats/name/worktree?force=true
+  const forceCall = page.chatFetch.calls.find(([url]) => url.includes('/worktree?force=true'))
+  assert.ok(forceCall, 'force-remove route called')
+  const forceIdx = page.chatFetch.calls.indexOf(forceCall)
+  page.chatFetch.answer(forceIdx, 200, { ok: true })
+  await flush()
+
+  // PATCH folder
+  page.gateway.answer(`/api/chat/folders/${WT_FOLDER_ID}`, {})
+  await flush()
+
+  // DELETE record
+  page.chatFetch.answer(page.chatFetch.calls.length - 1, 200, { removed: true })
+  await flush()
+
+  // Card resets
+  assert.doesNotMatch(page.text(), /Worktree kept/)
+  assert.equal(anchors(page).filter((a) => a.props.href === `/chat?sid=${NAME}`).length, 0)
+})
+
+test('cleanup: non-worktree record (worktree_path null) skips worktree route, deletes record directly', async () => {
+  const nullRecord = { card_id: ALPHA, name: NAME, key: NAME, created: 't', worktree_path: null, worktree_folder_id: null }
+  const page = await ready({}, [nullRecord])
+  await reviewCycle(page, [nullRecord])
+
+  page.clock.advance(15000)
+  await chatCycleWith(page, [nullRecord], [row(NAME, { source_links: [mergedPr] })])
+
+  const callsBefore = page.chatFetch.calls.length
+  // No worktree DELETE, no PATCH; only the record DELETE
+  const deleteIdx = page.chatFetch.calls.length - 1
+  page.chatFetch.answer(deleteIdx, 200, { removed: true })
+  await flush()
+
+  assert.ok(!page.chatFetch.calls.some(([url]) => url.includes('/worktree')), 'no worktree route called')
+  assert.ok(!page.gateway.calls.some(([verb]) => verb === 'patch'), 'no PATCH to Crew')
+  assert.equal(anchors(page).filter((a) => a.props.href === `/chat?sid=${NAME}`).length, 0, 'card reset after record delete')
 })
