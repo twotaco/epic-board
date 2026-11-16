@@ -491,7 +491,8 @@ def make_handler(state, router=None):
                     if (old_rp is not None and
                             old_rp.settings.repository == project.repository and
                             old_rp.settings.folder == project.folder and
-                            old_rp.settings.records_file == project.records_file):
+                            old_rp.settings.records_file == project.records_file and
+                            old_rp.settings.worktree == project.worktree):
                         new_running.append(old_rp)
                         reused.add(id(old_rp))
                     else:

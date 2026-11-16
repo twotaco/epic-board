@@ -1530,7 +1530,7 @@ export function renderSetupView(h, setupState, actions, kit = {}) {
             h('input', {
               type: 'checkbox',
               checked: worktrees[folder.id] !== false,
-              onChange: (e) => actions.worktreeFolder?.({ folderId: folder.id, value: e.target.checked }),
+              onChange: () => actions.worktreeFolder?.({ folderId: folder.id, value: worktrees[folder.id] === false }),
             }),
             'Start each story in its own worktree')
           : null)

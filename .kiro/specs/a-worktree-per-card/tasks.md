@@ -89,7 +89,7 @@ Group 1 covers all backend changes: git worktree operations, chat record fields,
 
 - [x] 3. Page: cleanup flow
   - [x] 3.1 Detect merged or closed PR in `ui/index.mjs`
-    - In the chat poller state update: when a Started_Chat's `source_links` gains a PR with `state` `merged` or `closed` (a transition from `open`/`draft` to terminal), set a cleanup flag for that card
+    - On every read of a Started_Chat: when the record has a `worktree_path` and its `source_links` has at least one PR with `state` `merged` or `closed` and none with `open` or `draft`, set a cleanup flag for that card. No earlier read is needed; a fresh load after a merge triggers cleanup immediately. The flag is set once per record key per page load.
     - _Requirements: 5.1_
   - [x] 3.2 Remove worktree and subfolder
     - When the cleanup flag is set for a card AND `worktree_path` is set: call `DELETE .../chats/<name>/worktree`
@@ -103,9 +103,10 @@ Group 1 covers all backend changes: git worktree operations, chat record fields,
     - The "Worktree kept" text has role `status`; "Remove anyway" is reachable by keyboard and acts on Enter or Space
     - _Requirement 7.2_
   - [x] 3.4 Test in `tests/ui/board.test.mjs`
-    - `source_links` PR transitions to `merged`: cleanup called; worktree removal route called; subfolder PATCH called with `project_dir: ""`; record deleted; card reset
-    - `worktree_has_changes` response: "Worktree kept" shown; "Remove anyway" button present
-    - Non-worktree record: cleanup skips worktree route; deletes record directly
+    - Started_Chat with `worktree_path` set and `source_links` showing a merged PR (no open PR): cleanup fires on first read; worktree route called; subfolder PATCH called; record deleted; card reset
+    - `worktree_has_changes` (409): "Worktree kept" shown; "Remove anyway" triggers force-remove; on success card resets
+    - Non-worktree record (`worktree_path` null): no cleanup at all; card unchanged
+    - Non-409 failure from worktree route: record is kept; next load retries
     - _Requirements: 5.1–5.5, 7.2_
   - [x] 3.5 Run the tests
     - Run `python3 -m unittest discover -s tests -t .` and `node --test tests/ui/*.test.mjs` and report the counts run, passed and skipped for each
