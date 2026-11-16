@@ -1,6 +1,7 @@
 import unittest
 
-from plan import build_plan
+from gitsource import SourceError
+from plan import build_plan, extract_headings, read_instructions
 
 
 class Memory:
@@ -296,6 +297,58 @@ class CardIdTests(unittest.TestCase):
             for item in group["cards"]:
                 self.assertIsInstance(item["id"], str)
                 self.assertTrue(item["id"].endswith("#" + item["name"]))
+
+
+class ReadInstructionsTests(unittest.TestCase):
+    def test_returns_text_for_an_existing_file(self):
+        source = Memory({"AGENTS.md": "# Rules\nDo this."})
+        self.assertEqual(read_instructions(source), "# Rules\nDo this.")
+
+    def test_returns_none_for_a_missing_file(self):
+        source = Memory({"AGENTS.md": SourceError("read_failed", "not found")})
+        self.assertIsNone(read_instructions(source))
+
+    def test_returns_none_for_an_unreadable_file_oserror(self):
+        source = Memory({"AGENTS.md": OSError("disk error")})
+        self.assertIsNone(read_instructions(source))
+
+    def test_returns_none_for_an_unreadable_file_valueerror(self):
+        source = Memory({"AGENTS.md": ValueError("bad encoding")})
+        self.assertIsNone(read_instructions(source))
+
+    def test_returns_none_when_source_has_no_file(self):
+        class NoFile:
+            def read_file(self, path):
+                raise KeyError(path)
+        self.assertIsNone(read_instructions(NoFile()))
+
+    def test_returns_none_when_source_raises_source_error(self):
+        class Broken:
+            def read_file(self, path):
+                raise SourceError("read_failed", "boom")
+        self.assertIsNone(read_instructions(Broken()))
+
+
+class ExtractHeadingsTests(unittest.TestCase):
+    def test_headings_at_several_levels(self):
+        text = "# One\n## Two\n### Three\n#### Four\nNot a heading\n"
+        self.assertEqual(extract_headings(text), ["# One", "## Two", "### Three", "#### Four"])
+
+    def test_no_headings(self):
+        self.assertEqual(extract_headings("Just text\nAnother line\n"), [])
+
+    def test_empty_text(self):
+        self.assertEqual(extract_headings(""), [])
+
+    def test_lines_without_space_after_hash_are_not_headings(self):
+        self.assertEqual(extract_headings("#nospace\n##also\n"), [])
+
+    def test_indented_headings_are_stripped(self):
+        self.assertEqual(extract_headings("  # Indented\n"), ["# Indented"])
+
+    def test_mixed_content(self):
+        text = "Intro\n# Title\nBody\n## Section\n- list\n### Sub\n"
+        self.assertEqual(extract_headings(text), ["# Title", "## Section", "### Sub"])
 
 
 if __name__ == "__main__":

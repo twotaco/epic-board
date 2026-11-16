@@ -9,6 +9,8 @@ from parse import parse_epic, parse_stories, parse_tasks, spec_folder
 
 SPECS = ".kiro/specs"
 EPICS = "docs/epics"
+AGENTS_FILE = "AGENTS.md"
+INSTRUCTIONS_THRESHOLD = 3000
 
 
 def spec_status(counts):
@@ -113,3 +115,21 @@ def build_plan(source):
         groups.append({"epic": None, "cards": loose})
     add_ids(groups)
     return groups, problems
+
+
+def read_instructions(source):
+    try:
+        return source.read_file(AGENTS_FILE)
+    except Exception:
+        return None
+
+
+def extract_headings(text):
+    headings = []
+    for line in text.splitlines():
+        stripped = line.lstrip()
+        if stripped and stripped[0] == '#':
+            rest = stripped.lstrip('#')
+            if rest and rest[0] == ' ':
+                headings.append(stripped)
+    return headings
