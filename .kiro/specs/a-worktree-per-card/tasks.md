@@ -92,11 +92,12 @@ Group 1 covers all backend changes: git worktree operations, chat record fields,
     - In the chat poller state update: when a Started_Chat's `source_links` gains a PR with `state` `merged` or `closed` (a transition from `open`/`draft` to terminal), set a cleanup flag for that card
     - _Requirements: 5.1_
   - [x] 3.2 Remove worktree and subfolder
-    - When the cleanup flag is set for a card: call `DELETE .../chats/<name>/worktree`
+    - When the cleanup flag is set for a card AND `worktree_path` is set: call `DELETE .../chats/<name>/worktree`
     - On 200 `{ok: true}`: if the record has a `worktree_folder_id`, send `PATCH /api/chat/folders/<worktree_folder_id>` with `{"project_dir": ""}` (silently ignore failure); then call `DELETE .../chats/<name>` to remove the record; re-render the card
     - On 409 `worktree_has_changes`: show "Worktree kept: uncommitted changes at `<path>`." on the card with a "Remove anyway" button
+    - On any other failure from the worktree route: stop — do not PATCH, do not delete the record; the next load retries
     - "Remove anyway" calls `DELETE .../chats/<name>/worktree?force=true`; on success, proceeds as the 200 path above
-    - When `worktree_path` is null (non-worktree record): skip the worktree route; delete the record directly
+    - When `worktree_path` is null (non-worktree record): do nothing — do not call the worktree route and do not delete the record; the card stays as is
     - _Requirements: 5.1–5.5_
   - [x] 3.3 Accessibility
     - The "Worktree kept" text has role `status`; "Remove anyway" is reachable by keyboard and acts on Enter or Space

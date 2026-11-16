@@ -2000,21 +2000,99 @@ test('cleanup: "Remove anyway" force-removes the worktree and resets the card', 
   assert.equal(anchors(page).filter((a) => a.props.href === `/chat?sid=${NAME}`).length, 0)
 })
 
-test('cleanup: non-worktree record (worktree_path null) skips worktree route, deletes record directly', async () => {
+test('cleanup: non-worktree record (worktree_path null) does nothing — no delete, card stays', async () => {
   const nullRecord = { card_id: ALPHA, name: NAME, key: NAME, created: 't', worktree_path: null, worktree_folder_id: null }
   const page = await ready({}, [nullRecord])
   await reviewCycle(page, [nullRecord])
 
   page.clock.advance(15000)
-  await chatCycleWith(page, [nullRecord], [row(NAME, { source_links: [mergedPr] })])
-
   const callsBefore = page.chatFetch.calls.length
-  // No worktree DELETE, no PATCH; only the record DELETE
-  const deleteIdx = page.chatFetch.calls.length - 1
-  page.chatFetch.answer(deleteIdx, 200, { removed: true })
+  await chatCycleWith(page, [nullRecord], [row(NAME, { source_links: [mergedPr] })])
   await flush()
 
   assert.ok(!page.chatFetch.calls.some(([url]) => url.includes('/worktree')), 'no worktree route called')
   assert.ok(!page.gateway.calls.some(([verb]) => verb === 'patch'), 'no PATCH to Crew')
-  assert.equal(anchors(page).filter((a) => a.props.href === `/chat?sid=${NAME}`).length, 0, 'card reset after record delete')
+  // Record is not deleted; the chat link is still present
+  assert.ok(anchors(page).some((a) => a.props.href === `/chat?sid=${NAME}`), 'chat link still present')
+})
+
+test('cleanup: fires on first read after reload (no prior state), merged PR only', async () => {
+  // Fresh load — no reviewCycle first; cleanup fires on the very first cycle.
+  const page = await ready({}, [WRECORD])
+  // Answer the CHAT_LIST from the first (and only pending) cycle
+  await chatCycleWith(page, [WRECORD], [row(NAME, { source_links: [mergedPr] })])
+  // No prior roleRead cache → detail read fires; answer it
+  page.gateway.answer(detailPath(NAME), { messages: [{ role: 'assistant' }] })
+  await flush()
+  // readChats returned with prTerminated=true; cleanupRecord is running:
+  // DELETE /chats/name/worktree is the latest chatFetch call
+  const worktreeIdx = page.chatFetch.calls.length - 1
+  page.chatFetch.answer(worktreeIdx, 200, { ok: true })
+  await flush()
+
+  // Then PATCH /api/chat/folders/wf_123
+  assert.ok(page.gateway.calls.some(([verb, path]) => verb === 'patch' && path === `/api/chat/folders/${WT_FOLDER_ID}`), 'PATCH called')
+  page.gateway.answer(`/api/chat/folders/${WT_FOLDER_ID}`, {})
+  await flush()
+
+  // Then DELETE /chats/name
+  page.chatFetch.answer(page.chatFetch.calls.length - 1, 200, { removed: true })
+  await flush()
+
+  assert.equal(anchors(page).filter((a) => a.props.href === `/chat?sid=${NAME}`).length, 0, 'card reset')
+})
+
+test('cleanup: no cleanup while another PR is still open', async () => {
+  const page = await ready({}, [WRECORD])
+  await reviewCycle(page, [WRECORD])
+
+  page.clock.advance(15000)
+  const callsBefore = page.chatFetch.calls.length
+  // source_links has both a merged and an open PR
+  const mixedLinks = [mergedPr, { kind: 'change', number: 2, url: 'https://github.com/o/r/pull/2', state: 'open' }]
+  await chatCycleWith(page, [WRECORD], [row(NAME, { source_links: mixedLinks })])
+  await flush()
+
+  assert.ok(!page.chatFetch.calls.slice(callsBefore).some(([url]) => url.includes('/worktree')), 'no worktree route called')
+})
+
+test('cleanup: failed worktree removal (500) keeps the record', async () => {
+  const page = await ready({}, [WRECORD])
+  await reviewCycle(page, [WRECORD])
+
+  page.clock.advance(15000)
+  await chatCycleWith(page, [WRECORD], [row(NAME, { source_links: [mergedPr] })])
+
+  // DELETE /chats/name/worktree → 500
+  page.chatFetch.answer(page.chatFetch.calls.length - 1, 500, { error: { code: 'server_error', message: 'oops' } })
+  await flush()
+
+  // No PATCH, no record DELETE
+  assert.ok(!page.gateway.calls.some(([verb]) => verb === 'patch'), 'no PATCH after 500')
+  assert.ok(!page.chatFetch.calls.some(([url]) => url.endsWith('/chats/' + NAME) && !url.includes('/worktree')), 'record not deleted')
+  // Chat link still present
+  assert.ok(anchors(page).some((a) => a.props.href === `/chat?sid=${NAME}`), 'chat link still present')
+})
+
+test('cleanup: force=true URL uses & when project is selected', async () => {
+  const page = await ready({}, [WRECORD])
+  await reviewCycle(page, [WRECORD])
+
+  page.clock.advance(15000)
+  await chatCycleWith(page, [WRECORD], [row(NAME, { source_links: [mergedPr] })])
+
+  // 409 → "Worktree kept"
+  page.chatFetch.answer(page.chatFetch.calls.length - 1, 409, { error: { code: 'worktree_has_changes', message: 'has changes', path: WT_PATH } })
+  await flush()
+  assert.ok(buttonNamed(page, 'Remove anyway'))
+
+  click(page, 'Remove anyway')
+  await flush()
+
+  // The force URL must be ?force=true&project=p, not ?force=true?project=p
+  const forceCall = page.chatFetch.calls.find(([url]) => url.includes('force=true'))
+  assert.ok(forceCall, 'force call made')
+  const [forceUrl] = forceCall
+  assert.ok(forceUrl.includes('force=true&project='), `URL uses & separator, got: ${forceUrl}`)
+  assert.ok(!forceUrl.includes('force=true?'), `URL does not use ? after force=true, got: ${forceUrl}`)
 })

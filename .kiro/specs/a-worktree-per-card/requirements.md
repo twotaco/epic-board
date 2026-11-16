@@ -80,13 +80,13 @@ This story changes the board so that each started story works in its own git wor
 
 #### Acceptance Criteria
 
-1. WHEN the board reads the Chat_List and a Started_Chat's `source_links` changes to include a pull request whose `state` is `merged` or `closed` THEN the page SHALL ask the backend to remove the worktree for that chat.
+1. WHEN the board reads the Chat_List and a Started_Chat's record has a `worktree_path` and `source_links` has at least one pull request with `state` `merged` or `closed` and no pull request with `state` `open` or `draft` THEN the page SHALL ask the backend to remove the worktree for that chat. This check runs on every read; no prior read in the same session is required, so a reload after a PR is merged still triggers cleanup. The page fires cleanup at most once per record key per page load.
 2. THE backend removal route SHALL run `git worktree remove <path>` on the shared checkout. WHEN the worktree has no uncommitted changes, the removal SHALL succeed. WHEN it has uncommitted changes, the removal SHALL fail and the backend SHALL answer with a reason.
 3. WHEN the worktree is removed THEN the page SHALL send `PATCH /api/chat/folders/<worktree_folder_id>` with `{"project_dir": ""}` to clear the working directory, if the record has one. This is allowed for an app's own folder. If the PATCH fails, the board SHALL silently ignore the failure and proceed. After the PATCH (or on failure), the page SHALL delete the Chat_Record.
 4. WHEN the worktree cannot be removed because it has uncommitted changes THEN the card SHALL show "Worktree kept: uncommitted changes at `<path>`." in place of a state, with a "Remove anyway" button that force-removes with `git worktree remove --force <path>`.
-5. WHEN the worktree removal succeeds THEN the board SHALL delete the Chat_Record and show the card as it was before the chat was started (with its Start button in the Planned or In progress column, or no controls in Done).
+5. WHEN the worktree removal succeeds THEN the board SHALL delete the Chat_Record and show the card as it was before the chat was started (with its Start button in the Planned or In progress column, or no controls in Done). WHEN `worktree_path` is null (a non-worktree start), the page SHALL NOT call the cleanup route and SHALL NOT delete the Chat_Record. The card stays as it is.
 6. THE backend cleanup route SHALL require a valid gateway signature (the start spec's Requirement 5, criterion 7). It SHALL be: `DELETE /chats/<name>/worktree`.
-7. WHEN the worktree_path is `null` for a record (a non-worktree start) THEN the cleanup route SHALL answer 200 immediately and do nothing.
+7. WHEN the worktree_path is `null` for a record (a non-worktree start) THEN the cleanup route SHALL answer 200 immediately and do nothing. The page does not call this route for null-path records (see criterion 5).
 
 ### Requirement 6: Failure is visible
 

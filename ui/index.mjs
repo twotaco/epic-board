@@ -504,11 +504,12 @@ export async function readChats({ backend, gateway, previous = initialChats, now
       const state = stateOf(row, role, workers, now())
       byKey[key] = { state, lastTs: row.last_ts, messages: row.messages, role, roleRead }
       if (state === 'review') byKey[key].review = reviewOf(row)
-      if (previous.byKey?.[key]?.state === 'review') {
+      const hasWorktree = typeof record.worktree_path === 'string' && record.worktree_path !== ''
+      if (hasWorktree) {
         const rowLinks = Array.isArray(row.source_links) ? row.source_links : []
-        if (rowLinks.some((link) => isObject(link) && (link.state === 'merged' || link.state === 'closed'))) {
-          byKey[key].prTerminated = true
-        }
+        const hasTerminal = rowLinks.some((link) => isObject(link) && (link.state === 'merged' || link.state === 'closed'))
+        const hasActive = rowLinks.some((link) => isObject(link) && (link.state === 'open' || link.state === 'draft'))
+        if (hasTerminal && !hasActive) byKey[key].prTerminated = true
       }
       continue
     }
@@ -1673,13 +1674,14 @@ export function uiReduce(state, action) {
 // error that has `status` and `error` (the body's {code, message}). Like the plan request, it carries no
 // credential of its own: the host signs it on its way to the backend.
 export function makeBackend(fetchFn, projectId = null) {
-  const query = projectQuery(projectId)
+  const projectParam = projectQuery(projectId)
   const call = async (method, path, body, init = {}) => {
     const options = { method, credentials: 'same-origin', cache: 'no-store', signal: init.signal }
     if (body !== undefined) {
       options.headers = { 'Content-Type': 'application/json' }
       options.body = JSON.stringify(body)
     }
+    const query = projectParam === '' ? '' : (path.includes('?') ? '&' + projectParam.slice(1) : projectParam)
     const response = await fetchFn(BACKEND_BASE + path + query, options)
     let data = null
     try {
@@ -2020,18 +2022,17 @@ export function createBoard(React, env = {}) {
       const gateway = latest.current.gateway
       const { name } = record
       const worktreePath = typeof record.worktree_path === 'string' && record.worktree_path ? record.worktree_path : null
-      if (worktreePath) {
-        try {
-          await backend.del(`/chats/${encodeURIComponent(name)}/worktree`)
-        } catch (error) {
-          if (!isLive()) return
-          if (error?.error?.code === 'worktree_has_changes') {
-            ownUi({ kind: 'worktree-kept', name, path: worktreePath })
-            return
-          }
-        }
+      if (!worktreePath) return
+      try {
+        await backend.del(`/chats/${encodeURIComponent(name)}/worktree`)
+      } catch (error) {
         if (!isLive()) return
+        if (error?.error?.code === 'worktree_has_changes') {
+          ownUi({ kind: 'worktree-kept', name, path: worktreePath })
+        }
+        return
       }
+      if (!isLive()) return
       await finishCleanup(record, isLive, backend, gateway)
     }
     latest.current.cleanupRecord = cleanupRecord
