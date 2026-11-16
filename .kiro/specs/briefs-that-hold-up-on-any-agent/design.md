@@ -253,3 +253,13 @@ The backend's pure functions are tested with `unittest`, the held plan's thread-
 3. **When the model is absent.** The spec says "unknown". The owner may prefer to hide the line entirely. Confirmed on the host in task 3.1.
 4. **The name-check step for spec writing.** A spec names tables, functions and files that don't exist yet — they are "new (with the task that creates it)". The conductor still checks that every name it relies on (an existing file, an existing function) does exist. The step applies to both spec and build work, as the story decides.
 5. **The "Project instructions" section in the brief may duplicate what the harness already loaded.** A Claude Code harness that loads AGENTS.md on its own will see the instructions twice: once from the harness and once from the brief. This is harmless (the instructions are the same text) and avoids the case where the harness does not load them. The story prefers consistency over deduplication.
+
+### The owner's answers (2026-11-16, after the check on the board)
+
+The owner started "A worktree per card" from the board on the Kiro harness and confirmed its brief carries the "Project instructions (from AGENTS.md on main):" section and the Built-with trailer and Kiro Crew footer in the last step. The conductor confirmed in the chat which files it read. Epic Board's AGENTS.md is under 3000 characters, so the headings summary was checked only by the tests, not on the host.
+
+1. Another file the project names: not now; AGENTS.md only.
+2. Resolved, as above.
+3. The model is no longer shown on the card at all (Requirement 4.3 removed); the PR footer records it.
+4. The name check applies to spec work and building, as the spec says.
+5. The duplicate with a harness that loads AGENTS.md itself is accepted.

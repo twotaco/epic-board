@@ -90,8 +90,8 @@ Start this story after "Show the board" (`.kiro/specs/show-the-board/`) group 6 
     - Run `python3 -m unittest discover -s tests -t .` and `node --test tests/ui/*.test.mjs` and report the counts run, passed and skipped for each
     - _Requirements: 4.3, 4.4, 4.5, 4.6_
 
-- [ ] 3. Check on a Crew host
-  - [ ] 3.1 Install the app in Kiro Crew and check the brief and the card (done by you in the app)
+- [x] 3. Check on a Crew host
+  - [x] 3.1 Install the app in Kiro Crew and check the brief and the card (done by you in the app)
     - Start a story from the board on a project that has an AGENTS.md and confirm the brief carries the "Project instructions" section with the file's text
     - Confirm step 1 asks the conductor to say which files it read, and does not repeat the AGENTS.md pointer
     - Confirm the name-check step, the honest-reporting rules and the provenance rules are in the brief
