@@ -836,6 +836,7 @@ export const STYLE = `
 .eb-filters { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 0 0 16px 0; }
 .eb-filter { margin: 0; }
 .eb-filter select { font: inherit; padding: 4px 8px; }
+.eb-filter [role='combobox'], .eb-filter select { min-width: min(calc(100vw - 32px), calc(var(--eb-select-ch, 0) * 1ch + 64px)); }
 .eb-columns { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
 .eb-column { --eb-lane: var(--muted, currentColor); min-width: 0; border: 1px solid var(--border, currentColor); border-radius: var(--radius-md, 0); background: var(--card, transparent); overflow: hidden; }
 .eb-column[data-column='in progress'] { --eb-lane: var(--accent, currentColor); }
@@ -1250,7 +1251,11 @@ function renderProblems(h, problems) {
 // One dropdown, the host's Select when there is one, else a native select, in its own `div.eb-filter`.
 // Crew's Select (kirocrew-ui/Select.tsx, 0.12.2): `options` are the values as strings, `optionLabels` the
 // labels in the same order, and `onChange` receives the chosen value. `options` here is [{key, label}].
+// Crew's list is exactly as wide as its trigger, so the trigger is made at least as wide as the longest
+// label (`--eb-select-ch`, in characters), and the list does not squeeze its options while a short one
+// such as "All epics" is chosen.
 function renderDropdown(h, Select, { key, label, value, options, choose }) {
+  const longest = options.reduce((most, option) => Math.max(most, String(option.label ?? '').length), 0)
   const control = Select
     ? h(Select, {
       'aria-label': label,
@@ -1265,7 +1270,7 @@ function renderDropdown(h, Select, { key, label, value, options, choose }) {
       value,
       onChange: (event) => choose(event.target.value),
     }, options.map((option) => h('option', { key: option.key, value: option.key }, option.label)))
-  return h('div', { className: 'eb-filter', key }, control)
+  return h('div', { className: 'eb-filter', key, style: { '--eb-select-ch': String(longest) } }, control)
 }
 
 // The project dropdown, named "Project". `view` is {options: [{key, label}], currentId}.
