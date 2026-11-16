@@ -12,7 +12,8 @@ from datetime import datetime, timezone
 
 CHATS_FILE = "chats.json"
 NAME_PATTERN = re.compile(r"^[A-Za-z0-9._-]{1,193}$")
-RECORD_KEYS = {"card_id", "name", "key", "state", "created"}
+RECORD_KEYS = {"card_id", "name", "key", "state", "created", "worktree_path", "worktree_folder_id"}
+_OLD_RECORD_KEYS = {"card_id", "name", "key", "state", "created"}
 STATES = ("reserved", "started")
 MAX_CARD_ID_CHARS = 400
 SLUG_MAX_CHARS = 60
@@ -76,9 +77,11 @@ _NAME_CHECK = ("Before opening the pull request, list every table, column, funct
                "command your change adds or relies on. Mark each as existing (with the file where you found it) or "
                "new (with the task that creates it). Fix anything that is neither found nor created. "
                "Put the list in the PR description.")
+_SETUP_STEP = ("This story runs in its own worktree. Before anything else, run the project's setup "
+               "(as AGENTS.md says — for example `npm ci`).")
 
 
-def build_brief(card, epic_file, branch, taken=(), instructions=None):
+def build_brief(card, epic_file, branch, taken=(), instructions=None, worktree_path=None):
     """The first message of a conductor chat, as plain text built only from the card's name and spec
     folder, the epic file and the main branch. The same inputs give the same text. It never includes
     the story's description or any task text."""
@@ -102,6 +105,10 @@ def build_brief(card, epic_file, branch, taken=(), instructions=None):
     provenance = (f" End each commit message with the trailer: Built-with: Kiro Crew, Epic Board (story: {story_name}). "
                   f"End the PR description with: Built with Kiro Crew, started from Epic Board · Story: {story_name} · "
                   '<your harness>, <your model>. Write "unknown" for harness or model unless the brief or Crew states them.')
+    has_worktree = bool(worktree_path and worktree_path.strip())
+    catch_up = (f"Before opening or updating the pull request, run `git fetch origin` and "
+                f"`git merge origin/{branch}` in the worktree. Resolve any conflicts, rerun the checks "
+                "the project names and say so in this chat.")
     spec = card.get("spec")
     if spec is None:
         folder = slugify(card.get("name", ""), taken)
@@ -114,13 +121,19 @@ def build_brief(card, epic_file, branch, taken=(), instructions=None):
             else:
                 step1 = ("Read the project's AGENTS.md and steering files. "
                          f"Follow them for how specs, branches and checks work. {_CONFIRM}")
-        steps = [
+        work_steps = [
             step1,
             f"Create a branch named story/{folder} from origin/{branch}. If the project names branches another way, follow the project.",
             f"Write requirements.md, design.md and tasks.md in .kiro/specs/{folder}/, in the project's usual spec format.",
         ]
         if epic_file:
-            steps.append(f"Change the story's line in the epic page to link to .kiro/specs/{folder}/. Set its status to in progress.")
+            work_steps.append(f"Change the story's line in the epic page to link to .kiro/specs/{folder}/. Set its status to in progress.")
+        steps = []
+        if has_worktree:
+            steps.append(_SETUP_STEP)
+        steps.extend(work_steps)
+        if has_worktree:
+            steps.append(catch_up)
         steps.append(_NAME_CHECK)
         steps.append(f"Commit, push the branch, and open one pull request into {branch}.{provenance}")
         lines = opening + [f"Main branch: {branch}", "Your job: write this story's spec. It has none yet.", ""] + _numbered(steps)
@@ -132,7 +145,7 @@ def build_brief(card, epic_file, branch, taken=(), instructions=None):
         else:
             step1 = f"Read the project's AGENTS.md and steering files, then requirements.md, design.md and tasks.md in .kiro/specs/{spec}/"
             step1 += f", and the epic page. {_CONFIRM}" if epic_file else f". {_CONFIRM}"
-        steps = [
+        work_steps = [
             step1,
             "Find the first top-level task group that has a task not ticked yet. Build only that group. "
             "If every task is ticked, change nothing and say so in this chat.",
@@ -142,8 +155,14 @@ def build_brief(card, epic_file, branch, taken=(), instructions=None):
             "Tick each task you finish in tasks.md, in the same branch. Run the checks the project names and fix what fails.",
         ]
         if epic_file:
-            steps.append("If your group ticks the last task in tasks.md, set the story's line in the epic page to done, "
-                         "in the same pull request.")
+            work_steps.append("If your group ticks the last task in tasks.md, set the story's line in the epic page to done, "
+                              "in the same pull request.")
+        steps = []
+        if has_worktree:
+            steps.append(_SETUP_STEP)
+        steps.extend(work_steps)
+        if has_worktree:
+            steps.append(catch_up)
         steps.append(_NAME_CHECK)
         steps.append(f"Commit, push the branch, and open one pull request into {branch}.{provenance}")
         lines = opening + [f"Spec: .kiro/specs/{spec}/", f"Main branch: {branch}",
@@ -185,8 +204,15 @@ def _check_records(path, data):
         raise _unreadable(path, "it must be an object with a \"chats\" list")
     cards, names, keys = set(), set(), set()
     for record in data["chats"]:
-        if not isinstance(record, dict) or set(record) != RECORD_KEYS:
+        if not isinstance(record, dict):
             raise _unreadable(path, "a record has the wrong fields")
+        rec_keys = set(record)
+        if rec_keys != RECORD_KEYS and rec_keys != _OLD_RECORD_KEYS:
+            raise _unreadable(path, "a record has the wrong fields")
+        if "worktree_path" not in record:
+            record["worktree_path"] = None
+        if "worktree_folder_id" not in record:
+            record["worktree_folder_id"] = None
         card_id, name, key, state, created = (record[k] for k in ("card_id", "name", "key", "state", "created"))
         if not (isinstance(card_id, str) and 0 < len(card_id) <= MAX_CARD_ID_CHARS):
             raise _unreadable(path, "a record has a bad card_id")
@@ -202,6 +228,14 @@ def _check_records(path, data):
             keys.add(key)
         elif key is not None:
             raise _unreadable(path, "a reserved record has a key")
+        wt_path = record["worktree_path"]
+        wt_folder_id = record["worktree_folder_id"]
+        if wt_path is not None:
+            if not isinstance(wt_path, str) or not wt_path or len(wt_path) > 1000:
+                raise _unreadable(path, "a record has an invalid worktree_path")
+        if wt_folder_id is not None:
+            if not (isinstance(wt_folder_id, str) and NAME_PATTERN.match(wt_folder_id)):
+                raise _unreadable(path, "a record has an invalid worktree_folder_id")
         if card_id in cards or name in names:
             raise _unreadable(path, "two records have the same card_id or name")
         cards.add(card_id)
@@ -269,11 +303,12 @@ class ChatStore:
             name = self.new_name()
             while name in names:
                 name = self.new_name()
-            record = {"card_id": card_id, "name": name, "key": None, "state": "reserved", "created": self.clock()}
+            record = {"card_id": card_id, "name": name, "key": None, "state": "reserved", "created": self.clock(),
+                      "worktree_path": None, "worktree_folder_id": None}
             self._save(records + [record])
             return dict(record)
 
-    def mark_started(self, name, key):
+    def mark_started(self, name, key, worktree_folder_id=None):
         if not (isinstance(key, str) and NAME_PATTERN.match(key)):
             raise ChatError("invalid_request", 400, "The key is not valid.")
         with self._lock:
@@ -288,8 +323,28 @@ class ChatStore:
                 if any(other["key"] == key for other in records):
                     raise ChatError("chat_exists", 409, "That chat belongs to another story.")
                 record["key"], record["state"] = key, "started"
+                if worktree_folder_id is not None:
+                    record["worktree_folder_id"] = worktree_folder_id
                 self._save(records)
                 return dict(record)
+            raise ChatError("chat_not_found", 404, "There is no chat record with that name.")
+
+    def update_worktree_path(self, name, path):
+        with self._lock:
+            records = self._load()
+            for record in records:
+                if record["name"] == name:
+                    record["worktree_path"] = path
+                    self._save(records)
+                    return
+            raise ChatError("chat_not_found", 404, "There is no chat record with that name.")
+
+    def get_record(self, name):
+        with self._lock:
+            records = self._load()
+            for record in records:
+                if record["name"] == name:
+                    return dict(record)
             raise ChatError("chat_not_found", 404, "There is no chat record with that name.")
 
     def remove(self, name):

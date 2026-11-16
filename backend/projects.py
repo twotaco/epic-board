@@ -8,7 +8,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from chats import slugify  # noqa: E402
 from setup import load_setup, is_git_checkout  # noqa: E402
 
-Project = namedtuple("Project", ["id", "name", "repository", "folder", "folder_reason", "records_file"])
+Project = namedtuple("Project", ["id", "name", "repository", "folder", "folder_reason", "records_file", "worktree"])
+Project.__new__.__defaults__ = (True,)
 
 CHATS_FILE = "chats.json"
 PROJECTS_MAX = 20
@@ -154,10 +155,11 @@ def _load_from_saved(entries, data_dir, legacy_path):
         if not is_git_checkout(repo):
             print(f"setup.json entry {i + 1}: {repo!r} is not a git checkout; skipping.", file=sys.stderr)
             continue
+        worktree = entry.get('worktree', True)
         id_ = slugify(name, taken=ids_so_far)
         ids_so_far.append(id_)
         raw_projects.append(Project(id=id_, name=name, repository=repo, folder=folder,
-                                    folder_reason=None, records_file=None))
+                                    folder_reason=None, records_file=None, worktree=worktree))
     if not raw_projects:
         return [], None
     # Assign records files.
@@ -215,7 +217,7 @@ def _load_multi(projects_value, config_path, legacy_path):
         id_ = slugify(name, taken=ids_so_far)
         ids_so_far.append(id_)
         raw_projects.append(Project(id=id_, name=name, repository=repo, folder=folder,
-                                    folder_reason=folder_reason, records_file=None))
+                                    folder_reason=folder_reason, records_file=None, worktree=True))
 
     # Assign records files: legacy repo keeps chats.json, others get chats-<id>.json.
     result = []

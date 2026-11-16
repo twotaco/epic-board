@@ -268,8 +268,6 @@ No earlier test stops being true. `build_brief` with no `worktree_path` argument
 
 **A. Resolved.** `POST /api/chat/folders` accepts `project_dir` from apps (confirmed from Crew 0.12.2, `chat_folders_routes.py`). Crew marks the folder `owner_app`. `POST /api/chat/slots` has no directory field. The subfolder-per-card approach is the decided design.
 
-**B. Deleting a Crew subfolder.**
-Does `DELETE /api/chat/folders/<id>` exist and work for apps? This is used in cleanup (Requirement 5, criterion 3). Task 1.1 confirms it. If it does not exist, skip the subfolder deletion and leave the note "folder not removed" in the cleanup response. Update Requirement 5, criterion 3 to match.
+**B. Resolved.** `DELETE /api/chat/folders/<id>` returns 403 `folder_delete_forbidden` for apps (confirmed from Crew 0.12.2, `chat_folders_routes.py` ~line 1241: `if request_app: return 403`). Apps cannot delete Crew folders. Cleanup silently skips subfolder deletion and proceeds to delete the Chat_Record. Requirement 5, criterion 3 updated accordingly.
 
-**C. The permissions entry.**
-`app.json` already lists `/api/chat/folders`. Does that cover `POST` and `DELETE` requests as well as `GET`? Task 1.1 confirms. If a separate entry is needed, add it and update the start spec's Requirement 1, criterion 3 (edited in place by the set-up-projects spec).
+**C. Resolved.** `/api/chat/folders` in `app.json` covers `POST` requests (apps can create folders). No separate entry is needed. The board creates one `owner_app` subfolder per started card. `DELETE /api/chat/folders/<id>` is refused for apps (see Open Question B), so no delete permission is exercised.

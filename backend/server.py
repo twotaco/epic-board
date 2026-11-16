@@ -16,7 +16,7 @@ from urllib.parse import urlparse, parse_qs
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from chats import NAME_PATTERN, ChatError, ChatStore, MAX_CARD_ID_CHARS, build_brief, find_card, spec_folders  # noqa: E402
-from gitsource import open_snapshot, read_snapshot  # noqa: E402
+from gitsource import open_snapshot, read_snapshot, worktree_path as gitsource_worktree_path, create_worktree, remove_worktree  # noqa: E402
 from held import Holder  # noqa: E402
 from plan import build_plan  # noqa: E402
 from projects import check_folder, load_projects, ENV_NAME, FOLDER_ENV_NAME, FOLDER_MAX_CHARS  # noqa: E402
@@ -121,11 +121,12 @@ def plan_response(holder, error, config_path):
 
 
 MAX_BODY_BYTES = 4096
-CHATS_ROUTE = re.compile(r"/chats(?:/([^/]+)(?:/(started))?)?$")
+CHATS_ROUTE = re.compile(r"/chats(?:/([^/]+)(?:/(started|worktree))?)?$")
 CHAT_STATUS = {"unauthorized": 401, "proxy_secret_missing": 503, "invalid_request": 400, "chat_not_found": 404,
                "not_found": 404, "card_not_found": 409, "card_done": 409, "chat_exists": 409, "folder_not_set": 409,
                "plan_not_ready": 409, "chats_unreadable": 500, "internal": 500,
-               "project_not_found": 404, "repository_not_configured": 409}
+               "project_not_found": 404, "repository_not_configured": 409,
+               "worktree_failed": 409, "worktree_has_changes": 409}
 
 
 def chat_refusal(code, message):
@@ -214,7 +215,8 @@ def make_running_project(project, data_dir, secret, clock=time.time):
     """Build a RunningProject with live git and plan functions. Used by startup and POST /setup."""
     held = Holder(project.repository, read_snapshot, open_snapshot, build_plan)
     store = ChatStore(data_dir, filename=project.records_file)
-    service = ChatService(store, project.folder, project.folder_reason, secret, held, clock)
+    service = ChatService(store, project.folder, project.folder_reason, secret, held, clock,
+                          repository=project.repository, worktree=project.worktree)
     return RunningProject(project, held, service)
 
 
@@ -225,9 +227,10 @@ class ChatService:
     KIROCREW_PROXY_SECRET. Every request must carry the gateway's signature.
     """
 
-    def __init__(self, store, folder, folder_reason, secret, holder, clock=time.time):
+    def __init__(self, store, folder, folder_reason, secret, holder, clock=time.time, repository=None, worktree=False):
         self.store, self.folder, self.folder_reason = store, folder, folder_reason
         self.secret, self.holder, self.clock = secret, holder, clock
+        self.repository, self.worktree = repository, worktree
 
     def handle(self, method, path, header, body):
         """Return (http status, body). `path` is the request target as received, query included.
@@ -254,9 +257,22 @@ class ChatService:
             if name is None and method == "POST":
                 return 200, self.reserve(fields(body, ["card_id"])["card_id"])
             if name is not None and suffix == "started" and method == "POST":
-                key = fields(body, ["key"])["key"]
-                record = self.store.mark_started(name, key)
+                try:
+                    data = json.loads(body.decode("utf-8"))
+                except (ValueError, UnicodeDecodeError):
+                    data = None
+                extra = set(data) - {"key", "worktree_folder_id"} if isinstance(data, dict) else {"_"}
+                if not isinstance(data, dict) or "key" not in data or extra:
+                    raise ChatError("invalid_request", 400,
+                                    "The body must be a JSON object with key, and optionally worktree_folder_id.")
+                worktree_folder_id = data.get("worktree_folder_id")
+                if worktree_folder_id is not None:
+                    if not (isinstance(worktree_folder_id, str) and NAME_PATTERN.match(worktree_folder_id)):
+                        raise ChatError("invalid_request", 400, "worktree_folder_id is not valid.")
+                record = self.store.mark_started(name, data["key"], worktree_folder_id=worktree_folder_id)
                 return 200, {"card_id": record["card_id"], "name": record["name"], "key": record["key"]}
+            if name is not None and suffix == "worktree" and method == "DELETE":
+                return self.remove_worktree_route(name, path)
             if name is not None and suffix is None and method == "DELETE":
                 self.store.remove(name)
                 return 200, {"removed": True}
@@ -287,9 +303,31 @@ class ChatService:
         if card.get("status") == "done":
             raise ChatError("card_done", 409, "That story is done.")
         record = self.store.reserve(card_id)
+        wt_path = None
+        if self.worktree and self.repository:
+            wt_path = gitsource_worktree_path(self.repository, record["name"])
+            ok, err = create_worktree(self.repository, wt_path, plan["branch"])
+            if not ok:
+                raise ChatError("worktree_failed", 409, f"Could not create worktree: {err}")
+            self.store.update_worktree_path(record["name"], wt_path)
         return {"card_id": card_id, "name": record["name"], "folder_id": self.folder,
+                "worktree_path": wt_path,
                 "brief": build_brief(card, epic_file, plan["branch"], spec_folders(plan),
-                                      instructions=plan.get("instructions"))}
+                                     instructions=plan.get("instructions"), worktree_path=wt_path)}
+
+    def remove_worktree_route(self, name, path):
+        record = self.store.get_record(name)
+        wt_path = record.get("worktree_path")
+        if not wt_path:
+            return 200, {"ok": True}
+        query = parse_qs(urlparse(path).query, keep_blank_values=True)
+        force = query.get("force", [""])[0].lower() == "true"
+        ok, err = remove_worktree(self.repository, wt_path, force=force)
+        if ok:
+            self.store.update_worktree_path(name, None)
+            return 200, {"ok": True}
+        return chat_refusal("worktree_has_changes",
+                            f"The worktree has uncommitted changes at {wt_path}.")
 
 
 class ChatRouter:
@@ -373,11 +411,13 @@ def make_handler(state, router=None):
                     "source": state.source,
                     "config_has_projects": state.config_has_projects,
                     "projects": [{"id": rp.id, "name": rp.name,
-                                  "folder_id": rp.settings.folder if rp.settings.folder else None}
+                                  "folder_id": rp.settings.folder if rp.settings.folder else None,
+                                  "worktree": rp.settings.worktree}
                                  for rp in running],
                 })
             if path.endswith("/projects"):
-                return self._send(200, [{"id": rp.id, "name": rp.name} for rp in running])
+                return self._send(200, [{"id": rp.id, "name": rp.name, "worktree": rp.settings.worktree}
+                                        for rp in running])
             if path.endswith("/plan"):
                 query = parse_qs(urlparse(self.path).query, keep_blank_values=True)
                 if state.error or not running:
@@ -421,10 +461,12 @@ def make_handler(state, router=None):
             if not isinstance(projects_value, list) or len(projects_value) < 1 or len(projects_value) > 20:
                 return self._send(400, error_body("invalid_request",
                     "projects must be a list of 1 to 20 entries."))
+            _required = {"folder_id", "name", "repository"}
+            _optional = {"worktree"}
             for item in projects_value:
-                if not isinstance(item, dict) or set(item) != {"folder_id", "name", "repository"}:
+                if not isinstance(item, dict) or not _required.issubset(set(item)) or (set(item) - _required - _optional):
                     return self._send(400, error_body("invalid_request",
-                        "Each entry must be an object with exactly: folder_id, name, repository."))
+                        "Each entry must be an object with folder_id, name, repository, and optionally worktree."))
             # Validate entries.
             for i, entry in enumerate(projects_value):
                 msg = validate_setup_entry(entry, i)
