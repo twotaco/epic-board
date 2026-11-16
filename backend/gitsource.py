@@ -120,8 +120,9 @@ def create_worktree(repository, path, main_branch):
     If the worktree add fails and the path was partially created, force-removes it."""
     ok, out, _ = run_git(repository, "worktree", "list", "--porcelain")
     if ok:
+        real_path = os.path.realpath(path)
         for line in out.decode("utf-8", "replace").splitlines():
-            if line.startswith("worktree ") and line[9:].strip() == path:
+            if line.startswith("worktree ") and os.path.realpath(line[9:].strip()) == real_path:
                 return True, None
     ok, _, err = run_git(repository, "fetch", "origin")
     if not ok:

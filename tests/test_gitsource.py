@@ -261,6 +261,20 @@ class WorktreeTests(unittest.TestCase):
         self.assertTrue(ok)
         self.assertIn("--force", calls[0])
 
+    def test_create_worktree_already_exists_via_symlink(self):
+        """Git prints resolved paths; a symlink to an existing worktree must still match."""
+        real_path = "/real/path/to/wt"
+        sym_path = "/sym/link/to/wt"
+        def fake_run_git(repo, *args):
+            if args[0] == "worktree" and args[1] == "list":
+                return True, f"worktree {real_path}\nHEAD abc123\n".encode(), ""
+            raise AssertionError(f"unexpected git call: {args}")
+        with mock.patch.object(gitsource, "run_git", fake_run_git):
+            with mock.patch("os.path.realpath", side_effect=lambda p: real_path if p in (sym_path, real_path) else p):
+                ok, err = gitsource.create_worktree("/repo", sym_path, "main")
+        self.assertTrue(ok)
+        self.assertIsNone(err)
+
     def test_remove_worktree_failure(self):
         def fake_run_git(repo, *args):
             return False, b"", "uncommitted changes"

@@ -93,7 +93,7 @@ Group 1 covers all backend changes: git worktree operations, chat record fields,
     - _Requirements: 5.1_
   - [ ] 3.2 Remove worktree and subfolder
     - When the cleanup flag is set for a card: call `DELETE .../chats/<name>/worktree`
-    - On 200 `{ok: true}`: call `DELETE /api/chat/folders/<worktree_folder_id>` if the record has one (silently ignore failure); then call `DELETE .../chats/<name>` to remove the record; re-render the card
+    - On 200 `{ok: true}`: if the record has a `worktree_folder_id`, send `PATCH /api/chat/folders/<worktree_folder_id>` with `{"project_dir": ""}` (silently ignore failure); then call `DELETE .../chats/<name>` to remove the record; re-render the card
     - On 409 `worktree_has_changes`: show "Worktree kept: uncommitted changes at `<path>`." on the card with a "Remove anyway" button
     - "Remove anyway" calls `DELETE .../chats/<name>/worktree?force=true`; on success, proceeds as the 200 path above
     - When `worktree_path` is null (non-worktree record): skip the worktree route; delete the record directly
@@ -102,7 +102,7 @@ Group 1 covers all backend changes: git worktree operations, chat record fields,
     - The "Worktree kept" text has role `status`; "Remove anyway" is reachable by keyboard and acts on Enter or Space
     - _Requirement 7.2_
   - [ ] 3.4 Test in `tests/ui/board.test.mjs`
-    - `source_links` PR transitions to `merged`: cleanup called; worktree removal route called; subfolder deletion called; record deleted; card reset
+    - `source_links` PR transitions to `merged`: cleanup called; worktree removal route called; subfolder PATCH called with `project_dir: ""`; record deleted; card reset
     - `worktree_has_changes` response: "Worktree kept" shown; "Remove anyway" button present
     - Non-worktree record: cleanup skips worktree route; deletes record directly
     - _Requirements: 5.1–5.5, 7.2_
