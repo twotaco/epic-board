@@ -489,7 +489,7 @@ test('a card with a started chat is a link in every column, with its state once 
   for (const status of ['planned', 'in progress', 'done']) {
     const chats = chatsWith({ records: started(), byKey: { k1: { state: 'needs-you' } } })
     assert.deepEqual(cardViewOf(card({ status }), chats, { asking: 'e.md#A' }), {
-      mode: 'chat', key: 'k1', name: 'k1', href: '/chat?sid=k1', state: 'needs-you', stateWord: 'Needs you', stateHref: null, brief: null, open: false,
+      mode: 'chat', key: 'k1', name: 'k1', href: '/chat?sid=k1', state: 'needs-you', stateWord: 'Needs you', stateHref: null, brief: null, open: false, cleanup: null,
     }, status)
   }
 })
