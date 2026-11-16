@@ -926,7 +926,21 @@ test('the question: the text, a Start and a Cancel button, a group with a label,
   group[0].props.onKeyDown({ key: 'Escape' })
   group[0].props.onKeyDown({ key: 'Enter' })
   group[0].props.onKeyDown({ key: 'a' })
-  assert.deepEqual(calls, [['start', CARD_ID], ['cancel', CARD_ID], ['cancel', CARD_ID]])
+  assert.deepEqual(calls, [['start', CARD_ID, 'Story'], ['cancel', CARD_ID], ['cancel', CARD_ID]])
+})
+
+test('start question mode line: "Works in its own worktree" when projectWorktree is true (the default)', () => {
+  const li = theCard(renderWith({ ...chatsView({ ui: { asking: CARD_ID } }), projectWorktree: true }))
+  const group = findAll(li, (n) => n.props.role === 'group')
+  assert.ok(textOf(group[0]).includes('Works in its own worktree'))
+  assert.ok(!textOf(group[0]).includes('shared checkout'))
+})
+
+test('start question mode line: "Works in the shared checkout" when projectWorktree is false', () => {
+  const li = theCard(renderWith({ ...chatsView({ ui: { asking: CARD_ID } }), projectWorktree: false }))
+  const group = findAll(li, (n) => n.props.role === 'group')
+  assert.ok(textOf(group[0]).includes('Works in the shared checkout'))
+  assert.ok(!textOf(group[0]).includes('own worktree'))
 })
 
 test('a failed start shows the step and the reason, with a status role, above the question', () => {
@@ -1803,7 +1817,7 @@ test('a card button calls its action with and without a kit', () => {
   const kit = fakeKit()
   const tree = renderBoard(h, chatsView({ ui: { asking: CARD_ID } }), actions, kit)
   for (const btn of findAll(tree, (node) => node.type === kit.Btn && node.props['data-eb-setup-btn'] === undefined)) btn.props.onClick()
-  assert.deepEqual(calls, [['start', CARD_ID], ['cancel', CARD_ID]])
+  assert.deepEqual(calls, [['start', CARD_ID, 'Story'], ['cancel', CARD_ID]])
 })
 
 test('every card keeps the same words and headings with the whole kit', () => {

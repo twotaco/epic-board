@@ -1496,9 +1496,9 @@ test('the page source has no innerHTML, script injection, other network paths or
     assert.doesNotMatch(start, /approve|question|approvals|stop|close|steer|note|context|delete/i, `forbidden path ${start}`)
   }
   assert.equal(/\/api\/approvals/.test(source), false)
-  // The page never deletes, stops or closes a chat in Crew: the one `.del(` is the backend's (Start again).
+  // The page never deletes anything in Crew: all `.del(` calls go to the app's own backend.
   const dels = source.match(/[A-Za-z_.]+\.del\(/g) ?? []
-  assert.deepEqual(dels, ['backend.del('], 'only the backend client deletes')
+  assert.ok(dels.length >= 1 && dels.every((d) => d === 'backend.del('), 'only the backend client deletes')
   assert.equal(/\.(del|delete|put|patch)\(\s*['"`]\/api\//.test(source), false, 'no write but post to Crew')
   assert.equal(/slots\/\$\{[^}]*\}\/(?!resume)/.test(source), false, 'the only per-chat route built in a template is resume')
 })

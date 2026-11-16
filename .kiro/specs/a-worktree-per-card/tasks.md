@@ -62,16 +62,16 @@ Group 1 covers all backend changes: git worktree operations, chat record fields,
     - Run `python3 -m unittest discover -s tests -t .` and report the counts run, passed and skipped
     - _All requirements of group 1_
 
-- [ ] 2. Page: start flow
-  - [ ] 2.1 Projects view: worktree checkbox in `ui/index.mjs`
+- [x] 2. Page: start flow
+  - [x] 2.1 Projects view: worktree checkbox in `ui/index.mjs`
     - In `setupReduce` (or the equivalent state handler): add `worktree` per ticked folder, defaulting to `true`; persist across untick/retick
     - In `renderSetupView`: show the worktree checkbox below the name field for each ticked folder; hide when unticked; pre-tick from the saved value via `GET .../setup`
     - Include `worktree` in the POST body when saving
     - _Requirements: 1.1, 1.2, 1.3, 1.4_
-  - [ ] 2.2 Start question: show mode
+  - [x] 2.2 Start question: show mode
     - In `renderCard` (or the start question renderer): add one line after "Start a conductor on this story?" — "Works in its own worktree" or "Works in the shared checkout" — based on `project.worktree`
     - _Requirements: 1.6, 1.7_
-  - [ ] 2.3 Start sequence: create Worktree_Folder and open chat in it
+  - [x] 2.3 Start sequence: create Worktree_Folder and open chat in it
     - When `project.worktree` is `true`, extend the start sequence after `POST .../chats {card_id}` and before `POST /api/chat/slots`:
       1. `POST /api/chat/folders {name: <story-name>, project_dir: <worktree_path>, parent_id: <project-folder-id>}` → `{id: subfolder_id}`
       2. Create the chat in `subfolder_id` (not the project folder)
@@ -79,11 +79,11 @@ Group 1 covers all backend changes: git worktree operations, chat record fields,
     - If the folders call fails: call `DELETE .../chats/<name>/worktree` to clean up the backend worktree; show "Could not create worktree folder: `<reason>`." on the card
     - When `project.worktree` is `false`, the sequence is exactly as today
     - _Requirements: 2.1, 2.6, 2.8, 6.3_
-  - [ ] 2.4 Test in `tests/ui/setup.test.mjs` and `tests/ui/start.test.mjs`
+  - [x] 2.4 Test in `tests/ui/setup.test.mjs` and `tests/ui/start.test.mjs`
     - Setup: worktree checkbox shown and hidden per ticked state; default ticked; value saved in POST body
     - Start: start question shows the right mode text; start sequence calls `POST /api/chat/folders` before `POST /api/chat/slots` when worktree on; folder_id in slots call is the subfolder id; `started` body includes `worktree_folder_id`; folder creation failure calls worktree cleanup and shows error
     - _Requirements: 1.1, 1.6, 1.7, 2.1, 2.6, 2.8, 6.3_
-  - [ ] 2.5 Run the tests
+  - [x] 2.5 Run the tests
     - Run `python3 -m unittest discover -s tests -t .` and `node --test tests/ui/*.test.mjs` and report the counts run, passed and skipped for each
     - _All requirements of group 2_
 

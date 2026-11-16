@@ -26,7 +26,20 @@ import {
 
 test('readProjects: a good list', () => {
   const result = readProjects([{ id: 'alpha', name: 'Alpha' }, { id: 'beta', name: 'Beta' }])
-  assert.deepEqual(result, [{ id: 'alpha', name: 'Alpha' }, { id: 'beta', name: 'Beta' }])
+  assert.deepEqual(result, [{ id: 'alpha', name: 'Alpha', worktree: true }, { id: 'beta', name: 'Beta', worktree: true }])
+})
+
+test('readProjects: worktree field: absent defaults to true, false stays false', () => {
+  const result = readProjects([
+    { id: 'a', name: 'A' },
+    { id: 'b', name: 'B', worktree: false },
+    { id: 'c', name: 'C', worktree: true },
+  ])
+  assert.deepEqual(result, [
+    { id: 'a', name: 'A', worktree: true },
+    { id: 'b', name: 'B', worktree: false },
+    { id: 'c', name: 'C', worktree: true },
+  ])
 })
 
 test('readProjects: an empty list', () => {

@@ -540,3 +540,83 @@ test('Property 7: the saving never waits for the send', async () => {
     assert.equal(outcome.error, undefined)
   })
 })
+
+// ---- Worktree start flow: group 2 ----
+
+const WORKTREE_PATH = '/home/alice/my-project--epic-board-3fa91c0e'
+const WORKTREE_RESERVATION = { ...RESERVATION, worktree_path: WORKTREE_PATH }
+
+test('worktree start: creates Worktree_Folder, uses subfolder id for slots, includes worktree_folder_id in started', async () => {
+  const log = []
+  const backend = recorder((verb, path) => (path === '/chats' ? WORKTREE_RESERVATION : {}), log, 'backend ')
+  const gateway = recorder((verb, path) => {
+    if (path === '/api/chat/folders') return { id: 'wf_sub1' }
+    if (path === '/api/chat/slots') return { key: KEY }
+    return {}
+  }, log, 'crew ')
+  const timers = makeTimers()
+  await settle(startStory({ cardId: CARD, cardName: 'Filter by epic', backend, gateway, ...timers }), timers)
+  assert.deepEqual(log.filter((l) => l.startsWith('crew ')), [
+    'crew post /api/chat/folders',
+    'crew post /api/chat/slots',
+    'crew post /api/chat',
+  ])
+  assert.deepEqual(gateway.calls[0], ['post', '/api/chat/folders', { name: 'Filter by epic', project_dir: WORKTREE_PATH, parent_id: RESERVATION.folder_id }])
+  assert.deepEqual(gateway.calls[1][2].folder_id, 'wf_sub1', 'slots call uses the subfolder id')
+  const startedCall = backend.calls.find(([, path]) => path.endsWith('/started'))
+  assert.deepEqual(startedCall[2], { key: KEY, worktree_folder_id: 'wf_sub1' })
+})
+
+test('worktree start: steps in order include "folder" between "reserve" and "create"', async () => {
+  const backend = recorder((verb, path) => (path === '/chats' ? WORKTREE_RESERVATION : {}), [], 'backend ')
+  const gateway = recorder((verb, path) => {
+    if (path === '/api/chat/folders') return { id: 'wf_sub1' }
+    if (path === '/api/chat/slots') return { key: KEY }
+    return {}
+  }, [], 'crew ')
+  const timers = makeTimers()
+  const steps = []
+  await settle(startStory({ cardId: CARD, cardName: 'x', backend, gateway, onStep: (s) => steps.push(s), ...timers }), timers)
+  assert.deepEqual(steps, ['reserve', 'folder', 'create', 'save', 'send'])
+})
+
+test('non-worktree start: reservation without worktree_path skips folder step', async () => {
+  const { backend, gateway, log } = working()  // RESERVATION has no worktree_path
+  const timers = makeTimers()
+  const steps = []
+  await settle(startStory({ cardId: CARD, cardName: 'x', backend, gateway, onStep: (s) => steps.push(s), ...timers }), timers)
+  assert.deepEqual(steps, ['reserve', 'create', 'save', 'send'])
+  assert.ok(!log.some((l) => l.includes('/api/chat/folders')), 'no folder call when no worktree_path')
+  const startedCall = backend.calls.find(([, path]) => path.endsWith('/started'))
+  assert.deepEqual(startedCall[2], { key: KEY }, 'started body has no worktree_folder_id')
+})
+
+test('worktree folder creation failure: calls worktree cleanup route and re-throws', async () => {
+  const log = []
+  const backend = recorder((verb, path) => (path === '/chats' ? WORKTREE_RESERVATION : {}), log, 'backend ')
+  const folderError = Object.assign(new Error('Crew 503'), { status: 503 })
+  const gateway = recorder((verb, path) => {
+    if (path === '/api/chat/folders') throw folderError
+    return {}
+  }, log, 'crew ')
+  const timers = makeTimers()
+  const outcome = await settle(startStory({ cardId: CARD, cardName: 'x', backend, gateway, ...timers }), timers)
+  assert.ok(outcome.error, 'start should fail')
+  const cleanupCall = backend.calls.find(([verb, path]) => verb === 'del' && path.includes('/worktree'))
+  assert.ok(cleanupCall, 'backend DELETE worktree route called')
+  assert.ok(!log.some((l) => l.includes('/api/chat/slots')), 'slots not called after folder failure')
+})
+
+test('worktree folder creation: Crew answers without an id, cleanup called and start fails', async () => {
+  const log = []
+  const backend = recorder((verb, path) => (path === '/chats' ? WORKTREE_RESERVATION : {}), log, 'backend ')
+  const gateway = recorder((verb, path) => {
+    if (path === '/api/chat/folders') return {}  // no id field
+    return {}
+  }, log, 'crew ')
+  const timers = makeTimers()
+  const outcome = await settle(startStory({ cardId: CARD, cardName: 'x', backend, gateway, ...timers }), timers)
+  assert.ok(outcome.error, 'start should fail when folder has no id')
+  const cleanupCall = backend.calls.find(([verb, path]) => verb === 'del' && path.includes('/worktree'))
+  assert.ok(cleanupCall, 'backend DELETE worktree route called after bad folder response')
+})
