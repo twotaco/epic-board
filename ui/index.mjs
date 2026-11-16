@@ -729,17 +729,20 @@ export function sendBrief({ gateway, key, brief, setTimer = defaultSetTimer, cle
   })
 }
 
-// The whole start of a story from its card, in four steps, each named to `onStep` before it runs:
+// The whole start of a story from its card, in four or five steps, each named to `onStep` before it runs:
 //   reserve  ask the backend for a name, the brief and the folder id
+//   folder   (worktree only) create the Worktree_Folder in Crew; on failure, clean up the backend worktree
 //   create   open the chat in Crew (a name the board already created answers with the same chat)
 //   save     tell the backend the chat has started, with the key Crew gave it
 //   send     send the brief, unless the chat already holds a message, without waiting for the turn
+// `cardName` is the story's display name, used as the Worktree_Folder name.
 // `onSaved({cardId, name, key, brief})` is called as soon as the chat is saved, before the send, so the card
 // can show its link and the chat's state while the brief is on its way. A failure before the save throws a
 // StartError and leaves the backend's record `reserved`, so a repeat is safe. A failure of the send throws a
 // StartError for the step `send` that carries `saved`: the chat exists and is saved, only the brief is missing.
 export async function startStory({
-  cardId, backend, gateway, onStep = () => {}, onSaved = () => {}, setTimer = defaultSetTimer, clearTimer = defaultClearTimer,
+  cardId, cardName = '', backend, gateway, onStep = () => {}, onSaved = () => {},
+  setTimer = defaultSetTimer, clearTimer = defaultClearTimer,
 }) {
   let step = 'reserve'
   let saved = null
@@ -749,14 +752,44 @@ export async function startStory({
     if (typeof reservation?.name !== 'string' || typeof reservation.brief !== 'string' || typeof reservation.folder_id !== 'string') {
       throw new StartError(step, 'The backend answered in a form the page cannot read.')
     }
+    let chatFolderId = reservation.folder_id
+    let worktreeFolderId = null
+    if (typeof reservation.worktree_path === 'string' && reservation.worktree_path !== '') {
+      step = 'folder'
+      onStep(step)
+      let folderResult
+      try {
+        const suffix = reservation.name.slice(-8)
+        const sep = ' · '
+        const maxStory = 100 - sep.length - suffix.length
+        const storyPart = cardName.slice(0, maxStory)
+        const folderName = storyPart ? storyPart + sep + suffix : suffix
+        folderResult = await gateway.post('/api/chat/folders', {
+          name: folderName,
+          project_dir: reservation.worktree_path,
+          parent_id: reservation.folder_id,
+        })
+      } catch (folderError) {
+        // Clean up the backend worktree before surfacing the folder error.
+        try { await backend.del(`/chats/${encodeURIComponent(reservation.name)}/worktree`) } catch { /* ignore */ }
+        throw folderError
+      }
+      if (typeof folderResult?.id !== 'string' || folderResult.id === '') {
+        try { await backend.del(`/chats/${encodeURIComponent(reservation.name)}/worktree`) } catch { /* ignore */ }
+        throw new StartError(step, 'Crew answered without a folder id.')
+      }
+      chatFolderId = folderResult.id
+      worktreeFolderId = folderResult.id
+    }
     step = 'create'
     onStep(step)
-    const row = await gateway.post('/api/chat/slots', { name: reservation.name, agent: AGENT, folder_id: reservation.folder_id })
+    const row = await gateway.post('/api/chat/slots', { name: reservation.name, agent: AGENT, folder_id: chatFolderId })
     const key = row?.key
     if (typeof key !== 'string' || key === '') throw new StartError(step, 'Crew answered without a chat key.')
     step = 'save'
     onStep(step)
-    await backend.post(`/chats/${encodeURIComponent(reservation.name)}/started`, { key })
+    const startedBody = worktreeFolderId !== null ? { key, worktree_folder_id: worktreeFolderId } : { key }
+    await backend.post(`/chats/${encodeURIComponent(reservation.name)}/started`, startedBody)
     saved = { cardId, name: reservation.name, key, brief: reservation.brief }
     onSaved(saved)
     step = 'send'
@@ -888,6 +921,8 @@ export const STYLE = `
 .eb-folder-label { display: flex; align-items: center; gap: 6px; }
 .eb-folder-label input { margin: 0; accent-color: var(--accent, currentColor); }
 .eb-folder-name { display: block; width: 100%; margin-top: 6px; font: inherit; }
+.eb-worktree-label { display: flex; align-items: center; gap: 6px; margin-top: 6px; font-size: 13px; }
+.eb-worktree-label input { margin: 0; accent-color: var(--accent, currentColor); }
 .eb-setup-actions { display: flex; gap: 8px; margin-top: 12px; }
 .eb-empty-column { margin: 0; padding: 6px; color: var(--muted, currentColor); }
 .eb-problems { margin-top: 16px; border: 1px solid var(--border, currentColor); border-radius: var(--radius-md, 0); padding: 8px 12px; }
@@ -942,7 +977,7 @@ export function readProjects(body) {
     if (typeof item.id !== 'string' || typeof item.name !== 'string') return null
     if (!ID_PATTERN.test(item.id) || ids.has(item.id)) return null
     ids.add(item.id)
-    result.push({ id: item.id, name: item.name })
+    result.push({ id: item.id, name: item.name, worktree: item.worktree !== false })
   }
   return result
 }
@@ -1048,7 +1083,7 @@ export function readFolders(body) {
 }
 
 export const initialSetup = Object.freeze({
-  phase: 'closed', folders: null, setupInfo: null, checks: {}, names: {}, saveError: null,
+  phase: 'closed', folders: null, setupInfo: null, checks: {}, names: {}, worktrees: {}, saveError: null,
 })
 
 export function setupReduce(state, action) {
@@ -1057,13 +1092,14 @@ export function setupReduce(state, action) {
       return { ...initialSetup, phase: 'opening' }
     case 'setup-loaded': {
       const { folders, setupInfo } = action
-      const checks = {}, names = {}
+      const checks = {}, names = {}, worktrees = {}
       for (const folder of folders ?? []) {
         const match = setupInfo?.projects?.find((p) => p.folder_id === folder.id)
         checks[folder.id] = !!match
         names[folder.id] = match ? match.name : ''
+        worktrees[folder.id] = match ? match.worktree !== false : true
       }
-      return { ...state, phase: 'ready', folders, setupInfo, checks, names, saveError: null }
+      return { ...state, phase: 'ready', folders, setupInfo, checks, names, worktrees, saveError: null }
     }
     case 'setup-load-failed':
       return { ...state, phase: 'error', saveError: action.message }
@@ -1073,6 +1109,8 @@ export function setupReduce(state, action) {
     }
     case 'setup-name':
       return { ...state, names: { ...state.names, [action.folderId]: action.value } }
+    case 'setup-worktree':
+      return { ...state, worktrees: { ...state.worktrees, [action.folderId]: action.value } }
     case 'setup-saving':
       return { ...state, phase: 'saving', saveError: null }
     case 'setup-save-failed':
@@ -1087,6 +1125,7 @@ export function setupReduce(state, action) {
 // What each step of a start says when it fails.
 const STEP_TEXT = {
   reserve: 'Could not reserve the chat',
+  folder: 'Could not create worktree folder',
   create: 'Could not create the chat',
   send: 'Could not send the brief',
   save: 'Could not save the chat',
@@ -1110,7 +1149,7 @@ const STATE_VARIANT = Object.freeze({
 
 // The part of a card below its progress that belongs to the chat: the state word, the question,
 // or the text and controls of a chat that is restoring or not open. Every text is a literal child.
-function renderChatPart(h, card, view, actions, parts = {}) {
+function renderChatPart(h, card, view, actions, parts = {}, projectWorktree = true) {
   const { Btn, Badge } = parts
   switch (view.mode) {
     case 'chat': {
@@ -1160,7 +1199,8 @@ function renderChatPart(h, card, view, actions, parts = {}) {
           ? h('p', { className: 'eb-chat-note', role: 'status' }, `${STEP_TEXT[view.failure.step] ?? 'The start failed'}: ${view.failure.reason}`)
           : null,
         h('p', null, 'Start a conductor on this story?'),
-        renderButton(h, Btn, { type: 'button', 'data-eb-start': card.id, onClick: () => actions.start(card.id) }, 'Start', true),
+        h('p', { className: 'eb-card-meta' }, projectWorktree ? 'Works in its own worktree' : 'Works in the shared checkout'),
+        renderButton(h, Btn, { type: 'button', 'data-eb-start': card.id, onClick: () => actions.start(card.id, card.name) }, 'Start', true),
         ' ',
         renderButton(h, Btn, { type: 'button', onClick: () => actions.cancel(card.id) }, 'Cancel'))
     }
@@ -1220,7 +1260,7 @@ function renderCard(h, card, index, view, actions, parts = {}) {
       ? h('div', { className: 'eb-bar', 'aria-hidden': 'true' },
         h('div', { className: 'eb-bar-fill', style: { width: `${progress.fraction * 100}%` } }))
       : null,
-    renderChatPart(h, card, chat, actions, parts),
+    renderChatPart(h, card, chat, actions, parts, view.projectWorktree ?? true),
   ]
   const marks = { 'data-mode': chat.mode, ...(chat.open ? { 'data-open': 'true' } : {}) }
   return parts.Card
@@ -1435,7 +1475,7 @@ export function renderSetupView(h, setupState, actions, kit = {}) {
   }
 
   const isSaving = setupState.phase === 'saving'
-  const { checks, names, setupInfo } = setupState
+  const { checks, names, worktrees, setupInfo } = setupState
 
   const checkedFolders = folders.filter((f) => !!checks[f.id])
   const saveEnabled = !isSaving &&
@@ -1470,6 +1510,15 @@ export function renderSetupView(h, setupState, actions, kit = {}) {
             'aria-label': `Name for ${folder.name}`,
             onChange: (e) => actions.nameFolder?.({ folderId: folder.id, value: e.target.value }),
           })
+          : null,
+        checked
+          ? h('label', { className: 'eb-worktree-label' },
+            h('input', {
+              type: 'checkbox',
+              checked: worktrees[folder.id] !== false,
+              onChange: (e) => actions.worktreeFolder?.({ folderId: folder.id, value: e.target.checked }),
+            }),
+            'Start each story in its own worktree')
           : null)
     })),
     h('div', { className: 'eb-setup-actions', key: 'actions' },
@@ -1729,6 +1778,7 @@ export function createBoard(React, env = {}) {
     latest.current.chats = chats
     latest.current.api = api
     latest.current.hasPanel = hasPanel
+    latest.current.projectWorktree = projects?.find((p) => p.id === currentId)?.worktree ?? true
     const prevSetupOpen = useRef(false)
 
     // Read the Project_List once. No plan or chat poller starts until this ends.
@@ -1964,6 +2014,7 @@ export function createBoard(React, env = {}) {
           folder_id: folder.id,
           name: (setupState.names[folder.id] ?? '').trim() || folder.name,
           repository: folder.project_dir,
+          worktree: setupState.worktrees[folder.id] !== false,
         })),
       }
       setupDispatch({ kind: 'setup-saving' })
@@ -1996,7 +2047,7 @@ export function createBoard(React, env = {}) {
         }
       },
       closeChat: () => ownUi({ kind: 'close-chat', focus: true }),
-      async start(cardId) {
+      async start(cardId, cardName = '') {
         const { starts, backend, gateway } = latest.current
         const startProjectId = latest.current.projectId
         const liveStart = () => latest.current.projectId === startProjectId && latest.current.alive
@@ -2005,7 +2056,7 @@ export function createBoard(React, env = {}) {
         liveStart() && ownUi({ kind: 'step', cardId, step: 'reserve' })
         try {
           const result = await startStory({
-            cardId, backend, gateway,
+            cardId, cardName, backend, gateway,
             setTimer: latest.current.setTimer, clearTimer: latest.current.clearTimer,
             onStep: (step) => { if (step !== 'send' && liveStart()) ownUi({ kind: 'step', cardId, step }) },
             // The chat is saved: its link and its state appear now, while the brief is on its way.
@@ -2102,10 +2153,12 @@ export function createBoard(React, env = {}) {
       tryAgain: openSetup,
       checkFolder: ({ folderId, checked }) => setupDispatch({ kind: 'setup-check', folderId, checked }),
       nameFolder: ({ folderId, value }) => setupDispatch({ kind: 'setup-name', folderId, value }),
+      worktreeFolder: ({ folderId, value }) => setupDispatch({ kind: 'setup-worktree', folderId, value }),
       saveSetup,
     }
+    const projectWorktree = latest.current.projectWorktree
     const board = renderBoard(h,
-      { ...view, chats, ui, panelAvailable: hasPanel, projects: projectsView, projectsNotice, setupState, unconfigured, icon },
+      { ...view, chats, ui, panelAvailable: hasPanel, projects: projectsView, projectsNotice, setupState, unconfigured, icon, projectWorktree },
       { ...actions, filter, switchProject, openSetup, ...setupActionSet },
       { ...kit, Select })
     const chatPanel = !setupOpen ? panelViewOf(view, ui, hasPanel) : null

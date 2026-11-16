@@ -377,7 +377,7 @@ test('the folder row: label with the checkbox and the name, the directory as tex
     const rows = findAll(tree, (n) => n.type === 'li')
     assert.deepEqual(rows.map((row) => row.props.className), ['eb-folder', 'eb-folder'])
     const [first, second] = rows
-    assert.deepEqual(first.children.map((node) => node.props.className), ['eb-folder-label', 'eb-folder-dir', 'eb-folder-name'])
+    assert.deepEqual(first.children.map((node) => node.props.className), ['eb-folder-label', 'eb-folder-dir', 'eb-folder-name', 'eb-worktree-label'])
     assert.deepEqual(second.children.map((node) => node.props.className), ['eb-folder-label', 'eb-folder-dir'])
     assert.deepEqual(first.children[0].children.map((node) => node.type ?? node), ['input', 'Alpha'])
     assert.deepEqual(first.children[0].children[0].props.type, 'checkbox')
@@ -440,6 +440,78 @@ test('the three notices keep the role status, take eb-notice (and eb-notice-erro
       assert.equal(findAll(tree, (n) => n.props.role === 'alert').length, 0)
     }
   }
+})
+
+// ---- Worktree checkbox: group 2 ----
+
+test('worktree checkbox is shown for a ticked folder and hidden for an unticked one', () => {
+  const tree = renderSetupView(h, readyState(), {})
+  const rows = findAll(tree, (n) => n.type === 'li')
+  const [first, second] = rows
+  const firstLabels = first.children.map((n) => n.props.className)
+  const secondLabels = second.children.map((n) => n.props.className)
+  assert.ok(firstLabels.includes('eb-worktree-label'), 'ticked folder has worktree label')
+  assert.ok(!secondLabels.includes('eb-worktree-label'), 'unticked folder has no worktree label')
+})
+
+test('worktree checkbox defaults to checked (true) when no saved value', () => {
+  const tree = renderSetupView(h, readyState(), {})
+  const [first] = findAll(tree, (n) => n.type === 'li')
+  const worktreeLabel = first.children.find((n) => n.props.className === 'eb-worktree-label')
+  const checkbox = worktreeLabel.children.find((n) => n.type === 'input')
+  assert.equal(checkbox.props.checked, true)
+})
+
+test('worktree checkbox pre-ticks from saved value: false stays false', () => {
+  const state = readyState({ worktrees: { f1: false } })
+  const tree = renderSetupView(h, state, {})
+  const [first] = findAll(tree, (n) => n.type === 'li')
+  const worktreeLabel = first.children.find((n) => n.props.className === 'eb-worktree-label')
+  const checkbox = worktreeLabel.children.find((n) => n.type === 'input')
+  assert.equal(checkbox.props.checked, false)
+})
+
+test('worktree checkbox onChange calls worktreeFolder action with folderId and value', () => {
+  const calls = []
+  const actions = { worktreeFolder: (arg) => calls.push(arg) }
+  const tree = renderSetupView(h, readyState(), actions)
+  const [first] = findAll(tree, (n) => n.type === 'li')
+  const worktreeLabel = first.children.find((n) => n.props.className === 'eb-worktree-label')
+  const checkbox = worktreeLabel.children.find((n) => n.type === 'input')
+  checkbox.props.onChange({ target: { checked: false } })
+  assert.deepEqual(calls, [{ folderId: 'f1', value: false }])
+})
+
+test('setupReduce setup-worktree: sets the worktree value for a folder', () => {
+  const state = { ...initialSetup, phase: 'ready', worktrees: { f1: true } }
+  const next = setupReduce(state, { kind: 'setup-worktree', folderId: 'f1', value: false })
+  assert.equal(next.worktrees['f1'], false)
+  const next2 = setupReduce(next, { kind: 'setup-worktree', folderId: 'f1', value: true })
+  assert.equal(next2.worktrees['f1'], true)
+})
+
+test('setupReduce setup-loaded: worktree defaults to true when absent, reads saved false', () => {
+  const folders = [
+    { id: 'f1', name: 'A', project_dir: '/a' },
+    { id: 'f2', name: 'B', project_dir: '/b' },
+  ]
+  const setupInfo = {
+    source: 'config', config_has_projects: false,
+    projects: [
+      { folder_id: 'f1', name: 'A', worktree: false },
+      { folder_id: 'f2', name: 'B' },  // no worktree field — defaults to true
+    ],
+  }
+  const next = setupReduce({ ...initialSetup, phase: 'opening' }, { kind: 'setup-loaded', folders, setupInfo })
+  assert.equal(next.worktrees['f1'], false)
+  assert.equal(next.worktrees['f2'], true)
+})
+
+test('setupReduce setup-loaded: unmatched folder defaults worktree to true', () => {
+  const folders = [{ id: 'f99', name: 'X', project_dir: '/x' }]
+  const setupInfo = { projects: [] }
+  const next = setupReduce(initialSetup, { kind: 'setup-loaded', folders, setupInfo })
+  assert.equal(next.worktrees['f99'], true)
 })
 
 test('the Projects view adds no heading and no ErrorNotice, with every kit component present', () => {

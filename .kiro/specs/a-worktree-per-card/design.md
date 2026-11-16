@@ -168,8 +168,10 @@ The page creates the Worktree_Folder in the start sequence, between creating the
 
 ```
 POST /api/chat/folders
-{name: <story-name>, project_dir: <worktree_path>, parent_id: <project-folder-id>}
+{name: "<story-name> · <last-8-of-record-name>", project_dir: <worktree_path>, parent_id: <project-folder-id>}
 ```
+
+The folder name is `<story name> · <last 8 characters of the Chat_Record's name>` (separator is ` · `, U+00B7). The whole name is capped at 100 characters by shortening the story name part to at most 89 characters. When the story name is empty, the name is just the 8-character suffix. This makes each reservation's folder name unique: a second start of the same card uses a new record name and therefore a new suffix, so Crew does not return the first card's folder (Crew 0.12.2, `chat_folders_records.py`, `refuse_duplicate_name`: same name under same parent returns `"reused": True`).
 
 Crew sets `owner_app` automatically. The response includes the new folder's `id`. The page then creates the chat with `folder_id` set to this subfolder id (not the project's folder).
 
