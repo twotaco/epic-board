@@ -208,7 +208,7 @@ The placeholder page (`ui/index.mjs`) stays in place until group 4 replaces it. 
   - [x] 6.4 Run the tests
     - Run `python3 -m unittest discover -s tests -t .` and `node --test tests/ui/*.test.mjs` and report the counts run, passed and skipped for each
     - _Requirements: 2.1, 2.2, 2.6_
-  - [ ] 6.5 Check it on the board (done by you in the app)
+  - [x] 6.5 Check it on the board (done by you in the app)
     - Start a conductor on a planned card and see the card move to In progress at once, with its chat state; see a done card stay in Done
     - _Requirements: 2.6_
 
