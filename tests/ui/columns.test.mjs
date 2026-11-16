@@ -1,5 +1,5 @@
 // Property 4: Grouping puts each card in one column.
-// Validates: Requirements 2.1, 2.2
+// Validates: Requirements 2.1, 2.2, 2.6
 import test from 'node:test'
 import assert from 'node:assert/strict'
 
@@ -57,26 +57,36 @@ function randomPlan(r) {
   return { repository: '/x', branch: 'main', groups, problems: [] }
 }
 
+// The effective column of a card given the started set.
+function effectiveColumn(card, started) {
+  return card.status === 'planned' && started.has(card.id) ? 'in progress' : card.status
+}
+
 function idsOf(column) {
   return column.groups.flatMap((group) => group.cards.map((card) => card.id))
 }
 
-test('Property 4: every card is in the one column of its status, in each group it belongs to', () => {
+test('Property 4: every card is in the one column of its status (or In progress if started)', () => {
   forSeeds('grouping puts each card in one column', ITERATIONS, (r) => {
     const plan = randomPlan(r)
-    const columns = columnsOf(plan)
+    // Randomly mark some card ids as started.
+    const allIds = plan.groups.flatMap((group) => group.cards.map((card) => card.id))
+    const started = new Set(allIds.filter(() => r.bool(0.4)))
+    const columns = columnsOf(plan, started)
 
     // The three columns, in order.
     assert.deepEqual(columns.map((column) => column.title), COLUMN_TITLES)
     assert.deepEqual(columns.map((column) => column.key), STATUSES)
 
     // Every card (each group's own copy) appears exactly once over all columns,
-    // and in the column that matches its status.
+    // and in the column that matches its effective column.
     const seen = new Map()
     for (const column of columns) {
       for (const id of idsOf(column)) seen.set(id, (seen.get(id) ?? 0) + 1)
       for (const group of column.groups) {
-        for (const card of group.cards) assert.equal(card.status, column.key, `card ${card.id} in the wrong column`)
+        for (const card of group.cards) {
+          assert.equal(effectiveColumn(card, started), column.key, `card ${card.id} in the wrong column`)
+        }
       }
     }
     for (const group of plan.groups) {
@@ -101,7 +111,9 @@ test('Property 4: every card is in the one column of its status, in each group i
 test('Property 4: counts, order, and no empty group', () => {
   forSeeds('count, order and empty groups', ITERATIONS, (r) => {
     const plan = randomPlan(r)
-    const columns = columnsOf(plan)
+    const allIds = plan.groups.flatMap((group) => group.cards.map((card) => card.id))
+    const started = new Set(allIds.filter(() => r.bool(0.4)))
+    const columns = columnsOf(plan, started)
 
     for (const column of columns) {
       // count equals the number of cards in the column's groups
@@ -113,7 +125,9 @@ test('Property 4: counts, order, and no empty group', () => {
       // groups and cards keep the plan's order: the expected column is built from the plan directly
       const expected = []
       plan.groups.forEach((group, g) => {
-        const ids = group.cards.filter((card) => card.status === column.key).map((card) => card.id)
+        const ids = group.cards
+          .filter((card) => effectiveColumn(card, started) === column.key)
+          .map((card) => card.id)
         if (ids.length > 0) expected.push({ g, ids })
       })
       assert.equal(column.groups.length, expected.length)
@@ -184,4 +198,59 @@ test('a card in two epic groups appears once under each, in its own status colum
   assert.deepEqual(done.groups.map((group) => group.name), ['Two'])
   assert.equal(inProgress.count, 0)
   assert.equal(planned.count + done.count, 2)
+})
+
+test('a planned started card is in In progress and counts there', () => {
+  const plan = {
+    groups: [
+      { epic: { name: 'Epic', file: 'epic.md' }, cards: [
+        { id: 'a', name: 'A', status: 'planned' },
+        { id: 'b', name: 'B', status: 'planned' },
+      ] },
+    ],
+  }
+  const started = new Set(['a'])
+  const [planned, inProgress, done] = columnsOf(plan, started)
+  assert.equal(planned.count, 1)
+  assert.equal(inProgress.count, 1)
+  assert.equal(done.count, 0)
+  assert.deepEqual(planned.groups[0].cards.map((card) => card.id), ['b'])
+  assert.deepEqual(inProgress.groups[0].cards.map((card) => card.id), ['a'])
+})
+
+test('an in-progress card stays in In progress regardless of started', () => {
+  const plan = {
+    groups: [
+      { epic: null, cards: [{ id: 'x', name: 'X', status: 'in progress' }] },
+    ],
+  }
+  const started = new Set(['x'])
+  const [, inProgress] = columnsOf(plan, started)
+  assert.equal(inProgress.count, 1)
+  assert.deepEqual(inProgress.groups[0].cards.map((c) => c.id), ['x'])
+})
+
+test('a done card stays in Done regardless of started', () => {
+  const plan = {
+    groups: [
+      { epic: null, cards: [{ id: 'y', name: 'Y', status: 'done' }] },
+    ],
+  }
+  const started = new Set(['y'])
+  const [, , done] = columnsOf(plan, started)
+  assert.equal(done.count, 1)
+})
+
+test('removing a started record returns a card to Planned', () => {
+  const plan = {
+    groups: [
+      { epic: null, cards: [{ id: 'z', name: 'Z', status: 'planned' }] },
+    ],
+  }
+  // With the record: card is in In progress.
+  const [, inProgress1] = columnsOf(plan, new Set(['z']))
+  assert.equal(inProgress1.count, 1)
+  // Record removed: card goes back to Planned.
+  const [planned2] = columnsOf(plan, new Set())
+  assert.equal(planned2.count, 1)
 })

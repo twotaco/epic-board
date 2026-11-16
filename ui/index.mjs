@@ -18,13 +18,16 @@ const COLUMNS = [
 // A group's Filter_Key: its epic's file name, or "no-epic". Shared by columnsOf and the filter.
 const groupKey = (group) => (group.epic ? group.epic.file : 'no-epic')
 
-export function columnsOf(plan) {
+export function columnsOf(plan, started = new Set()) {
   const planGroups = Array.isArray(plan?.groups) ? plan.groups : []
   return COLUMNS.map(({ key, title }) => {
     const groups = []
     let count = 0
     for (const group of planGroups) {
-      const cards = (group.cards ?? []).filter((card) => card.status === key)
+      const cards = (group.cards ?? []).filter((card) => {
+        const col = card.status === 'planned' && started.has(card.id) ? 'in progress' : card.status
+        return col === key
+      })
       if (cards.length === 0) continue
       groups.push({
         key: groupKey(group),
@@ -148,7 +151,7 @@ export function saveChoice(storage, key) {
 }
 
 // What the page shows for a state. `kind` is 'loading', 'unreachable', 'error' or 'plan'.
-export function viewOf(state, filterKey = 'all') {
+export function viewOf(state, filterKey = 'all', started = new Set()) {
   const { content, unreachable } = state
   if (content === null) return { kind: unreachable ? 'unreachable' : 'loading' }
   if (content.type === 'error') {
@@ -178,7 +181,7 @@ export function viewOf(state, filterKey = 'all') {
     unreachableNotice: unreachable,
     empty,
     filter: { key, options },
-    columns: empty ? null : columnsOf(filterPlan(plan, key)),
+    columns: empty ? null : columnsOf(filterPlan(plan, key), started),
     problems: Array.isArray(plan.problems) ? plan.problems : [],
   }
 }
@@ -2078,7 +2081,8 @@ export function createBoard(React, env = {}) {
       },
     }
 
-    const view = viewOf(state, filterKey)
+    const started = new Set(chats.records.map((record) => record.card_id))
+    const view = viewOf(state, filterKey, started)
     // A saved or chosen epic that the plan lacks: show all epics and save that.
     const effectiveKey = view.kind === 'plan' ? view.filter.key : filterKey
     useEffect(() => {
