@@ -4,19 +4,19 @@
 
 This story changes the brief that the board sends to a conductor, and the card that shows the conductor's chat. It builds on the start spec (`.kiro/specs/start-a-story/`) and the board spec (`.kiro/specs/show-the-board/`), and does not repeat them.
 
-The changes touch five backend files and one page file. The backend reads `AGENTS.md` from the git snapshot, includes it in the held plan and passes it to `build_brief`, which carries the instructions, a name-check step, honest-reporting rules and provenance rules. The page reads harness and model from the chat slot and shows them on the card. No dependency is added, `app.json` is unchanged, and the page adds no request.
+The changes touch five backend files and one page file. The backend reads `AGENTS.md` from the git snapshot, includes it in the held plan and passes it to `build_brief`, which carries the instructions, a name-check step, honest-reporting rules and provenance rules. The page reads the model from the chat slot and shows it on the card. No dependency is added, `app.json` is unchanged, and the page adds no request.
 
 ### Layout of the change
 
 ```
 backend/plan.py       CHANGED  read_instructions(source), extract_headings(text)
 backend/held.py       CHANGED  _plan_body includes instructions in the plan dict
-backend/server.py     CHANGED  handle_reserve passes instructions to build_brief
+backend/server.py     CHANGED  ChatService.reserve passes instructions to build_brief; plan_response excludes instructions
 backend/chats.py      CHANGED  build_brief gains instructions parameter; new sections and rules
-ui/index.mjs          CHANGED  readChats extracts harness/model; renderCard shows provenance meta line
+ui/index.mjs          CHANGED  readChats extracts model from served_model/model; renderCard shows provenance meta line
 tests/test_plan.py    CHANGED  tests for read_instructions and extract_headings
 tests/test_chats.py   CHANGED  tests for the new brief sections, rules and length
-tests/test_held.py    CHANGED  plan body includes instructions
+tests/test_held.py    CHANGED  plan body includes instructions; plan route response excludes it
 tests/ui/render.test.mjs  CHANGED  tests for the provenance meta line
 tests/ui/board.test.mjs   CHANGED  tests for provenance in createBoard
 ```
@@ -27,11 +27,11 @@ tests/ui/board.test.mjs   CHANGED  tests for provenance in createBoard
 flowchart LR
     S[Snapshot] -->|read_file AGENTS.md| P["plan.py: read_instructions"]
     P -->|text or None| H["held.py: plan body"]
-    H -->|plan.instructions| R["server.py: handle_reserve"]
+    H -->|plan.instructions| R["server.py: ChatService.reserve"]
     R -->|instructions arg| B["chats.py: build_brief"]
     B --> Brief["Brief text"]
     C["Crew GET /api/chat/slots"] -->|row fields| U["ui/index.mjs: readChats"]
-    U -->|harness, model| Card["Card: provenance meta line"]
+    U -->|model| Card["Card: provenance meta line"]
 ```
 
 ## Components and Interfaces
@@ -79,11 +79,11 @@ def _plan_body(self, snapshot, fetch, groups, problems):
             "instructions": read_instructions(snapshot)}
 ```
 
-The import is local because `held.py` imports nothing from `plan.py` today. The plan route's response to the page gains the `instructions` key; the page ignores it. Tests that check the exact key set of the plan body or the plan response are updated to include `instructions`.
+The import is local because `held.py` imports nothing from `plan.py` today. The plan body gains the `instructions` key, but `plan_response` strips it before sending to the page, so the page never sees it. Tests that check the exact key set of the plan body are updated to include `instructions`; tests that check the plan route response are updated to confirm `instructions` is absent.
 
-### The reserve handler (`server.py`)
+### The reserve call and the plan response (`server.py`)
 
-`handle_reserve` passes the instructions from the plan to `build_brief`:
+`ChatService.reserve` passes the instructions from the plan to `build_brief`:
 
 ```python
 return {"card_id": card_id, "name": record["name"], "folder_id": self.folder,
@@ -91,7 +91,15 @@ return {"card_id": card_id, "name": record["name"], "folder_id": self.folder,
                               instructions=plan.get("instructions"))}
 ```
 
-No other change to the handler.
+No other change to `reserve`.
+
+`plan_response` strips `instructions` from the plan before returning it to the page, so the page never receives the file's text:
+
+```python
+if kind == "plan":
+    body = {k: v for k, v in value.items() if k != "instructions"}
+    return 200, body
+```
 
 ### The brief (`chats.py`)
 
@@ -127,7 +135,7 @@ The brief gains four pieces:
 
 4. **The commit step, with trailer and footer.** The last numbered step (commit, push, open PR) gains two sentences:
 
-   > End each commit message with the trailer: Built-with: Kiro Crew, Epic Board (story: \<story name>). End the PR description with: Built with Kiro Crew, started from Epic Board · Story: \<story name> · \<your harness>, \<your model>.
+   > End each commit message with the trailer: Built-with: Kiro Crew, Epic Board (story: \<story name>). End the PR description with: Built with Kiro Crew, started from Epic Board · Story: \<story name> · \<your harness>, \<your model>. Write "unknown" for harness or model unless the brief or Crew states them.
 
    `<story name>` is the story's name as a safe one-line string (`_inline(card.get("name", ""), limit=BRIEF_NAME_MAX_CHARS)`), not the JSON-quoted form the opening line uses.
 
@@ -140,27 +148,25 @@ The total brief length with instructions at the threshold (3000 characters), wor
 
 ### The card's provenance meta line (`ui/index.mjs`)
 
-The `readChats` function already reads the chat list from `GET /api/chat/slots?crew=all`. Each row is an object. Two new fields are read:
+The `readChats` function already reads the chat list from `GET /api/chat/slots?crew=all`. Each row is an object. The model is read from two fields, preferring the one the session actually ran on:
 
 ```javascript
-const harness = typeof row.harness_display === 'string' ? row.harness_display : null
-const model = typeof row.model_display === 'string' ? row.model_display : null
+const model = typeof row.served_model === 'string' ? row.served_model
+            : typeof row.model === 'string' ? row.model
+            : null
 ```
 
-These are stored in the entry's record alongside `state`, `key` and the other fields, and passed through to the card's view as `view.harness` and `view.model`.
+`served_model` is the model the session ran on (set by Crew after the session starts). `model` is the hand-picked model from the session's settings (often empty). The row has no harness field — `agent` and `effective_agent` name the agent, not the harness — so the card shows the model only.
+
+The field is stored in the entry's record alongside `state`, `key` and the other fields, and passed through to the card's view as `view.model`.
 
 The card renders the provenance meta line after the chat state badge, in the card's meta style (the same 12px, `var(--muted)` of the spec folder name):
 
 ```javascript
-// When both are present: "Claude Code, claude-sonnet-4-6 on Bedrock"
-// When one is present: "Claude Code" or "claude-sonnet-4-6 on Bedrock"
-// When neither: "unknown"
-const provenance = [view.harness, view.model].filter(Boolean).join(', ') || 'unknown'
+const provenance = view.model || 'unknown'
 ```
 
 The line is shown only when `view.state` is not null (the chat's state has been read) and `view.key` is present (the card has a started chat). It is a `span` or `p` in meta style, as literal text.
-
-**The field names** `harness_display` and `model_display` are the best guess from the chat slot schema. The exact names are confirmed on the host in task 3.1; if they differ, the code uses the real names and the tests are updated.
 
 ## Correctness Properties
 
@@ -191,7 +197,7 @@ At least 100 iterations with the seed printed on failure.
 | Plan | `AGENTS.md` cannot be read (binary, corrupt, SourceError) | Same as missing |
 | Plan | `AGENTS.md` is empty | Same as missing (an empty string is treated as absent) |
 | Brief | Instructions above the threshold with no Markdown headings | The section header says "read the full file before anything else" with no headings listed |
-| Card | Crew does not expose `harness_display` or `model_display` | The provenance meta line shows "unknown" |
+| Card | `served_model` and `model` are both absent or non-string | The provenance meta line shows "unknown" |
 | Card | The chat slot row is malformed or missing the fields | Same as absent: "unknown" |
 | Card | The chat has not been started or its state has not been read | No provenance meta line |
 
@@ -211,19 +217,19 @@ The backend's pure functions are tested with `unittest`, the held plan's thread-
 
 - **`tests/test_plan.py`**: `read_instructions` returns the text for an existing file, `None` for a missing file, `None` for an unreadable file (each kind of exception), and `None` for a source with no `read_file`; `extract_headings` for text with headings at several levels, text with no headings, empty text and text whose lines look like headings but lack the space after `#`.
 - **`tests/test_chats.py`**: `build_brief` with instructions (full text within the threshold, headings summary above it, `None`, empty string); the "Project instructions" section is present or absent as expected; step 1 keeps or drops the AGENTS.md pointer and always ends with the confirmation; the name-check step appears in both variants; the honest-reporting rules appear; the commit-trailer and PR-footer rules appear with the story's name as plain text; the existing rules are unchanged; the `story_name` in the trailer has no control characters; the length test is updated to < 10 000; the existing tests pass unchanged (the new `instructions` default is `None`). Properties 1 and 2 as seeded tests with at least 100 iterations.
-- **`tests/test_held.py`**: the plan body includes `instructions` when `AGENTS.md` exists and `None` when it does not.
+- **`tests/test_held.py`**: the plan body includes `instructions` when `AGENTS.md` exists and `None` when it does not; the plan route response (`plan_response`) does not include `instructions`.
 
 ### Page tests
 
 - **`tests/ui/render.test.mjs`**: the provenance meta line in the card's tree: present with both fields, present with one, "unknown" with neither, absent when the chat has no state.
-- **`tests/ui/board.test.mjs`**: `createBoard` reads harness and model from the chat slot row and shows them on the card; a row without the fields shows "unknown"; a card with no chat shows no provenance.
+- **`tests/ui/board.test.mjs`**: `createBoard` reads the model from `served_model` (falling back to `model`) in the chat slot row and shows it on the card; a row without either field shows "unknown"; a card with no chat shows no provenance.
 
 | Req | Backend tests | Page tests | Manual, on the host |
 |---|---|---|---|
 | 1 | Property 1, Property 2; section present/absent; step 1 variants | — | Start a story and see the "Project instructions" section in the brief |
 | 2 | The name-check step in both variants | — | The conductor's PR description includes the name check |
 | 3 | The honest-reporting rules in both variants | — | The conductor reports exact commands and counts |
-| 4 | The trailer and footer rules with the story name | Provenance meta line | The card shows harness and model; the PR has the footer |
+| 4 | The trailer and footer rules with the story name | Provenance meta line | The card shows the model; the PR has the footer |
 | 5 | No project-specific check in the brief; the rules are unchanged | — | The conductor follows the project's AGENTS.md checks, not the board's |
 
 ## Design Decisions
@@ -234,13 +240,13 @@ The backend's pure functions are tested with `unittest`, the held plan's thread-
 - **One file, defaulting to AGENTS.md.** The story says "from AGENTS.md or another file the project names". This spec reads `AGENTS.md`. A project that names a different file is a future extension (see Open Question 1). The design keeps the file path as a constant (`AGENTS_FILE`) so that changing it is a one-line edit.
 - **The confirmation is in the brief, not enforced.** The board cannot check what the conductor read. The instruction "Confirm in this chat which project files you read" is for the person reading the chat.
 - **The trailer uses the unquoted name.** The opening line's `Story: "Filter by epic"` is JSON-quoted so that quotes and newlines in the name cannot break the line. The trailer is a git trailer, where a name with no special characters is clearer without quotes. `_inline` replaces control characters, so the name is always one line.
-- **The provenance meta line follows the chat state.** The chat state (Working, Needs you, etc.) says what the conductor is doing. The provenance says what is doing it. Together they describe the conductor at a glance.
-- **"unknown" instead of absent.** When both harness and model are absent, showing "unknown" makes the absence visible. Hiding the line entirely would leave the person wondering whether the board reads the information at all.
+- **The provenance meta line shows the model only.** Crew's slot row has `served_model` (what the session ran on) and `model` (the hand-picked setting, often empty), but no harness field. `agent`/`effective_agent` name the agent, not the harness, so the card shows the model and leaves harness to the PR footer, where the conductor knows its own harness.
+- **"unknown" instead of absent.** When the model is absent, showing "unknown" makes the absence visible. Hiding the line entirely would leave the person wondering whether the board reads the information at all.
 
 ## Open Questions
 
 1. **Another file the project names.** The story says "from AGENTS.md or another file the project names". This spec reads `AGENTS.md` only. A project could name a different file through a field in the board's project settings (for example `agents_file` in `config.json` or in the saved setup). That is a one-line change to `AGENTS_FILE` and a small addition to `load_projects`. It is left for a later story unless the owner asks for it now.
-2. **The exact field names for harness and model.** The design names `harness_display` and `model_display` as the fields of the chat slot row. Crew may name them differently. The field names are confirmed on the host in task 3.1; the code and the tests use whatever Crew provides.
-3. **When neither harness nor model is exposed.** The spec says "unknown". The owner may prefer to hide the line entirely. Confirmed on the host in task 3.1.
+2. ~~**The exact field names for harness and model.**~~ Resolved: `served_model` (the model the session ran on), falling back to `model` (the hand-picked one). The row has no harness field; the card shows the model only.
+3. **When the model is absent.** The spec says "unknown". The owner may prefer to hide the line entirely. Confirmed on the host in task 3.1.
 4. **The name-check step for spec writing.** A spec names tables, functions and files that don't exist yet — they are "new (with the task that creates it)". The conductor still checks that every name it relies on (an existing file, an existing function) does exist. The step applies to both spec and build work, as the story decides.
 5. **The "Project instructions" section in the brief may duplicate what the harness already loaded.** A Claude Code harness that loads AGENTS.md on its own will see the instructions twice: once from the harness and once from the brief. This is harmless (the instructions are the same text) and avoids the case where the harness does not load them. The story prefers consistency over deduplication.

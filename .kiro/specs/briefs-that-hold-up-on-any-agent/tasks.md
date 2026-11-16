@@ -21,7 +21,8 @@ Start this story after "Show the board" (`.kiro/specs/show-the-board/`) group 6 
     - Update `first_read` and `_outcome` only if their call to `_plan_body` needs a change (it should not; they already pass the snapshot)
     - _Requirements: 1.1, 1.6_
   - [ ] 1.3 Pass instructions to `build_brief` in `backend/server.py`
-    - In `handle_reserve`, pass `instructions=plan.get("instructions")` to `build_brief`
+    - In `ChatService.reserve`, pass `instructions=plan.get("instructions")` to `build_brief`
+    - In `plan_response`, strip `instructions` from the plan before returning it to the page: `body = {k: v for k, v in value.items() if k != "instructions"}`
     - No other change to the handler
     - _Requirements: 1.2, 1.3, 1.4_
   - [ ] 1.4 Add the "Project instructions" section to `build_brief` in `backend/chats.py`
@@ -44,7 +45,7 @@ Start this story after "Show the board" (`.kiro/specs/show-the-board/`) group 6 
     - Both variants
     - _Requirements: 3.1, 3.2, 3.3_
   - [ ] 1.8 Add the commit-trailer and PR-footer rules
-    - The last numbered step (commit, push, open PR) gains: "End each commit message with the trailer: Built-with: Kiro Crew, Epic Board (story: \<story name>). End the PR description with: Built with Kiro Crew, started from Epic Board · Story: \<story name> · \<your harness>, \<your model>."
+    - The last numbered step (commit, push, open PR) gains: "End each commit message with the trailer: Built-with: Kiro Crew, Epic Board (story: \<story name>). End the PR description with: Built with Kiro Crew, started from Epic Board · Story: \<story name> · \<your harness>, \<your model>. Write "unknown" for harness or model unless the brief or Crew states them."
     - `<story name>` is `_inline(card.get("name", ""), limit=BRIEF_NAME_MAX_CHARS)`, not the JSON-quoted form
     - _Requirements: 4.1, 4.2_
   - [ ] 1.9 Test `read_instructions` and `extract_headings` in `tests/test_plan.py`
@@ -63,7 +64,7 @@ Start this story after "Show the board" (`.kiro/specs/show-the-board/`) group 6 
     - Property 1 (threshold) and Property 2 (never breaks) as seeded tests with at least 100 iterations, seed printed on failure
     - _Requirements: 1.2, 1.3, 1.4, 1.5, 2.1, 2.4, 3.1, 3.3, 4.1, 4.2, 5.1, 5.2, 5.3_
   - [ ] 1.11 Test the plan body in `tests/test_held.py`
-    - The plan body includes `instructions` (text or `None`) as `read_instructions` returns; the plan route response to the page includes the key
+    - The plan body includes `instructions` (text or `None`) as `read_instructions` returns; the plan route response to the page does not include the `instructions` key
     - _Requirements: 1.1, 1.6_
   - [ ] 1.12 Run the tests
     - Run `python3 -m unittest discover -s tests -t .` and report the counts run, passed and skipped
@@ -72,18 +73,18 @@ Start this story after "Show the board" (`.kiro/specs/show-the-board/`) group 6 
 
 - [ ] 2. Page: provenance on the card
   - [ ] 2.1 Read harness and model from the chat slot row in `ui/index.mjs`
-    - In `readChats` (or the function that builds the byKey entries from the chat list), read `row.harness_display` and `row.model_display` as strings; treat any other type as absent
-    - Store them in the entry as `harness` and `model`; pass them through to the card's view
-    - The field names are the design's best guess; if Crew names them differently (confirmed in task 3.1), use the real names
+    - In `readChats` (or the function that builds the byKey entries from the chat list), read the model from `row.served_model` (the model the session ran on), falling back to `row.model` (the hand-picked one, often empty); treat any non-string as absent
+    - Store it in the entry as `model`; pass it through to the card's view as `view.model`
+    - The row has no harness field; the card shows the model only
     - _Requirements: 4.3, 4.4, 4.6_
   - [ ] 2.2 Show the provenance meta line on the card in `ui/index.mjs`
-    - After the chat state badge (when the card has a Started_Chat and its state has been read), show a meta line: both present → "\<harness>, \<model>"; one present → that one; neither → "unknown"
+    - After the chat state badge (when the card has a Started_Chat and its state has been read), show a meta line: model present → the model text; model absent → "unknown"
     - The line is a `span` or `p` in the card's meta style (12px, `var(--muted)`, same class as the spec folder name), as literal text, not a link or badge or button
     - When the card has no Started_Chat or the state has not been read, show nothing
     - _Requirements: 4.3, 4.4, 4.5_
   - [ ] 2.3 Test the provenance display in `tests/ui/render.test.mjs` and `tests/ui/board.test.mjs`
-    - `render.test.mjs`: the provenance meta line with both fields, with one, with neither ("unknown"), and absent when no chat; the line is in the meta style
-    - `board.test.mjs`: `createBoard` reads harness and model from the chat slot and shows them; a row without the fields shows "unknown"; a card with no chat shows no provenance
+    - `render.test.mjs`: the provenance meta line with `served_model` present, with only `model` present, with neither ("unknown"), and absent when no chat; the line is in the meta style
+    - `board.test.mjs`: `createBoard` reads the model from `served_model` (falling back to `model`) in the chat slot and shows it; a row without either field shows "unknown"; a card with no chat shows no provenance
     - _Requirements: 4.3, 4.4, 4.5_
   - [ ] 2.4 Run the tests
     - Run `python3 -m unittest discover -s tests -t .` and `node --test tests/ui/*.test.mjs` and report the counts run, passed and skipped for each
@@ -94,8 +95,8 @@ Start this story after "Show the board" (`.kiro/specs/show-the-board/`) group 6 
     - Start a story from the board on a project that has an AGENTS.md and confirm the brief carries the "Project instructions" section with the file's text
     - Confirm step 1 asks the conductor to say which files it read, and does not repeat the AGENTS.md pointer
     - Confirm the name-check step, the honest-reporting rules and the provenance rules are in the brief
-    - Confirm the card shows the harness and model from the chat slot; note the real field names Crew uses and update the code if they differ from the design's guess
-    - Confirm a card whose chat slot has no harness or model shows "unknown"
+    - Confirm the card shows the model from `served_model` (or `model`) on the chat slot
+    - Confirm a card whose chat slot has no `served_model` or `model` shows "unknown"
     - If a project's AGENTS.md is above 3000 characters, confirm the headings summary appears instead of the full text; if none is that long, note it and test with a temporary file
     - Write the owner's answers to the open questions of the design into the design
     - _Requirements: 1.1, 1.2, 1.3, 1.4, 1.5, 2.1, 3.1, 4.1, 4.2, 4.3, 4.4, 5.1_
@@ -104,7 +105,7 @@ Start this story after "Show the board" (`.kiro/specs/show-the-board/`) group 6 
 
 - Each group is one pull request and is merged by the owner; start the next group from the updated main
 - The existing brief tests pass with no `instructions` argument because the default is `None`
-- The page tests in group 2 may need a fake chat slot row with `harness_display` and `model_display` fields; if Crew names them differently (found in task 3.1), the tests use the real names
+- The page tests in group 2 need a fake chat slot row with `served_model` and `model` fields
 - No task is optional: every task checks a requirement of this spec
 
 ## Task Dependency Graph

@@ -16,8 +16,8 @@ This story changes four things. First, the brief carries the project's own agent
 - **Name_Check**: the list in the PR description that names every table, column, function, file, setting, endpoint and command the change adds or relies on, each marked as existing (with the file where it was found) or new (with the task that creates it).
 - **Provenance_Line**: the footer of a PR description: "Built with Kiro Crew, started from Epic Board · Story: \<story name> · \<harness>, \<model>".
 - **Commit_Trailer**: the last line of a commit message: "Built-with: Kiro Crew, Epic Board (story: \<story name>)".
-- **Harness_Name**: the name of the harness that runs the conductor, as Crew exposes it on the chat slot row (for example "Claude Code" or "Kiro Agent"). When Crew does not expose it, it is absent.
-- **Model_Name**: the name of the model the conductor uses, as Crew exposes it on the chat slot row (for example "claude-sonnet-4-6 on Bedrock" or "auto"). When Crew does not expose it, it is absent.
+- **Harness_Name**: the harness that runs the conductor. Crew's chat slot row has no harness field, so the conductor itself writes it in the PR footer; the card does not show it. When the conductor does not know its harness, it writes "unknown".
+- **Model_Name**: the model the conductor uses, from the chat slot row's `served_model` field (the model the session ran on), falling back to `model` (the hand-picked one, often empty). When neither is present, it is absent.
 
 ## Requirements
 
@@ -32,7 +32,7 @@ This story changes four things. First, the brief carries the project's own agent
 3. WHEN the Agent_Instructions are present and their length is above the Instructions_Threshold THEN the brief SHALL include the Headings_Summary in the same section, headed "Project instructions (from AGENTS.md on main — read the full file before anything else):".
 4. WHEN the Agent_Instructions are absent THEN the brief SHALL have no "Project instructions" section. The brief's step 1 SHALL keep the pointer to AGENTS.md that the start spec gives ("Read the project's AGENTS.md and steering files. Follow them for how specs, branches and checks work."), so the conductor can still find the file if the harness puts it in the working directory.
 5. THE brief's step 1 SHALL tell the conductor to confirm in the chat which project files it read. WHEN the "Project instructions" section is present THEN step 1 SHALL NOT repeat the pointer to AGENTS.md, because the instructions are already in the brief.
-6. THE reading of AGENTS.md SHALL happen once when the plan is built (in the same git read as the specs and epics) and be held in memory with the plan, so that a reserve request adds no git operation.
+6. THE reading of AGENTS.md SHALL happen once when the plan is built (in the same git read as the specs and epics) and be held in memory with the plan, so that a reserve request adds no git operation. THE `/plan` response that the page polls SHALL NOT include the instructions text.
 
 ### Requirement 2: Verify every name before the pull request
 
@@ -62,8 +62,8 @@ This story changes four things. First, the brief carries the project's own agent
 #### Acceptance Criteria
 
 1. THE brief SHALL include a rule that tells the conductor to end each commit message with the Commit_Trailer, where \<story name> is the story's name as plain text (not the JSON-quoted form of the opening line).
-2. THE brief SHALL include a rule that tells the conductor to end the PR description with the Provenance_Line, where \<harness> and \<model> are what the conductor knows about itself, and "unknown" for what it does not know.
-3. WHEN a card has a Started_Chat and the chat slot row carries a Harness_Name or a Model_Name THEN the card SHALL show them as a meta line in the card's meta style (the same size and muted colour as the spec folder name), in the format "\<harness>, \<model>". WHEN only one is present THEN the line SHALL show only that one. WHEN both are absent THEN the line SHALL show "unknown".
+2. THE brief SHALL include a rule that tells the conductor to end the PR description with the Provenance_Line, where \<harness> and \<model> are what the brief or Crew states, and "unknown" for what is not stated. The conductor SHALL NOT guess.
+3. WHEN a card has a Started_Chat THEN the card SHALL show the Model_Name as a meta line in the card's meta style (the same size and muted colour as the spec folder name). WHEN the Model_Name is absent THEN the line SHALL show "unknown".
 4. WHEN a card has no Started_Chat, or its state has not been read, THEN the card SHALL show no provenance meta line.
 5. THE provenance meta line SHALL be shown as literal text and SHALL NOT be a link, a badge or a button.
 6. THIS story SHALL NOT change how the board creates a chat (the `agent`, `folder_id` and `name` of the start spec), and SHALL NOT choose a harness or model for the conductor. The harness and model come from Crew's own settings.
