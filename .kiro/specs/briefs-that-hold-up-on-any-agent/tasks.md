@@ -10,49 +10,49 @@ Start this story after "Show the board" (`.kiro/specs/show-the-board/`) group 6 
 
 ## Tasks
 
-- [ ] 1. Backend: instructions in the plan, and a brief that holds up
-  - [ ] 1.1 Read AGENTS.md in `backend/plan.py`
+- [x] 1. Backend: instructions in the plan, and a brief that holds up
+  - [x] 1.1 Read AGENTS.md in `backend/plan.py`
     - Add `AGENTS_FILE = "AGENTS.md"`, `INSTRUCTIONS_THRESHOLD = 3000`, `read_instructions(source)` and `extract_headings(text)` as the design gives them
     - `read_instructions` reads `AGENTS.md` via `source.read_file`, returns the text or `None` on any exception; never raises, never adds a problem
     - `extract_headings` returns a list of Markdown heading lines (lines starting with one or more `#` followed by a space)
     - _Requirements: 1.1, 1.6_
-  - [ ] 1.2 Include instructions in the plan body in `backend/held.py`
+  - [x] 1.2 Include instructions in the plan body in `backend/held.py`
     - In `_plan_body`, call `read_instructions(snapshot)` and add `"instructions": <result>` to the returned dict
     - Update `first_read` and `_outcome` only if their call to `_plan_body` needs a change (it should not; they already pass the snapshot)
     - _Requirements: 1.1, 1.6_
-  - [ ] 1.3 Pass instructions to `build_brief` in `backend/server.py`
+  - [x] 1.3 Pass instructions to `build_brief` in `backend/server.py`
     - In `ChatService.reserve`, pass `instructions=plan.get("instructions")` to `build_brief`
     - In `plan_response`, strip `instructions` from the plan before returning it to the page: `body = {k: v for k, v in value.items() if k != "instructions"}`
     - No other change to the handler
     - _Requirements: 1.2, 1.3, 1.4_
-  - [ ] 1.4 Add the "Project instructions" section to `build_brief` in `backend/chats.py`
+  - [x] 1.4 Add the "Project instructions" section to `build_brief` in `backend/chats.py`
     - `build_brief(card, epic_file, branch, taken=(), instructions=None)` gains the keyword argument
     - When `instructions` is a non-empty string and within the threshold: add the section with the full text
     - When above the threshold: add the section with the headings summary (from `extract_headings`); when there are no headings, only the header line
     - When `None` or empty: no section
     - _Requirements: 1.2, 1.3, 1.4, 5.1_
-  - [ ] 1.5 Update step 1 for the confirmation
+  - [x] 1.5 Update step 1 for the confirmation
     - When the instructions section is present, step 1 drops the AGENTS.md pointer and ends with the confirmation
     - When absent, step 1 keeps the pointer and appends the confirmation
     - Follow the eight variants in the design's step 1 table
     - _Requirements: 1.4, 1.5_
-  - [ ] 1.6 Add the name-check step to both brief variants
+  - [x] 1.6 Add the name-check step to both brief variants
     - A new numbered step after the work steps and before the commit step: "Before opening the pull request, list every table, column, function, file, setting, endpoint and command your change adds or relies on. Mark each as existing (with the file where you found it) or new (with the task that creates it). Fix anything that is neither found nor created. Put the list in the PR description."
     - Appears in the no-spec and with-spec variants
     - _Requirements: 2.1, 2.2, 2.3, 2.4_
-  - [ ] 1.7 Add honest-reporting rules to the "Rules" section
+  - [x] 1.7 Add honest-reporting rules to the "Rules" section
     - Two new lines after the existing three rules: "Report the exact commands you ran and their results, including how many tests ran, how many passed and how many were skipped. Never claim a check you did not run." and "If a check was skipped, say so."
     - Both variants
     - _Requirements: 3.1, 3.2, 3.3_
-  - [ ] 1.8 Add the commit-trailer and PR-footer rules
+  - [x] 1.8 Add the commit-trailer and PR-footer rules
     - The last numbered step (commit, push, open PR) gains: "End each commit message with the trailer: Built-with: Kiro Crew, Epic Board (story: \<story name>). End the PR description with: Built with Kiro Crew, started from Epic Board · Story: \<story name> · \<your harness>, \<your model>. Write "unknown" for harness or model unless the brief or Crew states them."
     - `<story name>` is `_inline(card.get("name", ""), limit=BRIEF_NAME_MAX_CHARS)`, not the JSON-quoted form
     - _Requirements: 4.1, 4.2_
-  - [ ] 1.9 Test `read_instructions` and `extract_headings` in `tests/test_plan.py`
+  - [x] 1.9 Test `read_instructions` and `extract_headings` in `tests/test_plan.py`
     - `read_instructions` returns text for an existing file, `None` for a missing file (SourceError), `None` for an unreadable file (OSError, ValueError), `None` for a source with no `read_file`
     - `extract_headings` for: headings at levels 1–4, no headings, empty text, lines that look like headings but lack the space after `#`, indented headings
     - _Requirements: 1.1_
-  - [ ] 1.10 Test the brief in `tests/test_chats.py`
+  - [x] 1.10 Test the brief in `tests/test_chats.py`
     - `build_brief` with instructions: full text within the threshold, headings summary above it, `None`, empty string; the section is present or absent as expected
     - Step 1: keeps or drops the AGENTS.md pointer; always ends with the confirmation; the eight variants of the design's table
     - The name-check step in both variants
@@ -63,10 +63,10 @@ Start this story after "Show the board" (`.kiro/specs/show-the-board/`) group 6 
     - The length test updated to < 10 000 with instructions at the threshold and worst-case names
     - Property 1 (threshold) and Property 2 (never breaks) as seeded tests with at least 100 iterations, seed printed on failure
     - _Requirements: 1.2, 1.3, 1.4, 1.5, 2.1, 2.4, 3.1, 3.3, 4.1, 4.2, 5.1, 5.2, 5.3_
-  - [ ] 1.11 Test the plan body in `tests/test_held.py`
+  - [x] 1.11 Test the plan body in `tests/test_held.py`
     - The plan body includes `instructions` (text or `None`) as `read_instructions` returns; the plan route response to the page does not include the `instructions` key
     - _Requirements: 1.1, 1.6_
-  - [ ] 1.12 Run the tests
+  - [x] 1.12 Run the tests
     - Run `python3 -m unittest discover -s tests -t .` and report the counts run, passed and skipped
     - Skip the page tests if only backend files changed in this group
     - _Requirements: 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 2.1, 2.4, 3.1, 3.3, 4.1, 4.2, 5.1, 5.2, 5.3_
