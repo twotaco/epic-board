@@ -149,7 +149,7 @@ One ES module, no imports, no build step. The host's React is read when the comp
 ```js
 // pure, exported by name
 export const STYLE              // the one style sheet, a string
-export function columnsOf(plan)           // [{key, title, count, groups: [{key, name|null, cards}]}] x3
+export function columnsOf(plan, started) // [{key, title, count, groups: [{key, name|null, cards}]}] x3
 export function progressOf(card)          // {text, fraction|null}
 export function ageText(seconds)          // string
 export function nextDelay(result)         // 2000 | 15000
@@ -215,7 +215,7 @@ Markup, all built with `h(...)`: the title is `h1` and column headings `h2` (nam
 
 #### Pure functions
 
-- `columnsOf(plan)` returns the columns Planned, In progress, Done. For each column it walks the plan's groups in order and keeps a group only if it has a card with that status, with those cards in the group's order. A group with `epic: null` is named "No epic". A column's `count` is the number of cards in its groups; a card in two epic groups is in two groups and counts twice (2.1, 2.2).
+- `columnsOf(plan, started)` returns the columns Planned, In progress, Done. `started` is the set of card ids that have a chat record (`start-a-story`), empty when none is given. A card's column is its status, except that a planned card whose id is in `started` goes to In progress (2.6). For each column it walks the plan's groups in order and keeps a group only if it has a card in that column, with those cards in the group's order. A group with `epic: null` is named "No epic". A column's `count` is the number of cards in its groups; a card in two epic groups is in two groups and counts twice (2.1, 2.2).
 - `progressOf(card)` gives "No spec yet" and no fraction for a card with no spec; "Tasks could not be read" when `tasks` is none; "No tasks yet" when the total is 0; otherwise `"<done> of <total> tasks"` (`task` when the total is 1) with the fraction `done / total` clamped to 0..1 (3.3 to 3.5).
 - `ageText(seconds)`: none gives "Not yet updated from origin". Under 60 gives "Updated less than a minute ago". From 60 to under 3600 gives "Updated N minutes ago" with N = floor(seconds / 60); from 3600 to under 86400, hours; from 86400, days. N of 1 uses "minute", "hour" or "day" (8.2).
 
@@ -269,9 +269,9 @@ The project adds no dependencies (AGENTS.md), so these are checked with generato
 
 ### Property 4: Grouping puts each card in one column
 
-*For any* plan, every card appears in exactly one column, the one matching its status; each column's count equals the number of cards in its groups; groups and cards keep the plan's order; and no group has an empty card list.
+*For any* plan and set of started card ids, every card appears in exactly one column: In progress for a planned card whose id is started, and otherwise the one matching its status; each column's count equals the number of cards in its groups; groups and cards keep the plan's order; and no group has an empty card list.
 
-**Validates: Requirements 2.1, 2.2**
+**Validates: Requirements 2.1, 2.2, 2.6**
 
 ### Property 5: Progress text matches the counts
 

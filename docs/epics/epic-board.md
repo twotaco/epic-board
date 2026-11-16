@@ -18,7 +18,7 @@ It matters now because the plan already lives in files on main, and nothing show
 ## Stories
 
 - [Read the plan from main](../../.kiro/specs/read-the-plan-from-main/) — done
-- [Show the board](../../.kiro/specs/show-the-board/) — done
+- [Show the board](../../.kiro/specs/show-the-board/) — in progress. Group 6: a story moves to In progress when work on it starts.
 - [Start a story](../../.kiro/specs/start-a-story/) — done. Click a card to start a conductor on it, see the state of its chat on the card, and open the chat from the card.
 - [Work in the chat](../../.kiro/specs/work-in-the-chat/) — done. Click a card to open its conductor's chat beside the board, and approve, answer and steer it without leaving the board. Built after the fix to starting a story.
 - [Filter by epic](../../.kiro/specs/filter-by-epic/) — done. A dropdown at the top of the board shows one epic or all of them.

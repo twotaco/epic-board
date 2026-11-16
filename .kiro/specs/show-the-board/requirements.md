@@ -35,11 +35,12 @@ Four criteria of the earlier spec were edited in place because this story change
 
 #### Acceptance Criteria
 
-1. WHEN a plan with cards is shown THEN the page SHALL show three columns in the order Planned, In progress, Done, each headed with its name and its number of cards, and SHALL show each card only in the column of its status. A card shown under more than one epic group SHALL count once for each group.
-2. WHEN a column holds cards THEN the page SHALL show one heading for each group that has a card with that column's status, in the order the plan returns the groups (earlier spec, Requirement 8), with the cards of each group in the order the plan returns them. A group with no epic SHALL be headed "No epic", and a spec listed in more than one epic SHALL appear as one card under each of those epics, in the column of that card's own status.
+1. WHEN a plan with cards is shown THEN the page SHALL show three columns in the order Planned, In progress, Done, each headed with its name and its number of cards, and SHALL show each card only in its column: the column of its status, except as criterion 6 says. A card shown under more than one epic group SHALL count once for each group.
+2. WHEN a column holds cards THEN the page SHALL show one heading for each group that has a card in that column, in the order the plan returns the groups (earlier spec, Requirement 8), with the cards of each group in the order the plan returns them. A group with no epic SHALL be headed "No epic", and a spec listed in more than one epic SHALL appear as one card under each of those epics, in that card's column.
 3. WHEN a column has no cards THEN the page SHALL show "Nothing here" under its heading.
 4. WHILE the page is at least 720 CSS pixels wide THEN the page SHALL show the three columns side by side, from left to right in the order of criterion 1.
 5. WHILE the page is narrower than 720 CSS pixels THEN the page SHALL stack the three columns vertically, in the order of criterion 1.
+6. WHEN a card's status is planned and a chat has been started on it (`start-a-story`, a chat record holds the card's id) THEN the page SHALL show the card in In progress, so that a story moves when work on it starts and not only when its first pull request lands. A card whose status is in progress or done SHALL stay in the column of its status, whatever its chat, so that only main moves a card to Done.
 
 ### Requirement 3: Card content
 
