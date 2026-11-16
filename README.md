@@ -8,7 +8,7 @@ Epic Board is a [Kiro Crew](https://github.com/kirodotdev/KiroCrew) app. Every s
 
 - **Start work from the plan.** One click hands a story to a conductor, with a brief built from the spec.
 - **See every story's state at a glance.** Needs you, Working, Stalled, Review #N with a link to the pull request, or Your turn. The state counts the conductor's workers too.
-- **The plan stays true.** Cards come from `main` only, so a card moves when its work lands, and the board always shows what you actually have.
+- **The plan stays true.** Cards come from `main` only. A card moves to In progress when you start it, and to Done when its work lands on main. The board always shows what you actually have.
 - **Several projects on one board.** Switch between them from a dropdown, and filter any project by epic.
 
 You stay in charge: the board never merges, pushes or edits your plan, and it never approves or answers a chat for you. You do that in the chat beside it.

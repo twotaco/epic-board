@@ -191,21 +191,21 @@ The placeholder page (`ui/index.mjs`) stays in place until group 4 replaces it. 
     - Check the heading level: if the host already has an `h1`, change the one constant in `ui/index.mjs` to move the title, column headings and group headings down together; confirm that the host ignores the page module's named exports (open question 3 in the design)
     - _Requirements: 1.1, 2.4, 2.5, 3.1, 7.1, 7.2, 8.3, 10.1, 10.2, 10.4_
 
-- [ ] 6. A started story moves to In progress
-  - [ ] 6.1 Place started cards in `columnsOf`
+- [x] 6. A started story moves to In progress
+  - [x] 6.1 Place started cards in `columnsOf`
     - Give `columnsOf(plan, started)` a second argument, the set of card ids that have a chat record, empty when it is not given; a card whose status is planned and whose id is in `started` goes to In progress, and every other card stays in the column of its status
     - In the board component, build `started` from the chat records (`chats.records`, their `card_id`) and pass it through `viewOf` to `columnsOf`, so the filter and the column counts use the same columns
     - Change no backend file: the plan stays what main says, and the card's status field is unchanged
     - _Requirements: 2.1, 2.2, 2.6_
-  - [ ] 6.2 Test the placement in `tests/ui/`
+  - [x] 6.2 Test the placement in `tests/ui/`
     - Update the test of Property 4 to generate a set of started ids as well, and check that every card is in exactly one column, In progress for a planned started card and its status's column otherwise
     - Add examples: a planned card with a chat record is in In progress and counts there; an in-progress card with a record stays in In progress; a done card with a record stays in Done; a card whose record is removed goes back to Planned
     - _Requirements: 2.1, 2.2, 2.6_
-  - [ ] 6.3 Update the README and the epic
+  - [x] 6.3 Update the README and the epic
     - In `README.md`, change "Cards come from `main` only, so a card moves when its work lands" to say that a card moves to In progress when you start it and to Done when its work lands on main
     - In `docs/epics/epic-board.md`, change "it changes column only when its work lands on main" to the same rule
     - _Requirements: 2.6_
-  - [ ] 6.4 Run the tests
+  - [x] 6.4 Run the tests
     - Run `python3 -m unittest discover -s tests -t .` and `node --test tests/ui/*.test.mjs` and report the counts run, passed and skipped for each
     - _Requirements: 2.1, 2.2, 2.6_
   - [ ] 6.5 Check it on the board (done by you in the app)
