@@ -73,7 +73,7 @@ Group 1 covers all backend changes: git worktree operations, chat record fields,
     - _Requirements: 1.6, 1.7_
   - [x] 2.3 Start sequence: create Worktree_Folder and open chat in it
     - When `project.worktree` is `true`, extend the start sequence after `POST .../chats {card_id}` and before `POST /api/chat/slots`:
-      1. `POST /api/chat/folders {name: <story-name>, project_dir: <worktree_path>, parent_id: <project-folder-id>}` → `{id: subfolder_id}`
+      1. `POST /api/chat/folders {name: "<story-name> · <last-8-of-record-name>", project_dir: <worktree_path>, parent_id: <project-folder-id>}` → `{id: subfolder_id}`. The name is capped at 100 characters by shortening the story name part (max 89 chars); when the story name is empty, the name is just the last 8 characters of the record name.
       2. Create the chat in `subfolder_id` (not the project folder)
     - Include `worktree_folder_id: subfolder_id` in `POST .../chats/<name>/started`
     - If the folders call fails: call `DELETE .../chats/<name>/worktree` to clean up the backend worktree; show "Could not create worktree folder: `<reason>`." on the card

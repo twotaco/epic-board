@@ -759,8 +759,13 @@ export async function startStory({
       onStep(step)
       let folderResult
       try {
+        const suffix = reservation.name.slice(-8)
+        const sep = ' · '
+        const maxStory = 100 - sep.length - suffix.length
+        const storyPart = cardName.slice(0, maxStory)
+        const folderName = storyPart ? storyPart + sep + suffix : suffix
         folderResult = await gateway.post('/api/chat/folders', {
-          name: cardName,
+          name: folderName,
           project_dir: reservation.worktree_path,
           parent_id: reservation.folder_id,
         })

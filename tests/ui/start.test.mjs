@@ -561,7 +561,7 @@ test('worktree start: creates Worktree_Folder, uses subfolder id for slots, incl
     'crew post /api/chat/slots',
     'crew post /api/chat',
   ])
-  assert.deepEqual(gateway.calls[0], ['post', '/api/chat/folders', { name: 'Filter by epic', project_dir: WORKTREE_PATH, parent_id: RESERVATION.folder_id }])
+  assert.deepEqual(gateway.calls[0], ['post', '/api/chat/folders', { name: 'Filter by epic · 3fa91c0e', project_dir: WORKTREE_PATH, parent_id: RESERVATION.folder_id }])
   assert.deepEqual(gateway.calls[1][2].folder_id, 'wf_sub1', 'slots call uses the subfolder id')
   const startedCall = backend.calls.find(([, path]) => path.endsWith('/started'))
   assert.deepEqual(startedCall[2], { key: KEY, worktree_folder_id: 'wf_sub1' })
@@ -619,4 +619,53 @@ test('worktree folder creation: Crew answers without an id, cleanup called and s
   assert.ok(outcome.error, 'start should fail when folder has no id')
   const cleanupCall = backend.calls.find(([verb, path]) => verb === 'del' && path.includes('/worktree'))
   assert.ok(cleanupCall, 'backend DELETE worktree route called after bad folder response')
+})
+
+test('worktree folder name: two reservations for the same card get different names', async () => {
+  const res1 = { ...RESERVATION, name: 'epic-board-aaaaaaaa', worktree_path: WORKTREE_PATH }
+  const res2 = { ...RESERVATION, name: 'epic-board-bbbbbbbb', worktree_path: WORKTREE_PATH }
+  const folderNames = []
+  for (const res of [res1, res2]) {
+    const backend = recorder((verb, path) => (path === '/chats' ? res : {}), [], 'backend ')
+    const gateway = recorder((verb, path) => {
+      if (path === '/api/chat/folders') return { id: 'wf_x' }
+      if (path === '/api/chat/slots') return { key: KEY }
+      return {}
+    }, [], 'crew ')
+    const timers = makeTimers()
+    await settle(startStory({ cardId: CARD, cardName: 'My story', backend, gateway, ...timers }), timers)
+    folderNames.push(gateway.calls[0][2].name)
+  }
+  assert.strictEqual(folderNames[0], 'My story · aaaaaaaa')
+  assert.strictEqual(folderNames[1], 'My story · bbbbbbbb')
+  assert.notStrictEqual(folderNames[0], folderNames[1])
+})
+
+test('worktree folder name: empty card name falls back to last 8 chars of record name', async () => {
+  const res = { ...RESERVATION, name: 'epic-board-3fa91c0e', worktree_path: WORKTREE_PATH }
+  const backend = recorder((verb, path) => (path === '/chats' ? res : {}), [], 'backend ')
+  const gateway = recorder((verb, path) => {
+    if (path === '/api/chat/folders') return { id: 'wf_x' }
+    if (path === '/api/chat/slots') return { key: KEY }
+    return {}
+  }, [], 'crew ')
+  const timers = makeTimers()
+  await settle(startStory({ cardId: CARD, cardName: '', backend, gateway, ...timers }), timers)
+  assert.strictEqual(gateway.calls[0][2].name, '3fa91c0e')
+})
+
+test('worktree folder name: long story name is cut so total is 100 chars', async () => {
+  const longName = 'x'.repeat(95)  // 95 + ' · ' (3) + 8 = 106 without cut; cut to 89 + 3 + 8 = 100
+  const res = { ...RESERVATION, name: 'epic-board-3fa91c0e', worktree_path: WORKTREE_PATH }
+  const backend = recorder((verb, path) => (path === '/chats' ? res : {}), [], 'backend ')
+  const gateway = recorder((verb, path) => {
+    if (path === '/api/chat/folders') return { id: 'wf_x' }
+    if (path === '/api/chat/slots') return { key: KEY }
+    return {}
+  }, [], 'crew ')
+  const timers = makeTimers()
+  await settle(startStory({ cardId: CARD, cardName: longName, backend, gateway, ...timers }), timers)
+  const name = gateway.calls[0][2].name
+  assert.strictEqual(name.length, 100)
+  assert.ok(name.endsWith(' · 3fa91c0e'))
 })
