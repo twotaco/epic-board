@@ -63,9 +63,9 @@ This story changes four things. First, the brief carries the project's own agent
 
 1. THE brief SHALL include a rule that tells the conductor to end each commit message with the Commit_Trailer, where \<story name> is the story's name as plain text (not the JSON-quoted form of the opening line).
 2. THE brief SHALL include a rule that tells the conductor to end the PR description with the Provenance_Line, where \<harness> and \<model> are what the brief or Crew states, and "unknown" for what is not stated. The conductor SHALL NOT guess.
-3. WHEN a card has a Started_Chat THEN the card SHALL show the Model_Name as a meta line in the card's meta style (the same size and muted colour as the spec folder name). WHEN the Model_Name is absent THEN the line SHALL show "unknown".
-4. WHEN a card has no Started_Chat, or its state has not been read, THEN the card SHALL show no provenance meta line.
-5. THE provenance meta line SHALL be shown as literal text and SHALL NOT be a link, a badge or a button.
+3. (Removed. Removed by the owner on 2026-11-16, after the check on the board: Crew's model values are inconsistent ("default", "sonnet", a full Bedrock id, "unknown") and add noise to the card. The PR footer of Requirement 4.2 records the model instead.) ~~WHEN a card has a Started_Chat THEN the card SHALL show the Model_Name as a meta line in the card's meta style (the same size and muted colour as the spec folder name). WHEN the Model_Name is absent THEN the line SHALL show "unknown".~~
+4. (Removed with criterion 3.) THE card SHALL show no provenance meta line.
+5. (Removed with criterion 3.)
 6. THIS story SHALL NOT change how the board creates a chat (the `agent`, `folder_id` and `name` of the start spec), and SHALL NOT choose a harness or model for the conductor. The harness and model come from Crew's own settings.
 
 ### Requirement 5: Project checks pass through

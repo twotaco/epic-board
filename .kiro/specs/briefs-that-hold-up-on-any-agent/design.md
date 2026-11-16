@@ -146,7 +146,10 @@ The brief gains four pieces:
 
 The total brief length with instructions at the threshold (3000 characters), worst-case names and the new sections is under 10 000 characters. The length test is updated accordingly.
 
-### The card's provenance meta line (`ui/index.mjs`)
+### The card's provenance meta line (`ui/index.mjs`) — removed
+
+Removed by the owner on 2026-11-16, after the check on the board: Crew's model values are inconsistent ("default", "sonnet", a full Bedrock id, "unknown") and add noise to the card. The PR footer of Requirement 4.2 records the model instead. Group 2 built it (PR #49) and it was taken out again; the page reads no model.
+
 
 The `readChats` function already reads the chat list from `GET /api/chat/slots?crew=all`. Each row is an object. The model is read from two fields, preferring the one the session actually ran on:
 

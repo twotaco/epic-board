@@ -6,7 +6,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
   RESTORE_MS, STATE_WORDS, cardViewOf, chatDelay, chatHref, chatsReduce, classifyChats, initialChats,
-  modelOf, readChats, reviewOf, reviewWord, stateOf, workersOf,
+  readChats, reviewOf, reviewWord, stateOf, workersOf,
 } from '../../ui/index.mjs'
 import { forSeeds, forSeedsAsync } from './support.mjs'
 
@@ -489,7 +489,7 @@ test('a card with a started chat is a link in every column, with its state once 
   for (const status of ['planned', 'in progress', 'done']) {
     const chats = chatsWith({ records: started(), byKey: { k1: { state: 'needs-you' } } })
     assert.deepEqual(cardViewOf(card({ status }), chats, { asking: 'e.md#A' }), {
-      mode: 'chat', key: 'k1', name: 'k1', href: '/chat?sid=k1', state: 'needs-you', stateWord: 'Needs you', model: null, stateHref: null, brief: null, open: false,
+      mode: 'chat', key: 'k1', name: 'k1', href: '/chat?sid=k1', state: 'needs-you', stateWord: 'Needs you', stateHref: null, brief: null, open: false,
     }, status)
   }
 })
@@ -573,33 +573,4 @@ test('a started chat is open only when the page has it open', () => {
   assert.equal(cardViewOf(card(), chats, { open: { cardId: 'e.md#A', key: 'k1' } }).open, true)
   assert.equal(cardViewOf(card(), chats, { open: { cardId: 'e.md#B', key: 'k2' } }).open, false)
   assert.equal(cardViewOf(card(), chats, {}).open, false)
-})
-
-// ---- the model a chat runs on (briefs-that-hold-up-on-any-agent, Requirement 4) ----
-
-test('modelOf prefers served_model, falls back to model, and counts only non-empty text', () => {
-  assert.equal(modelOf({ served_model: 'claude-sonnet-4-6', model: 'claude-opus-4-6' }), 'claude-sonnet-4-6')
-  assert.equal(modelOf({ served_model: '', model: 'claude-opus-4-6' }), 'claude-opus-4-6', 'an unknown served model falls back')
-  assert.equal(modelOf({ served_model: '   ', model: 'auto' }), 'auto')
-  assert.equal(modelOf({ served_model: 7, model: null }), null)
-  assert.equal(modelOf({ served_model: '', model: '' }), null)
-  assert.equal(modelOf({}), null)
-  assert.equal(modelOf(null), null)
-})
-
-test('readChats keeps the model of each chat, from its row or from its own read', async () => {
-  const chats = [record('c1', 'a'), record('c2', 'b'), record('c3', 'c')]
-  const gateway = fakeGateway({
-    rows: [row('a', { running: true, served_model: 'claude-sonnet-4-6' }), row('b', { running: true, served_model: '', model: '' })],
-    details: { c: { ...detailWith('assistant'), served_model: '', model: 'auto' } },
-  })
-  const result = await read({ backend: fakeBackend(backendAnswer(chats)), gateway })
-  assert.deepEqual([result.byKey.a.model, result.byKey.b.model, result.byKey.c.model], ['claude-sonnet-4-6', null, 'auto'])
-})
-
-test('a started chat carries its model to the card, and null before its state is read', () => {
-  const withModel = chatsWith({ records: started(), byKey: { k1: { state: 'working', model: 'claude-sonnet-4-6' } } })
-  assert.equal(cardViewOf(card(), withModel, {}).model, 'claude-sonnet-4-6')
-  assert.equal(cardViewOf(card(), chatsWith({ records: started(), byKey: { k1: { state: 'working' } } }), {}).model, null)
-  assert.equal(cardViewOf(card(), chatsWith({ records: started() }), {}).model, null)
 })

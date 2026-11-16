@@ -439,16 +439,6 @@ function lastRoleOf(detail) {
 // is a started chat's key, and reads a chat's newest row only when its row is not Needs you, Working or
 // interrupted and its `last_ts` or `messages` changed since the last read. A key that is not in the list
 // is read on its own: a 404 is `missing`. Anything else that goes wrong rejects.
-// The model a chat ran on, from its Crew row: `served_model` (what the session resolved to), else
-// `model` (the one picked by hand). Crew sends `served_model` as "" while it is not known, so only a
-// non-empty string counts. Null when neither is known. Crew's row has no harness field.
-export function modelOf(row) {
-  for (const value of [row?.served_model, row?.model]) {
-    if (typeof value === 'string' && value.trim() !== '') return value.trim()
-  }
-  return null
-}
-
 export async function readChats({ backend, gateway, previous = initialChats, now, signal, onRecords = () => {} }) {
   let answer
   try {
@@ -512,7 +502,7 @@ export async function readChats({ backend, gateway, previous = initialChats, now
         }
       }
       const state = stateOf(row, role, workers, now())
-      byKey[key] = { state, lastTs: row.last_ts, messages: row.messages, role, roleRead, model: modelOf(row) }
+      byKey[key] = { state, lastTs: row.last_ts, messages: row.messages, role, roleRead }
       if (state === 'review') byKey[key].review = reviewOf(row)
       continue
     }
@@ -523,7 +513,7 @@ export async function readChats({ backend, gateway, previous = initialChats, now
     }
     const role = lastRoleOf(detail)
     const state = detail.running === true || detail.admission_queued === true ? 'working' : role === 'error' ? 'interrupted' : 'your-turn'
-    byKey[key] = { state, role, roleRead: true, model: modelOf(detail) }
+    byKey[key] = { state, role, roleRead: true }
   }
   const at = now()
   for (const key of Object.keys(missingSince)) if (missingSince[key] === null) missingSince[key] = at
@@ -610,7 +600,6 @@ export function cardViewOf(card, chats, ui = {}, nowMs = chats.at) {
       mode: 'chat', key, name: record.name, href: chatHref(key),
       state: entry ? entry.state : null,
       stateWord: entry ? (entry.state === 'review' ? reviewWord(entry.review) : STATE_WORDS[entry.state]) : null,
-      model: entry ? (entry.model ?? null) : null,
       stateHref: entry?.state === 'review' && entry.review ? entry.review.url : null,
       brief: ui.briefs?.[key] ?? null,
       open: ui.open?.key === key,
@@ -1139,8 +1128,6 @@ function renderChatPart(h, card, view, actions, parts = {}) {
             : null,
           view.open ? h('span', { className: 'eb-chat-open' }, 'Chat open') : null))
       }
-      // The model the conductor runs on, as plain text in the spec folder's meta style, once its state is read.
-      if (view.state) chat.push(h('p', { className: 'eb-card-spec eb-card-model', key: 'model' }, view.model || 'unknown'))
       if (view.brief?.kind === 'sending') {
         chat.push(h('p', { className: 'eb-chat-note', role: 'status', key: 'brief' }, 'Sending the brief…'))
       } else if (view.brief?.kind === 'failed') {

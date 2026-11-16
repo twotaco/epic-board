@@ -71,7 +71,7 @@ Start this story after "Show the board" (`.kiro/specs/show-the-board/`) group 6 
     - Skip the page tests if only backend files changed in this group
     - _Requirements: 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 2.1, 2.4, 3.1, 3.3, 4.1, 4.2, 5.1, 5.2, 5.3_
 
-- [x] 2. Page: provenance on the card
+- [x] 2. Page: provenance on the card (built in PR #49, then removed by the owner after the check on the board; see Requirement 4.3)
   - [x] 2.1 Read harness and model from the chat slot row in `ui/index.mjs`
     - In `readChats` (or the function that builds the byKey entries from the chat list), read the model from `row.served_model` (the model the session ran on), falling back to `row.model` (the hand-picked one, often empty); treat anything but a non-empty string as absent (Crew sends `served_model` as `""` while it is not known, and then `model` is used)
     - Store it in the entry as `model`; pass it through to the card's view as `view.model`
@@ -95,8 +95,6 @@ Start this story after "Show the board" (`.kiro/specs/show-the-board/`) group 6 
     - Start a story from the board on a project that has an AGENTS.md and confirm the brief carries the "Project instructions" section with the file's text
     - Confirm step 1 asks the conductor to say which files it read, and does not repeat the AGENTS.md pointer
     - Confirm the name-check step, the honest-reporting rules and the provenance rules are in the brief
-    - Confirm the card shows the model from `served_model` (or `model`) on the chat slot
-    - Confirm a card whose chat slot has no `served_model` or `model` shows "unknown"
     - If a project's AGENTS.md is above 3000 characters, confirm the headings summary appears instead of the full text; if none is that long, note it and test with a temporary file
     - Write the owner's answers to the open questions of the design into the design
     - _Requirements: 1.1, 1.2, 1.3, 1.4, 1.5, 2.1, 3.1, 4.1, 4.2, 4.3, 4.4, 5.1_

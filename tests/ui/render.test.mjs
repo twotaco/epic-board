@@ -1886,25 +1886,3 @@ test('STYLE: the fallback looks sit under .eb-fb, so a Crew component is never d
   assert.match(ruleOf('.eb-card'), /position:\s*relative[^}]*margin-bottom:\s*0/)
   assert.match(ruleOf('.eb-card-description'), /-webkit-line-clamp:\s*3/)
 })
-
-// ---- the model line (briefs-that-hold-up-on-any-agent, Requirement 4) ----
-
-const modelLines = (node) => findAll(node, (n) => /(^| )eb-card-model( |$)/.test(n.props.className ?? ''))
-
-test('a card whose chat state is read shows its model as plain meta text, or "unknown"', () => {
-  const known = theCard(renderWith(chatsView({ chats: withChat('k1', { state: 'working', model: 'claude-sonnet-4-6' }) })))
-  const [line] = modelLines(known)
-  assert.equal(textOf(line), 'claude-sonnet-4-6')
-  assert.equal(line.type, 'p')
-  assert.match(line.props.className, /(^| )eb-card-spec( |$)/, 'the meta style of the spec folder name')
-  assert.equal(findAll(line, (n) => n.type === 'a' || n.type === 'button').length, 0, 'not a link or a button')
-  const unknown = theCard(renderWith(chatsView({ chats: withChat('k1', { state: 'your-turn' }) })))
-  assert.deepEqual(modelLines(unknown).map(textOf), ['unknown'])
-})
-
-test('no model line before the chat state is read, or on a card with no chat', () => {
-  const unread = theCard(renderWith(chatsView({ chats: withChat('k1', undefined, { byKey: {} }) })))
-  assert.equal(modelLines(unread).length, 0)
-  const none = theCard(renderWith(chatsView()))
-  assert.equal(modelLines(none).length, 0)
-})
