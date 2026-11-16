@@ -3,6 +3,7 @@ import shutil
 import subprocess
 import tempfile
 import unittest
+from unittest import mock
 
 import gitsource
 from gitsource import SourceError, open_snapshot, read_snapshot, run_git
@@ -152,6 +153,135 @@ class RunnerTests(Repos):
         ok, _, error = run_git(self.checkout, "-c", "alias.slow=!sleep 10", "slow")
         self.assertFalse(ok)
         self.assertIn("timed out", error)
+
+
+class WorktreeTests(unittest.TestCase):
+    def test_worktree_path_sibling_of_checkout(self):
+        path = gitsource.worktree_path("/home/alice/my-project", "epic-board-a3f2b1c4")
+        self.assertEqual(path, "/home/alice/my-project--epic-board-a3f2b1c4")
+
+    def test_worktree_path_basename_and_parent(self):
+        path = gitsource.worktree_path("/a/b/c", "name")
+        self.assertEqual(os.path.dirname(path), "/a/b")
+        self.assertEqual(os.path.basename(path), "c--name")
+
+    def test_worktree_path_does_not_contain_branch_slug(self):
+        path = gitsource.worktree_path("/r/p", "epic-board-deadbeef")
+        self.assertNotIn("story/", path)
+
+    def test_worktree_path_property(self):
+        import random
+        seed = random.randrange(2 ** 32)
+        rng = random.Random(seed)
+        for _ in range(50):
+            repo = "/r/" + "".join(rng.choices("abcdefghijklmnopqrstuvwxyz", k=rng.randint(1, 20)))
+            name = "epic-board-" + "".join(rng.choices("0123456789abcdef", k=8))
+            path = gitsource.worktree_path(repo, name)
+            self.assertTrue(path, f"seed={seed}")
+            self.assertEqual(os.path.dirname(path), os.path.dirname(os.path.abspath(repo)), f"seed={seed}")
+            self.assertTrue(os.path.basename(path).endswith("--" + name), f"seed={seed}")
+
+    def test_create_worktree_success(self):
+        calls = []
+        def fake_run_git(repo, *args):
+            calls.append(args)
+            if args[0] == "worktree" and args[1] == "list":
+                return True, b"worktree /other\n", ""
+            if args[0] == "fetch":
+                return True, b"", ""
+            return True, b"", ""
+        with mock.patch.object(gitsource, "run_git", fake_run_git):
+            ok, err = gitsource.create_worktree("/repo", "/path/to/wt", "main")
+        self.assertTrue(ok)
+        self.assertIsNone(err)
+        add_call = next(c for c in calls if c[0] == "worktree" and c[1] == "add")
+        self.assertIn("--detach", add_call)
+        self.assertIn("/path/to/wt", add_call)
+        self.assertIn("origin/main", add_call)
+
+    def test_create_worktree_fetch_failure(self):
+        def fake_run_git(repo, *args):
+            if args[0] == "worktree" and args[1] == "list":
+                return True, b"worktree /other\n", ""
+            return False, b"", "network error"
+        with mock.patch.object(gitsource, "run_git", fake_run_git):
+            ok, err = gitsource.create_worktree("/repo", "/path/to/wt", "main")
+        self.assertFalse(ok)
+        self.assertIn("fetch failed", err)
+
+    def test_create_worktree_add_failure_cleans_up(self):
+        cleanup_calls = []
+        def fake_run_git(repo, *args):
+            if args[0] == "worktree" and args[1] == "list":
+                return True, b"worktree /other\n", ""
+            if args[0] == "fetch":
+                return True, b"", ""
+            if args[0] == "worktree" and args[1] == "add":
+                return False, b"", "branch already exists"
+            if args[0] == "worktree" and args[1] == "remove":
+                cleanup_calls.append(args)
+                return True, b"", ""
+            return True, b"", ""
+        with mock.patch.object(gitsource, "run_git", fake_run_git):
+            ok, err = gitsource.create_worktree("/repo", "/path/to/wt", "main")
+        self.assertFalse(ok)
+        self.assertTrue(err)
+        self.assertEqual(len(cleanup_calls), 1)
+        self.assertIn("--force", cleanup_calls[0])
+
+    def test_create_worktree_already_exists_returns_ok(self):
+        def fake_run_git(repo, *args):
+            if args[0] == "worktree" and args[1] == "list":
+                return True, b"worktree /existing/path\nHEAD abc123\n", ""
+            raise AssertionError(f"unexpected git call: {args}")
+        with mock.patch.object(gitsource, "run_git", fake_run_git):
+            ok, err = gitsource.create_worktree("/repo", "/existing/path", "main")
+        self.assertTrue(ok)
+        self.assertIsNone(err)
+
+    def test_remove_worktree_without_force(self):
+        calls = []
+        def fake_run_git(repo, *args):
+            calls.append(args)
+            return True, b"", ""
+        with mock.patch.object(gitsource, "run_git", fake_run_git):
+            ok, err = gitsource.remove_worktree("/repo", "/path/to/wt")
+        self.assertTrue(ok)
+        self.assertIsNone(err)
+        self.assertEqual(calls[0], ("worktree", "remove", "/path/to/wt"))
+        self.assertNotIn("--force", calls[0])
+
+    def test_remove_worktree_with_force(self):
+        calls = []
+        def fake_run_git(repo, *args):
+            calls.append(args)
+            return True, b"", ""
+        with mock.patch.object(gitsource, "run_git", fake_run_git):
+            ok, err = gitsource.remove_worktree("/repo", "/path/to/wt", force=True)
+        self.assertTrue(ok)
+        self.assertIn("--force", calls[0])
+
+    def test_create_worktree_already_exists_via_symlink(self):
+        """Git prints resolved paths; a symlink to an existing worktree must still match."""
+        real_path = "/real/path/to/wt"
+        sym_path = "/sym/link/to/wt"
+        def fake_run_git(repo, *args):
+            if args[0] == "worktree" and args[1] == "list":
+                return True, f"worktree {real_path}\nHEAD abc123\n".encode(), ""
+            raise AssertionError(f"unexpected git call: {args}")
+        with mock.patch.object(gitsource, "run_git", fake_run_git):
+            with mock.patch("os.path.realpath", side_effect=lambda p: real_path if p in (sym_path, real_path) else p):
+                ok, err = gitsource.create_worktree("/repo", sym_path, "main")
+        self.assertTrue(ok)
+        self.assertIsNone(err)
+
+    def test_remove_worktree_failure(self):
+        def fake_run_git(repo, *args):
+            return False, b"", "uncommitted changes"
+        with mock.patch.object(gitsource, "run_git", fake_run_git):
+            ok, err = gitsource.remove_worktree("/repo", "/path/to/wt")
+        self.assertFalse(ok)
+        self.assertTrue(err)
 
 
 if __name__ == "__main__":

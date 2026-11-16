@@ -102,3 +102,41 @@ def read_snapshot(repository):
 def open_snapshot(repository):
     """Fetch the main branch, then read it."""
     return _open(repository, fetch=True)
+
+
+def worktree_path(repository, name):
+    """The Worktree_Path: <parent>/<basename>--<name>. Example:
+      repository=/home/alice/my-project, name=epic-board-a3f2b1c4
+      → /home/alice/my-project--epic-board-a3f2b1c4"""
+    repo = os.path.abspath(repository)
+    return os.path.join(os.path.dirname(repo), f"{os.path.basename(repo)}--{name}")
+
+
+def create_worktree(repository, path, main_branch):
+    """Fetch origin and create a detached worktree at path at origin/main_branch.
+    Returns (True, None) on success or (False, error_text) on failure.
+    If path already exists as a worktree, returns (True, None) without re-creating.
+    Runs: git fetch origin; git worktree add --detach path origin/main_branch.
+    If the worktree add fails and the path was partially created, force-removes it."""
+    ok, out, _ = run_git(repository, "worktree", "list", "--porcelain")
+    if ok:
+        real_path = os.path.realpath(path)
+        for line in out.decode("utf-8", "replace").splitlines():
+            if line.startswith("worktree ") and os.path.realpath(line[9:].strip()) == real_path:
+                return True, None
+    ok, _, err = run_git(repository, "fetch", "origin")
+    if not ok:
+        return False, f"fetch failed — {err}"
+    ok, _, err = run_git(repository, "worktree", "add", "--detach", path, f"origin/{main_branch}")
+    if not ok:
+        run_git(repository, "worktree", "remove", "--force", path)
+        return False, err
+    return True, None
+
+
+def remove_worktree(repository, path, force=False):
+    """Remove the worktree at path. Returns (True, None) or (False, error_text).
+    Runs: git worktree remove [--force] path."""
+    args = ["worktree", "remove", "--force", path] if force else ["worktree", "remove", path]
+    ok, _, err = run_git(repository, *args)
+    return (True, None) if ok else (False, err)

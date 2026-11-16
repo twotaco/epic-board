@@ -389,13 +389,14 @@ class ProjectsRouteTests(unittest.TestCase):
         except HTTPError as e:
             return e.code, json.load(e)
 
-    def test_two_projects_returns_id_and_name(self):
+    def test_two_projects_returns_id_name_and_worktree(self):
         rp1 = _make_running("alpha", FakeHolder(), ChatStore(self.data, filename="chats-alpha.json"))
         rp2 = _make_running("beta", FakeHolder(), ChatStore(self.data, filename="chats-beta.json"))
         httpd = self._make_server([rp1, rp2])
         status, body = self.get(httpd, "/api/projects")
         self.assertEqual(status, 200)
-        self.assertEqual(body, [{"id": "alpha", "name": "Alpha"}, {"id": "beta", "name": "Beta"}])
+        self.assertEqual(body, [{"id": "alpha", "name": "Alpha", "worktree": True},
+                                 {"id": "beta", "name": "Beta", "worktree": True}])
 
     def test_empty_project_list_returns_empty_list(self):
         httpd = self._make_server(None)
@@ -986,6 +987,241 @@ class SetupEndToEndTests(unittest.TestCase):
         # /chats must immediately reflect the new folder without a restart.
         _, chats_body = self.get(httpd, chats_path, header=sign("GET", chats_path))
         self.assertEqual(chats_body["folder_id"], "f_2")
+
+
+class WorktreeServerTests(unittest.TestCase):
+    def setUp(self):
+        self.root = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.root, True)
+        self.data = os.path.join(self.root, "data")
+        os.makedirs(self.data)
+
+    def _store(self):
+        return ChatStore(self.data, new_name=lambda: "epic-board-00000001", clock=lambda: "t")
+
+    def _service(self, store=None, worktree=True, repository="/r/p"):
+        s = store or self._store()
+        return server.ChatService(s, "f_1", None, SECRET, FakeHolder(), clock=lambda: NOW,
+                                  repository=repository, worktree=worktree)
+
+    def _call(self, service, method, path, body=b""):
+        h = sign(method, path, body)
+        return service.handle(method, path, h, body)
+
+    def _post(self, service, path, body_dict):
+        raw = json.dumps(body_dict).encode()
+        h = sign("POST", path, raw)
+        return service.handle("POST", path, h, raw)
+
+    def test_reserve_with_worktree_calls_create_worktree(self):
+        expected_path = "/r/p--epic-board-00000001"
+        with mock.patch.object(server, "create_worktree", return_value=(True, None)) as cw:
+            status, resp = self._post(self._service(worktree=True), "/chats",
+                                      {"card_id": "#s"})
+        self.assertEqual(status, 200)
+        self.assertEqual(resp["worktree_path"], expected_path)
+        cw.assert_called_once_with("/r/p", expected_path, "main")
+        self.assertIn("own worktree", resp["brief"])
+
+    def test_reserve_without_worktree_has_null_path(self):
+        with mock.patch.object(server, "create_worktree") as cw:
+            status, resp = self._post(self._service(worktree=False), "/chats", {"card_id": "#s"})
+        self.assertEqual(status, 200)
+        self.assertIsNone(resp["worktree_path"])
+        cw.assert_not_called()
+        self.assertNotIn("own worktree", resp["brief"])
+
+    def test_reserve_worktree_failure_is_409(self):
+        with mock.patch.object(server, "create_worktree", return_value=(False, "git error")):
+            status, resp = self._post(self._service(worktree=True), "/chats", {"card_id": "#s"})
+        self.assertEqual(status, 409)
+        self.assertEqual(resp["error"]["code"], "worktree_failed")
+
+    def test_delete_worktree_route_success(self):
+        store = self._store()
+        record = store.reserve("#s")
+        store.update_worktree_path(record["name"], "/parent/p--epic-board-00000001")
+        service = server.ChatService(store, "f_1", None, SECRET, FakeHolder(), clock=lambda: NOW,
+                                     repository="/r/p", worktree=True)
+        with mock.patch.object(server, "remove_worktree", return_value=(True, None)) as rw:
+            status, resp = self._call(service, "DELETE",
+                                      f"/chats/{record['name']}/worktree")
+        self.assertEqual(status, 200)
+        self.assertTrue(resp.get("ok"))
+        rw.assert_called_once()
+        self.assertIsNone(store.get_record(record["name"])["worktree_path"])
+
+    def test_delete_worktree_has_changes_is_409(self):
+        store = self._store()
+        record = store.reserve("#s")
+        store.update_worktree_path(record["name"], "/parent/p--wt")
+        service = server.ChatService(store, "f_1", None, SECRET, FakeHolder(), clock=lambda: NOW,
+                                     repository="/r/p", worktree=True)
+        with mock.patch.object(server, "remove_worktree", return_value=(False, "uncommitted")):
+            status, resp = self._call(service, "DELETE",
+                                      f"/chats/{record['name']}/worktree")
+        self.assertEqual(status, 409)
+        self.assertEqual(resp["error"]["code"], "worktree_has_changes")
+
+    def test_delete_worktree_force_param(self):
+        store = self._store()
+        record = store.reserve("#s")
+        store.update_worktree_path(record["name"], "/parent/p--wt")
+        service = server.ChatService(store, "f_1", None, SECRET, FakeHolder(), clock=lambda: NOW,
+                                     repository="/r/p", worktree=True)
+        calls = []
+        def fake_remove(repo, path, force=False):
+            calls.append(force)
+            return True, None
+        with mock.patch.object(server, "remove_worktree", fake_remove):
+            path = f"/chats/{record['name']}/worktree?force=true"
+            h = sign("DELETE", path)
+            status, resp = service.handle("DELETE", path, h, b"")
+        self.assertEqual(status, 200)
+        self.assertTrue(calls[0])
+
+    def test_delete_worktree_null_path_is_200(self):
+        store = self._store()
+        record = store.reserve("#s")
+        service = server.ChatService(store, "f_1", None, SECRET, FakeHolder(), clock=lambda: NOW,
+                                     repository="/r/p", worktree=True)
+        with mock.patch.object(server, "remove_worktree") as rw:
+            status, resp = self._call(service, "DELETE",
+                                      f"/chats/{record['name']}/worktree")
+        self.assertEqual(status, 200)
+        self.assertTrue(resp.get("ok"))
+        rw.assert_not_called()
+
+    def test_delete_worktree_unknown_name_is_404(self):
+        status, resp = self._call(self._service(), "DELETE", "/chats/no-such-name/worktree")
+        self.assertEqual(status, 404)
+        self.assertEqual(resp["error"]["code"], "chat_not_found")
+
+    def test_started_stores_worktree_folder_id(self):
+        store = self._store()
+        record = store.reserve("#s")
+        service = server.ChatService(store, "f_1", None, SECRET, FakeHolder(), clock=lambda: NOW)
+        name = record["name"]
+        status, _ = self._post(service, f"/chats/{name}/started",
+                               {"key": "k-1", "worktree_folder_id": "folder-id-001"})
+        self.assertEqual(status, 200)
+        self.assertEqual(store.get_record(name)["worktree_folder_id"], "folder-id-001")
+
+    def test_started_without_folder_id_stores_null(self):
+        store = self._store()
+        record = store.reserve("#s")
+        service = server.ChatService(store, "f_1", None, SECRET, FakeHolder(), clock=lambda: NOW)
+        name = record["name"]
+        status, _ = self._post(service, f"/chats/{name}/started", {"key": "k-1"})
+        self.assertEqual(status, 200)
+        self.assertIsNone(store.get_record(name)["worktree_folder_id"])
+
+    def test_started_bad_worktree_folder_id_is_400(self):
+        store = self._store()
+        record = store.reserve("#s")
+        service = server.ChatService(store, "f_1", None, SECRET, FakeHolder(), clock=lambda: NOW)
+        name = record["name"]
+        for bad in ("a b", "x" * 194, ""):
+            raw = json.dumps({"key": "k-1", "worktree_folder_id": bad}).encode()
+            h = sign("POST", f"/chats/{name}/started", raw)
+            status, resp = service.handle("POST", f"/chats/{name}/started", h, raw)
+            self.assertEqual(status, 400, f"bad={bad!r}")
+
+    def test_get_projects_includes_worktree(self):
+        import threading
+        from urllib.request import urlopen
+        settings = proj.Project(id="p", name="Project", repository="/r/p",
+                                folder="f_1", folder_reason=None, records_file="chats.json",
+                                worktree=False)
+        rp = server.RunningProject(settings, None, None)
+        state = server.RuntimeState([rp], None, 'config', False, "/app/config.json", self.data, SECRET)
+        httpd = server.make_server(0, state)
+        threading.Thread(target=httpd.serve_forever, daemon=True).start()
+        self.addCleanup(httpd.shutdown)
+        self.addCleanup(httpd.server_close)
+        from urllib.error import HTTPError
+        try:
+            with urlopen(f"http://127.0.0.1:{httpd.server_port}/projects") as r:
+                body = json.load(r)
+        except HTTPError as e:
+            body = json.load(e)
+        self.assertEqual(body[0]["worktree"], False)
+
+    def test_get_setup_includes_worktree(self):
+        import threading
+        from urllib.request import urlopen
+        settings = proj.Project(id="p", name="Project", repository="/r/p",
+                                folder="f_1", folder_reason=None, records_file="chats.json",
+                                worktree=False)
+        rp = server.RunningProject(settings, None, None)
+        state = server.RuntimeState([rp], None, 'config', False, "/app/config.json", self.data, SECRET)
+        httpd = server.make_server(0, state)
+        threading.Thread(target=httpd.serve_forever, daemon=True).start()
+        self.addCleanup(httpd.shutdown)
+        self.addCleanup(httpd.server_close)
+        from urllib.error import HTTPError
+        try:
+            with urlopen(f"http://127.0.0.1:{httpd.server_port}/setup") as r:
+                body = json.load(r)
+        except HTTPError as e:
+            body = json.load(e)
+        self.assertEqual(body["projects"][0]["worktree"], False)
+
+    def test_post_setup_accepts_worktree_boolean(self):
+        import threading
+        from urllib.request import urlopen, Request
+        from urllib.error import HTTPError
+        repo = os.path.join(self.root, "repo")
+        import subprocess
+        subprocess.run(["git", "init", "-q", repo], check=True)
+        state = server.RuntimeState([], None, 'config', False, "/app/config.json", self.data, SECRET,
+                                    clock=lambda: NOW)
+        httpd = server.make_server(0, state)
+        threading.Thread(target=httpd.serve_forever, daemon=True).start()
+        self.addCleanup(httpd.shutdown)
+        self.addCleanup(httpd.server_close)
+        body = json.dumps({"projects": [{"folder_id": "f_1", "name": "P",
+                                         "repository": repo, "worktree": False}]}).encode()
+        h = sign("POST", "/setup", body)
+        req = Request(f"http://127.0.0.1:{httpd.server_port}/setup",
+                      data=body, method="POST",
+                      headers={"Content-Type": "application/json", "X-KiroCrew-Proxy": h})
+        try:
+            with urlopen(req) as r:
+                resp = json.load(r)
+            status = 200
+        except HTTPError as e:
+            resp = json.load(e)
+            status = e.code
+        self.assertEqual(status, 200, resp)
+
+    def test_post_setup_rejects_non_boolean_worktree(self):
+        import threading
+        from urllib.request import urlopen, Request
+        from urllib.error import HTTPError
+        repo = os.path.join(self.root, "repo")
+        import subprocess
+        subprocess.run(["git", "init", "-q", repo], check=True)
+        state = server.RuntimeState([], None, 'config', False, "/app/config.json", self.data, SECRET,
+                                    clock=lambda: NOW)
+        httpd = server.make_server(0, state)
+        threading.Thread(target=httpd.serve_forever, daemon=True).start()
+        self.addCleanup(httpd.shutdown)
+        self.addCleanup(httpd.server_close)
+        body = json.dumps({"projects": [{"folder_id": "f_1", "name": "P",
+                                         "repository": repo, "worktree": "yes"}]}).encode()
+        h = sign("POST", "/setup", body)
+        req = Request(f"http://127.0.0.1:{httpd.server_port}/setup",
+                      data=body, method="POST",
+                      headers={"Content-Type": "application/json", "X-KiroCrew-Proxy": h})
+        try:
+            with urlopen(req) as r:
+                resp = json.load(r)
+            status = 200
+        except HTTPError as e:
+            resp = json.load(e)
+            status = e.code
+        self.assertEqual(status, 400, resp)
 
 
 if __name__ == "__main__":

@@ -197,3 +197,55 @@ class SaveSetupTests(unittest.TestCase):
         new_data = os.path.join(self.root, "newdata")
         su.save_setup(new_data, [])
         self.assertTrue(os.path.isfile(os.path.join(new_data, "setup.json")))
+
+
+class WorktreeFieldTests(unittest.TestCase):
+    def setUp(self):
+        self.root = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.root, True)
+        self.repo = os.path.join(self.root, "repo")
+        os.makedirs(os.path.join(self.repo, ".git"))
+        self.data = os.path.join(self.root, "data")
+        os.makedirs(self.data)
+
+    def valid(self, **overrides):
+        entry = {"folder_id": "f_1", "name": "P", "repository": self.repo}
+        entry.update(overrides)
+        return entry
+
+    def test_worktree_true_is_valid(self):
+        self.assertIsNone(su.validate_setup_entry(self.valid(worktree=True), 0))
+
+    def test_worktree_false_is_valid(self):
+        self.assertIsNone(su.validate_setup_entry(self.valid(worktree=False), 0))
+
+    def test_worktree_string_is_invalid(self):
+        self.assertIsNotNone(su.validate_setup_entry(self.valid(worktree="yes"), 0))
+
+    def test_worktree_int_is_invalid(self):
+        self.assertIsNotNone(su.validate_setup_entry(self.valid(worktree=1), 0))
+
+    def test_worktree_absent_is_valid(self):
+        # No worktree key — backward compat
+        self.assertIsNone(su.validate_setup_entry(self.valid(), 0))
+
+    def test_load_setup_includes_worktree_true(self):
+        with open(os.path.join(self.data, "setup.json"), "w") as f:
+            json.dump({"projects": [{"folder_id": "f_1", "name": "P",
+                                     "repository": self.repo, "worktree": True}]}, f)
+        entries, _ = su.load_setup(self.data)
+        self.assertIs(entries[0]["worktree"], True)
+
+    def test_load_setup_includes_worktree_false(self):
+        with open(os.path.join(self.data, "setup.json"), "w") as f:
+            json.dump({"projects": [{"folder_id": "f_1", "name": "P",
+                                     "repository": self.repo, "worktree": False}]}, f)
+        entries, _ = su.load_setup(self.data)
+        self.assertIs(entries[0]["worktree"], False)
+
+    def test_load_setup_absent_worktree_defaults_to_true(self):
+        with open(os.path.join(self.data, "setup.json"), "w") as f:
+            json.dump({"projects": [{"folder_id": "f_1", "name": "P",
+                                     "repository": self.repo}]}, f)
+        entries, _ = su.load_setup(self.data)
+        self.assertIs(entries[0]["worktree"], True)

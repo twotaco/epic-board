@@ -35,6 +35,8 @@ def validate_setup_entry(entry, i):
     expanded = os.path.abspath(os.path.expanduser(repository.strip()))
     if not is_git_checkout(expanded):
         return f"Entry {i + 1}: repository is not an existing git checkout."
+    if 'worktree' in entry and not isinstance(entry['worktree'], bool):
+        return f"Entry {i + 1}: worktree must be a boolean."
     return None
 
 
@@ -65,7 +67,8 @@ def load_setup(data_dir):
         repository = item.get('repository')
         if not isinstance(folder_id, str) or not isinstance(name, str) or not isinstance(repository, str):
             return [], f"{SETUP_FILE}: each project must have folder_id, name and repository as strings."
-        entries.append({'folder_id': folder_id, 'name': name, 'repository': repository})
+        worktree = item.get('worktree', True)
+        entries.append({'folder_id': folder_id, 'name': name, 'repository': repository, 'worktree': worktree})
     return entries, None
 
 

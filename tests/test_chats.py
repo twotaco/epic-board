@@ -407,7 +407,8 @@ class StoreTests(unittest.TestCase):
     def test_reserve_writes_a_record_with_the_documented_fields(self):
         record = self.store.reserve("e.md#A")
         self.assertEqual(record, {"card_id": "e.md#A", "name": "epic-board-00000001", "key": None,
-                                 "state": "reserved", "created": "2026-11-14T09:30:12Z"})
+                                 "state": "reserved", "created": "2026-11-14T09:30:12Z",
+                                 "worktree_path": None, "worktree_folder_id": None})
         self.assertEqual(json.loads(self.raw()), {"chats": [record]})
         self.assertEqual(self.store.started(), [])  # a reserved record is not a chat
 
@@ -947,6 +948,176 @@ class HttpTests(unittest.TestCase):
             urllib.request.urlopen(f"http://127.0.0.1:{httpd.server_port}/api/chats")
         self.assertEqual(caught.exception.code, 404)
         caught.exception.close()
+
+
+class WorktreeBriefTests(unittest.TestCase):
+    SETUP_STEP = "This story runs in its own worktree."
+    CATCH_UP_STEP = "Before opening or updating the pull request, run `git fetch origin`"
+
+    def _steps(self, text):
+        return [l for l in text.split("\n") if re.match(r"^\d+\. ", l)]
+
+    def test_no_spec_setup_step_is_step_1(self):
+        text = build_brief(NO_SPEC, "epic-board.md", "main", worktree_path="/wt/p--abc")
+        step1 = self._steps(text)[0]
+        self.assertIn(self.SETUP_STEP, step1)
+
+    def test_with_spec_setup_step_is_step_1(self):
+        text = build_brief(WITH_SPEC, "epic-board.md", "main", worktree_path="/wt/p--abc")
+        step1 = self._steps(text)[0]
+        self.assertIn(self.SETUP_STEP, step1)
+
+    def test_no_spec_catch_up_step_after_work_steps(self):
+        text = build_brief(NO_SPEC, "epic-board.md", "main", worktree_path="/wt/p--abc")
+        steps = self._steps(text)
+        name_check_idx = next(i for i, s in enumerate(steps) if "Before opening the pull request" in s)
+        catch_up_idx = next(i for i, s in enumerate(steps) if self.CATCH_UP_STEP in s)
+        self.assertLess(catch_up_idx, name_check_idx)
+
+    def test_with_spec_catch_up_step_after_work_steps(self):
+        text = build_brief(WITH_SPEC, "epic-board.md", "main", worktree_path="/wt/p--abc")
+        steps = self._steps(text)
+        name_check_idx = next(i for i, s in enumerate(steps) if "Before opening the pull request" in s)
+        catch_up_idx = next(i for i, s in enumerate(steps) if self.CATCH_UP_STEP in s)
+        self.assertLess(catch_up_idx, name_check_idx)
+
+    def test_no_spec_no_epic_with_worktree(self):
+        text = build_brief(NO_SPEC, None, "main", worktree_path="/wt/p--abc")
+        self.assertIn(self.SETUP_STEP, text)
+        self.assertIn(self.CATCH_UP_STEP, text)
+
+    def test_with_spec_no_epic_with_worktree(self):
+        text = build_brief(WITH_SPEC, None, "main", worktree_path="/wt/p--abc")
+        self.assertIn(self.SETUP_STEP, text)
+        self.assertIn(self.CATCH_UP_STEP, text)
+
+    def test_catch_up_uses_the_branch_name(self):
+        text = build_brief(WITH_SPEC, "epic-board.md", "trunk", worktree_path="/wt/p--abc")
+        self.assertIn("origin/trunk", text)
+
+    def test_no_worktree_path_no_extra_steps(self):
+        with_wt = build_brief(NO_SPEC, "epic-board.md", "main", worktree_path="/wt/p--abc")
+        without_wt = build_brief(NO_SPEC, "epic-board.md", "main")
+        self.assertNotIn(self.SETUP_STEP, without_wt)
+        self.assertNotIn(self.CATCH_UP_STEP, without_wt)
+        # Step count increases by 2 when worktree is set
+        self.assertEqual(len(self._steps(with_wt)), len(self._steps(without_wt)) + 2)
+
+    def test_none_worktree_path_identical_to_absent(self):
+        self.assertEqual(build_brief(NO_SPEC, "epic-board.md", "main", worktree_path=None),
+                         build_brief(NO_SPEC, "epic-board.md", "main"))
+
+    def test_empty_worktree_path_no_extra_steps(self):
+        text = build_brief(NO_SPEC, "epic-board.md", "main", worktree_path="  ")
+        self.assertNotIn(self.SETUP_STEP, text)
+
+    def test_step_numbers_are_sequential_with_worktree(self):
+        for card, epic in ((NO_SPEC, "e.md"), (NO_SPEC, None), (WITH_SPEC, "e.md"), (WITH_SPEC, None)):
+            text = build_brief(card, epic, "main", worktree_path="/wt/p--abc")
+            nums = [int(s.split(".")[0]) for s in self._steps(text)]
+            self.assertEqual(nums, list(range(1, len(nums) + 1)), repr((card["name"], epic)))
+
+    def test_property2_worktree_steps_respect_flag(self):
+        import random
+        seed = random.randrange(2 ** 32)
+        rng = random.Random(seed)
+        cards = [NO_SPEC, WITH_SPEC]
+        epics = ["epic-board.md", None]
+        instrs = [None, "rules"]
+        for _ in range(100):
+            card = rng.choice(cards)
+            epic = rng.choice(epics)
+            instr = rng.choice(instrs)
+            wt_path = "/wt/p--abc" if rng.random() > 0.5 else None
+            text = build_brief(card, epic, "main", instructions=instr, worktree_path=wt_path)
+            steps = self._steps(text)
+            if wt_path and wt_path.strip():
+                step1_text = steps[0]
+                self.assertIn(self.SETUP_STEP, step1_text, f"seed={seed}")
+                self.assertIn(self.CATCH_UP_STEP, text, f"seed={seed}")
+            else:
+                self.assertNotIn(self.SETUP_STEP, text, f"seed={seed}")
+                self.assertNotIn(self.CATCH_UP_STEP, text, f"seed={seed}")
+
+
+class WorktreeRecordTests(unittest.TestCase):
+    def setUp(self):
+        self.root = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.root, True)
+        self.data = os.path.join(self.root, "data")
+        self.names = iter(f"epic-board-{i:08x}" for i in range(1, 100))
+        self.store = ChatStore(self.data, new_name=lambda: next(self.names), clock=lambda: "t")
+
+    def write_records(self, records):
+        os.makedirs(self.data, exist_ok=True)
+        with open(self.store.path, "w", encoding="utf-8") as f:
+            json.dump({"chats": records}, f)
+
+    def test_new_fields_null_are_accepted(self):
+        self.write_records([
+            {"card_id": "c", "name": "n", "key": "k", "state": "started", "created": "t",
+             "worktree_path": None, "worktree_folder_id": None}
+        ])
+        self.assertEqual(self.store.started()[0]["card_id"], "c")
+
+    def test_missing_new_fields_normalized_to_null(self):
+        self.write_records([
+            {"card_id": "c", "name": "n", "key": "k", "state": "started", "created": "t"}
+        ])
+        self.assertEqual(self.store.started()[0]["card_id"], "c")
+
+    def test_bad_worktree_folder_id_rejected(self):
+        for bad in ("a b", "x" * 194, "a/b"):
+            self.write_records([
+                {"card_id": "c", "name": "n", "key": "k", "state": "started", "created": "t",
+                 "worktree_path": None, "worktree_folder_id": bad}
+            ])
+            with self.assertRaises(chats.ChatError) as caught:
+                self.store.started()
+            self.assertEqual(caught.exception.code, "chats_unreadable", f"bad={bad!r}")
+
+    def test_bad_worktree_path_rejected(self):
+        self.write_records([
+            {"card_id": "c", "name": "n", "key": "k", "state": "started", "created": "t",
+             "worktree_path": "", "worktree_folder_id": None}
+        ])
+        with self.assertRaises(chats.ChatError) as caught:
+            self.store.started()
+        self.assertEqual(caught.exception.code, "chats_unreadable")
+
+    def test_update_worktree_path_stores_path(self):
+        record = self.store.reserve("c#A")
+        self.store.update_worktree_path(record["name"], "/wt/path")
+        updated = self.store.get_record(record["name"])
+        self.assertEqual(updated["worktree_path"], "/wt/path")
+
+    def test_update_worktree_path_unknown_name(self):
+        with self.assertRaises(chats.ChatError) as caught:
+            self.store.update_worktree_path("no-such-name", "/wt/path")
+        self.assertEqual(caught.exception.code, "chat_not_found")
+
+    def test_get_record_returns_full_record(self):
+        record = self.store.reserve("c#A")
+        got = self.store.get_record(record["name"])
+        self.assertEqual(got["card_id"], "c#A")
+        self.assertIn("worktree_path", got)
+
+    def test_get_record_unknown_name_is_404(self):
+        with self.assertRaises(chats.ChatError) as caught:
+            self.store.get_record("no-such-name")
+        self.assertEqual((caught.exception.code, caught.exception.status), ("chat_not_found", 404))
+
+    def test_mark_started_stores_worktree_folder_id(self):
+        record = self.store.reserve("c#A")
+        self.store.mark_started(record["name"], "k", worktree_folder_id="folder-abc")
+        updated = self.store.get_record(record["name"])
+        self.assertEqual(updated["worktree_folder_id"], "folder-abc")
+
+    def test_mark_started_null_worktree_folder_id(self):
+        record = self.store.reserve("c#A")
+        self.store.mark_started(record["name"], "k")
+        updated = self.store.get_record(record["name"])
+        self.assertIsNone(updated["worktree_folder_id"])
 
 
 if __name__ == "__main__":

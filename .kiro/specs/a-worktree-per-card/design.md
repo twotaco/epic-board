@@ -183,6 +183,8 @@ The chat poller already reads `source_links` for the Review state. When a source
 
 On `worktree_has_changes`, the card shows "Worktree kept: uncommitted changes at `<path>`." and a "Remove anyway" button. Activating it calls `DELETE .../chats/<name>/worktree?force=true`.
 
+After the worktree is removed and before the Chat_Record is deleted, the page sends `PATCH /api/chat/folders/<worktree_folder_id>` with `{"project_dir": ""}` to clear the working directory. This is allowed for an app's own folder (Crew 0.12.2, `chat_folders_routes.py`, `api_chat_folder_update`). Crew's "clean up empty folders" keeps any folder with `project_dir` set (`chat_folder_cleanup.py`, `_KEEP_FIELDS`), so clearing it lets the person's own cleanup remove the folder once its chat is closed. If the PATCH fails, the board silently ignores it and proceeds to delete the Chat_Record.
+
 ### The Projects view (`ui/index.mjs`)
 
 The worktree checkbox is below the name field for each ticked folder. When a folder is unticked, the checkbox is hidden. When reticked, it restores the last value or defaults to `true`.
@@ -218,7 +220,7 @@ At least 100 iterations with the seed printed on failure.
 | Reserve | Worktree already at path | Reused silently; start proceeds |
 | Start seq | `POST /api/chat/folders` fails | Worktree removed via backend route; "Could not create worktree folder: `<reason>`." |
 | Cleanup | Worktree has uncommitted changes | "Worktree kept: uncommitted changes at `<path>`." with "Remove anyway" |
-| Cleanup | Subfolder delete fails | Silently skipped; worktree and record still removed |
+| Cleanup | Subfolder PATCH fails | Silently skipped; record still removed |
 | Record | Old record without new fields | Fields treated as `null`; backward compatible |
 
 ## Edits to earlier specs
@@ -268,8 +270,6 @@ No earlier test stops being true. `build_brief` with no `worktree_path` argument
 
 **A. Resolved.** `POST /api/chat/folders` accepts `project_dir` from apps (confirmed from Crew 0.12.2, `chat_folders_routes.py`). Crew marks the folder `owner_app`. `POST /api/chat/slots` has no directory field. The subfolder-per-card approach is the decided design.
 
-**B. Deleting a Crew subfolder.**
-Does `DELETE /api/chat/folders/<id>` exist and work for apps? This is used in cleanup (Requirement 5, criterion 3). Task 1.1 confirms it. If it does not exist, skip the subfolder deletion and leave the note "folder not removed" in the cleanup response. Update Requirement 5, criterion 3 to match.
+**B. Resolved.** `DELETE /api/chat/folders/<id>` returns 403 `folder_delete_forbidden` for apps (Crew 0.12.2, `chat_folders_routes.py` ~line 1241: `if request_app: return 403`), and each refusal is written to the person's access log. Instead, cleanup sends `PATCH /api/chat/folders/<worktree_folder_id>` with `{"project_dir": ""}` — allowed for an app's own folder (`api_chat_folder_update`). Clearing `project_dir` lets Crew's own cleanup remove the folder once it is empty. Requirement 5, criterion 3 updated accordingly.
 
-**C. The permissions entry.**
-`app.json` already lists `/api/chat/folders`. Does that cover `POST` and `DELETE` requests as well as `GET`? Task 1.1 confirms. If a separate entry is needed, add it and update the start spec's Requirement 1, criterion 3 (edited in place by the set-up-projects spec).
+**C. Resolved.** `/api/chat/folders` in `app.json` covers `POST` requests (apps can create folders). No separate entry is needed. The board creates one `owner_app` subfolder per started card. `DELETE /api/chat/folders/<id>` is refused for apps (see Open Question B), so no delete permission is exercised.
