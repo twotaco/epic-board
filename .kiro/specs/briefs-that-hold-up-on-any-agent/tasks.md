@@ -73,7 +73,7 @@ Start this story after "Show the board" (`.kiro/specs/show-the-board/`) group 6 
 
 - [ ] 2. Page: provenance on the card
   - [ ] 2.1 Read harness and model from the chat slot row in `ui/index.mjs`
-    - In `readChats` (or the function that builds the byKey entries from the chat list), read the model from `row.served_model` (the model the session ran on), falling back to `row.model` (the hand-picked one, often empty); treat any non-string as absent
+    - In `readChats` (or the function that builds the byKey entries from the chat list), read the model from `row.served_model` (the model the session ran on), falling back to `row.model` (the hand-picked one, often empty); treat anything but a non-empty string as absent (Crew sends `served_model` as `""` while it is not known, and then `model` is used)
     - Store it in the entry as `model`; pass it through to the card's view as `view.model`
     - The row has no harness field; the card shows the model only
     - _Requirements: 4.3, 4.4, 4.6_
