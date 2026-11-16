@@ -71,22 +71,22 @@ Start this story after "Show the board" (`.kiro/specs/show-the-board/`) group 6 
     - Skip the page tests if only backend files changed in this group
     - _Requirements: 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 2.1, 2.4, 3.1, 3.3, 4.1, 4.2, 5.1, 5.2, 5.3_
 
-- [ ] 2. Page: provenance on the card
-  - [ ] 2.1 Read harness and model from the chat slot row in `ui/index.mjs`
+- [x] 2. Page: provenance on the card
+  - [x] 2.1 Read harness and model from the chat slot row in `ui/index.mjs`
     - In `readChats` (or the function that builds the byKey entries from the chat list), read the model from `row.served_model` (the model the session ran on), falling back to `row.model` (the hand-picked one, often empty); treat anything but a non-empty string as absent (Crew sends `served_model` as `""` while it is not known, and then `model` is used)
     - Store it in the entry as `model`; pass it through to the card's view as `view.model`
     - The row has no harness field; the card shows the model only
     - _Requirements: 4.3, 4.4, 4.6_
-  - [ ] 2.2 Show the provenance meta line on the card in `ui/index.mjs`
+  - [x] 2.2 Show the provenance meta line on the card in `ui/index.mjs`
     - After the chat state badge (when the card has a Started_Chat and its state has been read), show a meta line: model present → the model text; model absent → "unknown"
     - The line is a `span` or `p` in the card's meta style (12px, `var(--muted)`, same class as the spec folder name), as literal text, not a link or badge or button
     - When the card has no Started_Chat or the state has not been read, show nothing
     - _Requirements: 4.3, 4.4, 4.5_
-  - [ ] 2.3 Test the provenance display in `tests/ui/render.test.mjs` and `tests/ui/board.test.mjs`
+  - [x] 2.3 Test the provenance display in `tests/ui/render.test.mjs` and `tests/ui/board.test.mjs`
     - `render.test.mjs`: the provenance meta line with `served_model` present, with only `model` present, with neither ("unknown"), and absent when no chat; the line is in the meta style
     - `board.test.mjs`: `createBoard` reads the model from `served_model` (falling back to `model`) in the chat slot and shows it; a row without either field shows "unknown"; a card with no chat shows no provenance
     - _Requirements: 4.3, 4.4, 4.5_
-  - [ ] 2.4 Run the tests
+  - [x] 2.4 Run the tests
     - Run `python3 -m unittest discover -s tests -t .` and `node --test tests/ui/*.test.mjs` and report the counts run, passed and skipped for each
     - _Requirements: 4.3, 4.4, 4.5, 4.6_
 
