@@ -1311,6 +1311,46 @@ test('setup: after saveSetup succeeds, setup view closes', async () => {
   assert.equal(buttonNamed(page, 'Cancel'), undefined, 'Cancel button gone after close')
 })
 
+test('setup: worktree false is included in the POST body when checkbox is unticked', async () => {
+  const page = mount()
+  await page.awaitProjects()
+  page.fetch.answer(0, 200, plan())
+  page.chatFetch.answer(0, 200, chatsAnswer([]))
+  await flush()
+
+  click(page, 'Projects')
+  await flush()
+  page.gateway.answer('/api/chat/folders', [{ id: 'f1', name: 'Folder', project_dir: '/home/x' }])
+  page.chatFetch.answer(1, 200, { source: 'config', config_has_projects: false, projects: [] })
+  await flush()
+
+  // Tick the folder and name it
+  findAll(page.tree(), (n) => n.type === 'input' && n.props.type === 'checkbox')[0]
+    .props.onChange({ target: { checked: true } })
+  await flush()
+  findAll(page.tree(), (n) => n.type === 'input' && n.props.type === 'text')[0]
+    .props.onChange({ target: { value: 'My P' } })
+  await flush()
+
+  // Untick the worktree checkbox
+  const worktreeInputs = findAll(page.tree(), (n) => n.props?.className === 'eb-worktree-label')
+  assert.ok(worktreeInputs.length > 0, 'worktree label present')
+  const worktreeCheckbox = findAll(worktreeInputs[0], (n) => n.type === 'input')[0]
+  assert.equal(worktreeCheckbox.props.checked, true, 'worktree defaults to true')
+  worktreeCheckbox.props.onChange({ target: { checked: false } })
+  await flush()
+
+  click(page, 'Save')
+  await flush()
+
+  // Find the POST /setup call and check its body
+  const setupPost = page.chatFetch.calls.find(([url, opts]) =>
+    url.includes('/setup') && opts.method === 'POST')
+  assert.ok(setupPost, 'POST /setup was called')
+  const sentBody = JSON.parse(setupPost[1].body)
+  assert.equal(sentBody.projects[0].worktree, false, 'worktree: false sent in POST body')
+})
+
 test('setup: view is drawn in the panel aside, not appended after the board', async () => {
   const page = mount()
   await page.awaitProjects()

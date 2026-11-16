@@ -952,6 +952,57 @@ class SetupEndToEndTests(unittest.TestCase):
         self.assertEqual(status, 200, chats_body)
         self.assertEqual(chats_body["folder_id"], "f_1")
 
+    def test_flipping_worktree_to_false_takes_effect_without_restart(self):
+        """POST /setup with worktree flipped false → GET /setup and GET /projects reflect it,
+        and a subsequent reserve does NOT create a worktree."""
+        app_dir = os.path.join(self.root, "app3")
+        os.makedirs(app_dir)
+        projs, problem, source, chp = proj.load_projects(app_dir=app_dir, data_dir=self.data)
+        config_path = os.path.join(app_dir, "config.json")
+        state = server.RuntimeState(projs, problem, source, chp,
+                                    config_path, self.data, SECRET, clock=lambda: NOW)
+        httpd = self._make_server(state)
+        path = "/api/setup"
+
+        # First save with worktree: true (default).
+        status, body = self.post(httpd, path,
+                                 {"projects": [{"folder_id": "f_1", "name": "Alpha",
+                                                "repository": self.checkout, "worktree": True}]},
+                                 signed=True)
+        self.assertEqual(status, 200, body)
+        project_id = body["projects"][0]["id"]
+
+        # Second save with same folder/name/repository but worktree flipped to false.
+        status, body = self.post(httpd, path,
+                                 {"projects": [{"folder_id": "f_1", "name": "Alpha",
+                                                "repository": self.checkout, "worktree": False}]},
+                                 signed=True)
+        self.assertEqual(status, 200, body)
+
+        # GET /setup must reflect worktree: false.
+        _, setup_body = self.get(httpd, "/setup")
+        self.assertIs(setup_body["projects"][0]["worktree"], False,
+                      "GET /setup must return updated worktree value")
+
+        # GET /projects must reflect worktree: false.
+        _, projects_body = self.get(httpd, "/projects")
+        self.assertIs(projects_body[0]["worktree"], False,
+                      "GET /projects must return updated worktree value")
+
+        # Wait for the plan holder so reserve does not get plan_not_ready.
+        plan_status, _ = self._wait_for_plan(httpd, project_id)
+        self.assertEqual(plan_status, 200)
+
+        # Reserve on this project must NOT create a worktree (worktree_path null).
+        chats_path = f"/api/chats?project={project_id}"
+        with mock.patch.object(server, "create_worktree") as cw:
+            status, reserve_body = self.post(httpd, chats_path,
+                                             {"card_id": "#s"}, signed=True)
+        self.assertEqual(status, 200, reserve_body)
+        self.assertIsNone(reserve_body.get("worktree_path"),
+                          "reserve must not set a worktree_path when worktree is false")
+        cw.assert_not_called()
+
     def test_changing_project_folder_takes_effect_without_restart(self):
         """Saving the same project with a different folder is reflected immediately in /chats."""
         app_dir = os.path.join(self.root, "app2")
