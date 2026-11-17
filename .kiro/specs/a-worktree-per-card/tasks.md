@@ -112,21 +112,21 @@ Group 1 covers all backend changes: git worktree operations, chat record fields,
     - Run `python3 -m unittest discover -s tests -t .` and `node --test tests/ui/*.test.mjs` and report the counts run, passed and skipped for each
     - _All requirements of group 3_
 
-- [ ] 4. Check on a Crew host
-  - [ ] 4.1 Confirm Open Questions B and C on the host (builds on task 1.1 which checks the source)
+- [x] 4. Check on a Crew host
+  - [x] 4.1 Confirm Open Questions B and C on the host (builds on task 1.1 which checks the source)
     - Confirm that `DELETE /api/chat/folders/<id>` works for the app on a live install (Open Question B); update the design if the route is absent
     - Confirm that `/api/chat/folders` in `app.json` covers POST and DELETE as the live host enforces them (Open Question C); verify that the worktree subfolder was created with `owner_app` set
     - Write the final answers into the design
     - _Requirements: 2.1, 2.8, 5.3_
-  - [ ] 4.2 Check start flow on the host
+  - [x] 4.2 Check start flow on the host
     - Start a story on a project with `worktree: true` and confirm: the worktree is created beside the checkout; the conductor's chat opens with `project_dir` set to the worktree; the brief carries the Setup_Step and Catch_Up_Step; the Projects view shows the checkbox and saves correctly
     - _Requirements: 1.1–1.7, 2.1–2.8, 3.1–3.7_
-  - [ ] 4.3 Check cleanup on the host
+  - [x] 4.3 Check cleanup on the host (replaced by Finish session, task 5.9; the board no longer cleans up by itself)
     - Close a pull request (or merge one); confirm the board removes the worktree; confirm the card resets
     - Try a worktree with uncommitted changes; confirm "Worktree kept" is shown; confirm "Remove anyway" force-removes it
     - _Requirements: 5.1–5.6_
 
-- [ ] 5. Finish replaces auto cleanup
+- [x] 5. Finish replaces auto cleanup
   - [x] 5.1 Git safety checks in `backend/gitsource.py`
     - Add `worktree_has_changes(path)`: `git -C <path> status --porcelain`; returns `(True, None)` when it prints anything, `(False, None)` when empty, `(None, error_text)` when git fails
     - Add `worktree_has_unpushed(path, main_branch)`: when `rev-parse --abbrev-ref @{upstream}` succeeds count `@{upstream}..HEAD`, otherwise count `origin/<main_branch>..HEAD`; same return shape. Add the `shortcut:` comment from the design
@@ -173,7 +173,7 @@ Group 1 covers all backend changes: git worktree operations, chat record fields,
     - `worktree_has_unpushed` counts `git rev-list --count HEAD --not --remotes=origin` and no longer reads the upstream, so a branch made from `origin/main` and pushed without `-u` is not reported as unpushed; same return shape; the `shortcut:` comment now speaks of commits on no remote branch
     - Tests in `tests/test_gitsource.py`: pushed without `-u` (not unpushed, and unpushed with one more commit)
     - _Requirements: 5.3_
-  - [ ] 5.9 Check Finish on a Crew host
+  - [x] 5.9 Check Finish on a Crew host
     - On a worktree story: Finish session with a clean pushed worktree removes the folder and shows "Session finished"; the note appears in the chat and starts no agent turn; with an uncommitted file and with an unpushed commit "Worktree kept" shows the reason and "Remove anyway" removes it; on a story with the worktree setting off Finish session only marks it
     - Restart session on the finished card (also one in Done) opens a new chat and a new worktree from origin/main
     - _Requirements: 5.1–5.13_
