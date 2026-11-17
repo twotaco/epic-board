@@ -8,7 +8,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { h, findAll, textOf } from './support.mjs'
-import { createBoard, FINISH_NOTE } from '../../ui/index.mjs'
+import { createBoard, FINISH_NOTE, FINISH_NOTE_PLAIN } from '../../ui/index.mjs'
 
 const PLAN_URL = '/apps/epic-board/api/plan'
 const BACKEND = '/apps/epic-board/api'
@@ -2159,4 +2159,17 @@ test('finish: the name of an ended card opens its old chat, and no "Open chat" l
 
 test('finish: the note text is exact', () => {
   assert.equal(FINISH_NOTE, 'This session is finished and its working folder was removed. For more work on this story, use Restart session on its card in Epic Board to open a new chat.')
+  assert.equal(FINISH_NOTE_PLAIN, 'This session is finished. For more work on this story, use Restart session on its card in Epic Board to open a new chat.')
+})
+
+test('finish: a session without a worktree gets the note that names no folder', async () => {
+  const page = await startedPage(PLAIN)
+  click(page, 'Finish session')
+  click(page, 'Finish session')
+  await flush()
+  assert.ok(!backendCalls(page).some((call) => call.endsWith('/worktree')), 'no worktree route')
+  assert.equal(backendCalls(page)[lastBackend(page)], `POST /chats/${NAME}/finished`)
+  page.chatFetch.answer(lastBackend(page), 200, { state: 'finished' })
+  await flush()
+  assert.deepEqual(page.gateway.calls.at(-1), ['post', `/api/chat/slots/${NAME}/note`, { content: FINISH_NOTE_PLAIN, source: 'epic-board' }])
 })

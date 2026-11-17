@@ -1141,6 +1141,9 @@ export function setupReduce(state, action) {
 // chat: it asks the agent for nothing.
 export const FINISH_NOTE = 'This session is finished and its working folder was removed. '
   + 'For more work on this story, use Restart session on its card in Epic Board to open a new chat.'
+// The same note for a session that never had a worktree: no folder was removed, so it does not say so.
+export const FINISH_NOTE_PLAIN = 'This session is finished. '
+  + 'For more work on this story, use Restart session on its card in Epic Board to open a new chat.'
 
 const STEP_TEXT = {
   reserve: 'Could not reserve the chat',
@@ -2283,8 +2286,9 @@ export function createBoard(React, env = {}) {
           if (!isLive()) return
           ownChats({ kind: 'finished', name })
           ownUi({ kind: 'cleanup-done', name })
+          const note = typeof record.worktree_path === 'string' && record.worktree_path !== '' ? FINISH_NOTE : FINISH_NOTE_PLAIN
           try {
-            await gateway.post(`/api/chat/slots/${encodeURIComponent(record.key)}/note`, { content: FINISH_NOTE, source: 'epic-board' })
+            await gateway.post(`/api/chat/slots/${encodeURIComponent(record.key)}/note`, { content: note, source: 'epic-board' })
           } catch { /* a closed chat answers 404: the card is finished all the same */ }
         } finally {
           latest.current.finishes.delete(name)
