@@ -4,28 +4,31 @@
 
 This story gives each started story its own git worktree and opens the conductor's chat there. It builds on the start spec (`.kiro/specs/start-a-story/`), the set-up-projects spec (`.kiro/specs/set-up-projects/`) and the briefs spec (`.kiro/specs/briefs-that-hold-up-on-any-agent/`), and does not repeat them.
 
-The changes touch five backend files and one page file. The backend gains git worktree operations, two new routes, a `worktree` field on Project and on `setup.json` entries, and two new brief steps. The page's start flow creates a Crew subfolder for each worktree card, then creates the chat there; the Projects view gains a checkbox; the cleanup flow removes the worktree and subfolder. No new dependency is added, and `app.json` gains no new permission.
+The changes touch five backend files and one page file. The backend gains git worktree operations, two new routes, a `worktree` field on Project and on `setup.json` entries, two new brief steps, git safety checks before a worktree is removed, and a `finished` Chat_Record state. The page's start flow creates a Crew subfolder for each worktree card, then creates the chat there; the Projects view gains a checkbox; a person-started Finish step removes the worktree and marks the chat finished. No new dependency is added, and `app.json` gains no new permission.
 
 ### Layout of the change
 
 ```
-backend/gitsource.py        CHANGED  add create_worktree, remove_worktree
+backend/gitsource.py        CHANGED  add create_worktree, remove_worktree; group 5 adds
+                                     worktree_has_changes, worktree_has_unpushed
 backend/chats.py            CHANGED  Chat_Record gains worktree_path and worktree_folder_id;
-                                     build_brief gains worktree_path parameter; Setup_Step and Catch_Up_Step
+                                     build_brief gains worktree_path parameter; Setup_Step and Catch_Up_Step;
+                                     group 5: state "finished", mark_finished, started() returns all fields
 backend/setup.py            CHANGED  validate_setup_entry accepts worktree field
 backend/projects.py         CHANGED  Project gains worktree field; GET /projects returns it
-backend/server.py           CHANGED  reserve creates worktree; POST /chats/<name>/worktree route;
-                                     DELETE /chats/<name>/worktree route; started route accepts worktree_folder_id
+backend/server.py           CHANGED  reserve creates worktree; DELETE /chats/<name>/worktree route;
+                                     started route accepts worktree_folder_id;
+                                     group 5: safety checks in the worktree route, POST /chats/<name>/finished
 ui/index.mjs                CHANGED  setupReduce gains worktree toggle; renderSetupView shows checkbox;
                                      start sequence creates Worktree_Folder, opens chat in it;
-                                     start question shows mode; cleanup on PR merge/close
-tests/test_gitsource.py     CHANGED  tests for create_worktree and remove_worktree
+                                     start question shows mode; group 5: Finish step (replaces cleanup on PR merge/close)
+tests/test_gitsource.py     CHANGED  tests for create_worktree, remove_worktree and the group 5 checks
 tests/test_chats.py         CHANGED  brief with worktree_path; Setup_Step and Catch_Up_Step; record fields
 tests/test_setup.py         CHANGED  validate_setup_entry accepts worktree field
 tests/test_server.py        CHANGED  reserve creates worktree; worktree route; cleanup route; started with folder_id
 tests/ui/setup.test.mjs     CHANGED  worktree checkbox in Projects view
 tests/ui/start.test.mjs     CHANGED  start sequence: Worktree_Folder creation; mode in start question
-tests/ui/board.test.mjs     CHANGED  cleanup on PR merge/close; "Worktree kept" state
+tests/ui/board.test.mjs     CHANGED  Finish step; "Worktree kept" state; finished badge
 ```
 
 ## Architecture
@@ -38,13 +41,15 @@ flowchart LR
       Seq -->|POST /api/chat/folders| G
       Seq -->|POST /api/chat/slots| G
       Seq -->|POST /chats/name/started| B
-      Poll[Chat poller] -->|PR merged/closed| CL[Cleanup]
-      CL -->|DELETE /chats/name/worktree| B
-      CL -->|DELETE /api/chat/folders/id| G
+      Fin[Finish button] -->|confirm| FS[Finish step]
+      FS -->|DELETE /chats/name/worktree| B
+      FS -->|PATCH /api/chat/folders/id| G
+      FS -->|POST /chats/name/finished| B
+      FS -->|POST /api/chat/slots/key/note| G
     end
     subgraph Backend
       B[server.py] --> CS[ChatService]
-      CS --> WT[gitsource.py: create_worktree / remove_worktree]
+      CS --> WT[gitsource.py: create_worktree / remove_worktree / safety checks]
       WT --> R[(git repository + worktree)]
     end
     G[Crew gateway]
@@ -86,6 +91,12 @@ def remove_worktree(repository, path, force=False):
 RECORD_KEYS = {"card_id", "name", "key", "state", "created",
                "worktree_path", "worktree_folder_id"}
 ```
+
+Group 5 adds a third state, `finished`: `STATES = ("reserved", "started", "finished")`. A state value, not a flag, because `reserve` already branches on `state` (a `started` record answers `chat_exists`) and a finished record must never answer that. A flag would leave `state == "started"` true for a finished chat and every existing check on it would need a second condition. `_check_records` treats a `finished` record like a `started` one: it needs a `key`.
+
+`ChatStore.started()` today returns only `card_id`, `name`, `key` and `created`. So the page never receives `worktree_path` or `worktree_folder_id`, and no record could be cleaned up. Group 5 makes it return every field of each `started` or `finished` record, including `state`, `worktree_path` and `worktree_folder_id`.
+
+`ChatStore.mark_finished(name)` sets `state` to `finished`. It refuses with 404 `chat_not_found` for an unknown name, 409 `chat_not_started` for a `reserved` record, and 409 `worktree_not_removed` while `worktree_path` is set. A record that is already `finished` answers the same as a success. `ChatStore.reserve(card_id)` skips `finished` records when it looks for the card's reserved or started record. `ChatStore.mark_started` removes the `finished` records of the card, so a card holds at most one finished record, and only until its next chat is started. `ChatService.reserve` refuses a Done card with `card_done` unless the card has a `finished` record.
 
 Existing records (without these keys) are **not** treated as unreadable: `_check_records` treats missing keys as `null` and the writer always includes them. This keeps backward compatibility: an old `chats.json` without the new keys is still readable.
 
@@ -135,15 +146,25 @@ def reserve(self, card_id, project):
 
 Non-worktree starts set both new fields to `null`.
 
-### The worktree and cleanup routes (`server.py`)
+### The worktree and finish routes (`server.py`)
 
 ```
-DELETE /chats/<name>/worktree
+DELETE /chats/<name>/worktree[?force=true]
+POST   /chats/<name>/finished
 ```
 
-Removes the worktree for the record named `<name>`. Requires a valid gateway signature. The backend runs `git worktree remove <path>` (or `--force` when `?force=true`). On success (or when `worktree_path` is null) answers 200 `{"ok": true}`. On failure (uncommitted changes) answers 409 `{"code": "worktree_has_changes", "path": "<path>", "message": "..."}`.
+`CHATS_ROUTE` gains the suffix `finished`. Both routes require a valid gateway signature.
 
-The page calls this route when a PR is merged or closed, and when "Remove anyway" is activated.
+**`DELETE .../worktree`** (`ChatService.remove_worktree_route`, exists). When `worktree_path` is `null` it answers 200 `{"ok": true}`. When the folder is gone from disk it sets `worktree_path` to `null` and answers 200. Without `force=true` it runs two checks first, in this order, and answers 409 on the first that fails:
+
+1. `worktree_has_changes(path)`: `git -C <path> status --porcelain` prints anything (modified, staged or untracked files; ignored files are not listed). Code `worktree_has_changes`.
+2. `worktree_has_unpushed(path, main_branch)`: when `git -C <path> rev-parse --abbrev-ref @{upstream}` succeeds, `git rev-list --count @{upstream}..HEAD` is above 0; otherwise (no upstream, or a detached HEAD) `git rev-list --count origin/<main_branch>..HEAD` is above 0. `main_branch` is `gitsource.main_branch(repository)`. Code `worktree_has_unpushed`.
+
+With `force=true` it skips both and runs `git worktree remove --force`. Any other failure of `git worktree remove` answers 409 `worktree_remove_failed` with git's text. Today every failure is reported as `worktree_has_changes`, which is wrong for a path that is not a worktree. On success it sets `worktree_path` to `null`.
+
+`worktree_has_changes` and `worktree_has_unpushed` are new functions in `gitsource.py` and use `run_git`. (`worktree_has_changes` exists today only as an error code in `server.py`, not as a function.) Each returns `(True|False, None)`, or `(None, error_text)` when git fails; an error counts as a refusal with the error as the reason. `shortcut: a squash-merged branch whose remote branch was deleted has commits that are not on origin/<main>, so it is refused; the person uses "Remove anyway". Upgrade only if that proves common.`
+
+**`POST .../finished`** (new). No body. Calls `ChatStore.mark_finished` and answers 200 `{"card_id", "name", "key", "state": "finished"}`.
 
 ### The `started` route extension (`server.py`)
 
@@ -179,13 +200,29 @@ The subfolder id is saved in `POST /chats/<name>/started` as `worktree_folder_id
 
 Confirmed from Crew 0.12.2's source: `POST /api/chat/folders` accepts `project_dir` from apps and Crew marks the folder `owner_app`. `POST /api/chat/slots` has no directory field, only `folder_id`. The subfolder-per-card approach is therefore the decided design.
 
-### Cleanup in the page (`ui/index.mjs`)
+### Finish in the page (`ui/index.mjs`)
 
-The chat poller already reads `source_links` for the Review state. When a source link transitions to `merged` or `closed`, the page calls `DELETE .../chats/<name>/worktree`. On success (or when the response is 200 with `{ok: true}`), the page then calls `DELETE /api/chat/folders/<worktree_folder_id>` if one is recorded. After both, it deletes the Chat_Record via `DELETE .../chats/<name>` and re-renders the card.
+Nothing runs by itself. The code of the old auto cleanup goes: the `prTerminated` flag set in `readChats`, the `cleanups` set and the loop over `byKey` in the poller's `onResult`, and `cleanupRecord`. `finishCleanup` is rewritten as the Finish sequence; `actions.removeWorktree` stays and becomes the "Remove anyway" action.
 
-On `worktree_has_changes`, the card shows "Worktree kept: uncommitted changes at `<path>`." and a "Remove anyway" button. Activating it calls `DELETE .../chats/<name>/worktree?force=true`.
+**State.** `uiReduce` gains `finish-ask` and `finish-cancel` (which card has its confirm step open) next to `ask`. The existing `worktree-kept` action carries the refusal `reason` as well as the path, and shows for both refusals.
 
-After the worktree is removed and before the Chat_Record is deleted, the page sends `PATCH /api/chat/folders/<worktree_folder_id>` with `{"project_dir": ""}` to clear the working directory. This is allowed for an app's own folder (Crew 0.12.2, `chat_folders_routes.py`, `api_chat_folder_update`). Crew's "clean up empty folders" keeps any folder with `project_dir` set (`chat_folder_cleanup.py`, `_KEEP_FIELDS`), so clearing it lets the person's own cleanup remove the folder once its chat is closed. If the PATCH fails, the board silently ignores it and proceeds to delete the Chat_Record.
+**Card views.** `cardViewOf` picks the card's record: a `started` one when there is one, else a `finished` one. A finished record gives `{mode: 'finished', key, name, href}`. When the card is asking (`ui.asking`), a finished card shows the start question, as a startable card does. `renderChatPart` draws, for a card in mode `chat`, `restoring`, `not-open`, `resuming` or `resume-failed`, a "Finish" button; in mode `finished` the badge "Finished" (`STATE_WORDS.finished`, variant `muted`), the chat link and a "Start again" button that calls `actions.ask(card.id)`. The `started` set for `columnsOf` holds only cards with a non-finished record, so a finished planned card stays in Planned. `readChats` does not read the state of a finished record: it sets `byKey[key] = {state: 'finished'}`.
+
+**Confirm step.** A `group` named "Finish this story" with the text of Requirement 5, criterion 2, a "Finish" button and a "Cancel" button. Escape cancels, as the start question does. The tasks warning reads `card.tasks`: shown when `done < total`.
+
+**Finish sequence** (`actions.finish(name)`):
+
+1. When the record has a `worktree_path`: `DELETE .../chats/<name>/worktree`. On 409 `worktree_has_changes` or `worktree_has_unpushed`: show "Worktree kept: `<reason>`" with "Remove anyway" and stop. On another failure: show the reason on the card and stop.
+2. When the record has a `worktree_folder_id`: `PATCH /api/chat/folders/<id>` with `{"project_dir": ""}`. A failure is ignored. Crew's own cleanup of empty folders keeps any folder with `project_dir` set (`chat_folder_cleanup.py`, `_KEEP_FIELDS`), so clearing it lets the person remove the folder.
+3. `POST .../chats/<name>/finished`. On failure: show the reason; "Finish" works again, and step 1 is then skipped because `worktree_path` is `null`.
+4. Update the record in the chats state to `finished`.
+5. `gateway.post('/api/chat/slots/<key>/note', {content: <note>, source: 'epic-board'})`. The note is the same text every time: "This story is finished and its working folder was removed. For more work on this story, use Start again on its card in Epic Board to open a new chat." A failure is ignored.
+
+**The note is for the person, not the agent.** `POST /api/chat/slots/{slot}/note` (`chat_api/slot_note.py`, `api_chat_slot_note`) starts no agent turn. It writes a visible line in the transcript and a context entry that Crew prepends to the person's next message, once, and drops after 24 hours. Two things follow. The text is written as a statement of fact and asks for nothing, as that function's own documentation requires. And the design does not rely on the agent ignoring it: the board never posts it through `POST /api/chat`, the route that starts a turn. It does not use `sendBrief`. The agent may see the line with the person's next message; nothing in it is an instruction, and it must not act on it. The board posts it once, at Finish, because it cannot catch typing in a chat.
+
+"Remove anyway" runs the same sequence with `?force=true`.
+
+**Start again.** The question and `startStory` are unchanged. `reserve` ignores the finished record and creates a new one; `mark_started` then deletes the finished one. `reduce('started')` already drops older records of the same card.
 
 ### The Projects view (`ui/index.mjs`)
 
@@ -221,8 +258,12 @@ At least 100 iterations with the seed printed on failure.
 | Reserve | `git worktree add` fails | "Could not create worktree: `<reason>`." Question offered again |
 | Reserve | Worktree already at path | Reused silently; start proceeds |
 | Start seq | `POST /api/chat/folders` fails | Worktree removed via backend route; "Could not create worktree folder: `<reason>`." |
-| Cleanup | Worktree has uncommitted changes | "Worktree kept: uncommitted changes at `<path>`." with "Remove anyway" |
-| Cleanup | Subfolder PATCH fails | Silently skipped; record still removed |
+| Finish | Worktree has uncommitted changes | "Worktree kept: " and the reason, with "Remove anyway" |
+| Finish | Worktree has commits that are not pushed | Same, with that reason |
+| Finish | Git cannot remove the worktree for another reason | The reason on the card; nothing is changed |
+| Finish | Subfolder PATCH fails | Silently skipped; the chat is still marked finished |
+| Finish | Marking finished fails | The reason on the card; "Finish" works again and skips the removal |
+| Finish | Note into the chat fails | Silently skipped; the card is finished |
 | Record | Old record without new fields | Fields treated as `null`; backward compatible |
 
 ## Edits to earlier specs
@@ -230,24 +271,24 @@ At least 100 iterations with the seed printed on failure.
 | Where | Change |
 |---|---|
 | Epic page (`docs/epics/epic-board.md`) | Story line links to `.kiro/specs/a-worktree-per-card/` and is set to in progress; "Not in this epic" updated to allow one app-owned subfolder per started card |
-| Start spec (`start-a-story`), Requirement 4 | Reserve response may include `worktree_path`; `started` body may include `worktree_folder_id`; start sequence creates Worktree_Folder when setting is on |
+| Start spec (`start-a-story`), Requirement 4 | A card with a finished record can be started again, including a Done card; reserve response may include `worktree_path`; `started` body may include `worktree_folder_id`; start sequence creates Worktree_Folder when setting is on |
 
-No earlier test stops being true. `build_brief` with no `worktree_path` argument is unchanged. Old `chats.json` records without the new fields are readable.
+The earlier "no finished" comment on `STATE_WORDS` in `ui/index.mjs` stops being true and is changed in group 5. The old group 3 tests of the auto cleanup are replaced by the Finish tests (task 5.5 and 5.7); they test behaviour this group removes. No other earlier test stops being true. `build_brief` with no `worktree_path` argument is unchanged. Old `chats.json` records without the new fields are readable.
 
 ## Testing Strategy
 
 ### Backend tests
 
-- **`tests/test_gitsource.py`**: `worktree_path` pure-function cases; `create_worktree` succeeds on a fake repo (using `git init` in a temp dir and a mock `run_git`); `create_worktree` returns `(False, error)` on fetch failure and on `worktree add` failure; `create_worktree` does not re-create an existing worktree; `remove_worktree` without and with `--force`.
+- **`tests/test_gitsource.py`**: `worktree_path` pure-function cases; `create_worktree` succeeds on a fake repo (using `git init` in a temp dir and a mock `run_git`); `create_worktree` returns `(False, error)` on fetch failure and on `worktree add` failure; `create_worktree` does not re-create an existing worktree; `remove_worktree` without and with `--force`. Group 5: `worktree_has_changes` (clean, modified, untracked, ignored-only) and `worktree_has_unpushed` (upstream ahead, upstream equal, no upstream with and without commits, detached HEAD) on a real temporary repository.
 - **`tests/test_chats.py`**: `build_brief` with `worktree_path` set: Setup_Step is step 1; Catch_Up_Step appears before the name-check step; both variants (no-spec, with-spec); `worktree_path=None` leaves the brief unchanged. Property 2 as a seeded test with at least 100 iterations. Record validation: new fields accepted; missing fields treated as null; bad `worktree_folder_id` rejected.
 - **`tests/test_setup.py`**: `validate_setup_entry` accepts `true` and `false` for `worktree`; rejects non-boolean; treats absent as `true`.
-- **`tests/test_server.py`**: Reserve with worktree on calls `create_worktree` and stores `worktree_path`; reserve with worktree off stores `null`; `DELETE .../worktree` route calls `remove_worktree`; `?force=true` passes through; 409 `worktree_has_changes` on uncommitted changes; `started` route stores `worktree_folder_id`.
+- **`tests/test_server.py`**: Reserve with worktree on calls `create_worktree` and stores `worktree_path`; reserve with worktree off stores `null`; `DELETE .../worktree` route calls `remove_worktree`; `?force=true` passes through; 409 `worktree_has_changes` on uncommitted changes; `started` route stores `worktree_folder_id`. Group 5: `GET /chats` returns the worktree fields and `state`; the worktree route refuses with `worktree_has_unpushed`, and `force` skips both checks; `POST .../finished` marks, is idempotent, and refuses while `worktree_path` is set; reserve skips finished records and accepts a Done card that has one; `mark_started` removes the card's finished records.
 
 ### Page tests
 
 - **`tests/ui/setup.test.mjs`**: Worktree checkbox shown per ticked folder; default ticked; value persists across untick/retick.
 - **`tests/ui/start.test.mjs`**: Start question shows "Works in its own worktree" vs "Works in the shared checkout" based on project setting; start sequence calls `POST /api/chat/folders` before `POST /api/chat/slots` when worktree on; `folder_id` in slots call is the subfolder id; `started` body includes `worktree_folder_id`.
-- **`tests/ui/board.test.mjs`**: "Worktree kept" state shown when cleanup route returns `worktree_has_changes`; "Remove anyway" triggers force-remove; card rendered without worktree fields for non-worktree chats.
+- **`tests/ui/board.test.mjs`**: Finish button on a started card with and without a worktree; the confirm step names the path and the ignored-files line, and the tasks warning shows only when tasks are not all ticked; nothing is called before the person confirms; "Worktree kept" with the reason for both refusals; "Remove anyway" force-removes; the sequence order (worktree, folder PATCH, finished, note); a failed note does not undo it; the badge "Finished"; "Start again" on a finished card in every column including Done; no automatic removal when a PR link is merged.
 
 | Req | Backend | Page | Manual |
 |---|---|---|---|
@@ -255,7 +296,7 @@ No earlier test stops being true. `build_brief` with no `worktree_path` argument
 | 2 | gitsource, server | start | Worktree created beside checkout; conductor opens in it |
 | 3 | chats (brief) | — | Brief in conductor chat has setup and catch-up steps |
 | 4 | — | — | Reopen card; worktree reused |
-| 5 | server (cleanup route) | board | PR merged → worktree removed; card resets |
+| 5 | server, gitsource (finish, safety checks) | board | Finish removes the worktree and shows "Finished"; Start again starts clean |
 | 6 | server (error paths) | start | Error shown; retry starts fresh |
 
 ## Design Decisions
@@ -266,6 +307,9 @@ No earlier test stops being true. `build_brief` with no `worktree_path` argument
 - **Old records without new fields stay readable.** `_check_records` treats missing `worktree_path` and `worktree_folder_id` as `null`. Adding these fields to the writer always ensures the file stays in a known form after any write.
 - **Default `worktree: true`.** The story says the setting is "on by default". Existing installations that have no `worktree` key in `setup.json` get the new behaviour automatically, which matches the epic's intent.
 - **Worktree named after the record, not the branch.** Using the chat record's name (`epic-board-xxxxxxxx`) as the path component avoids the failure where `git worktree add -b story/<spec>` fails because that branch already exists after the spec PR merged. The conductor creates its branch inside the detached worktree as the brief says. The record name is unique per start, so each retry and each new group gets its own path.
+- **Finish is the person's step, not an automatic cleanup.** Found on the host check of group 4. Crew 0.12.2 gives an app no pull request state: `GET /api/chat/slots` answers an app token with source links without their `state` (`slot_detail.py`; `ws_event_scope.py`, `_SOURCE_LINK_STATUS_KEYS`). And a story chat opens one pull request per group, so "a pull request is merged and none is open" also holds between two groups, and the folder of a chat that is still working would go. Reading the state with `gh` was tried and dropped: it is not on every machine and it is GitHub only.
+- **The safety check is plain git, in the backend.** It cannot know the pull request state, but it can know whether anything would be lost: uncommitted work, or commits that exist nowhere else. "Remove anyway" stays for the person who knows better.
+- **`finished` is a state value, not a flag.** See "The Chat_Record". The chat is not closed or deleted; it stays in Crew and the person can still talk to it.
 - **Worktree_Path as a pure function.** `worktree_path(repository, name)` does no filesystem access. This lets the brief builder and the page compute the path without subprocess cost, and makes it easy to test.
 
 ## Open Questions
@@ -275,3 +319,5 @@ No earlier test stops being true. `build_brief` with no `worktree_path` argument
 **B. Resolved.** `DELETE /api/chat/folders/<id>` returns 403 `folder_delete_forbidden` for apps (Crew 0.12.2, `chat_folders_routes.py` ~line 1241: `if request_app: return 403`), and each refusal is written to the person's access log. Instead, cleanup sends `PATCH /api/chat/folders/<worktree_folder_id>` with `{"project_dir": ""}` — allowed for an app's own folder (`api_chat_folder_update`). Clearing `project_dir` lets Crew's own cleanup remove the folder once it is empty. Requirement 5, criterion 3 updated accordingly.
 
 **C. Resolved.** `/api/chat/folders` in `app.json` covers `POST` requests (apps can create folders). No separate entry is needed. The board creates one `owner_app` subfolder per started card. `DELETE /api/chat/folders/<id>` is refused for apps (see Open Question B), so no delete permission is exercised.
+
+**D. Open (one part).** The note after Finish is posted with `POST /api/chat/slots/<key>/note` (`chat_api/slot_note.py`), which starts no agent turn. The board already holds the grant: `permissions.api` in `app.json` lists `/api/chat/slots`, the prefix the board's `.../resume` call uses. The slot is one the board created, which is what Crew's ownership check for app callers looks for (`deny_app_slot_session_access`). Not confirmed from source: that the call is accepted for a chat the person has closed. The board ignores a failure, so Finish works either way. Task 5.9 checks both on the host.

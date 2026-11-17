@@ -15,6 +15,7 @@ This story changes the board so that each started story works in its own git wor
 - **Worktree_Folder**: the Crew subfolder created for a worktree card, with `project_dir` set to the Worktree_Path. Its `id` is stored in the Chat_Record so the board can remove it when the worktree is cleaned up.
 - **Setup_Step**: the brief step that tells the conductor to run the project's setup commands inside the worktree before anything else (for example `npm ci`).
 - **Catch_Up_Step**: the brief step that tells the conductor to fetch and merge origin/main into its branch, resolve any conflicts, rerun the checks and say so, before opening or updating the pull request.
+- **Finished_Chat**: a Chat_Record whose `state` is `finished`. The person finished the card; the chat itself stays open in Crew.
 - **Chat_Record**, **Started_Chat**, **Data_Folder**, **Crew_Folder**, **Project**, **Saved_Config**: as the start spec and set-up-projects spec define them.
 
 ## Requirements
@@ -30,7 +31,7 @@ This story changes the board so that each started story works in its own git wor
 3. WHEN the person saves the Projects view, the backend SHALL accept and persist the `worktree` field alongside `folder_id`, `name` and `repository`. The route's validation SHALL accept `true` and `false` only; anything else SHALL answer 400 `invalid_request`.
 4. THE `GET .../setup` response SHALL include `worktree` for each project entry so the Projects view can pre-tick the checkbox from the saved value.
 5. THE `GET .../projects` response SHALL include `worktree` for each project so the page knows whether to offer a worktree start.
-6. WHEN the worktree setting is `false` for a project THEN every new start for that project SHALL work exactly as it does today, with no worktree and no Worktree_Folder. The start question SHALL say "Works in the shared checkout".
+6. WHEN the worktree setting is `false` for a project THEN every new start for that project SHALL work exactly as it does today, with no worktree and no Worktree_Folder. The start question SHALL say "Works in the shared checkout". Finish SHALL then only mark the chat finished (Requirement 5, criterion 10).
 7. WHEN the worktree setting is `true` THEN the start question SHALL say "Works in its own worktree" and the start sequence SHALL follow Requirements 2 and 3.
 
 ### Requirement 2: Worktree creation
@@ -72,21 +73,35 @@ This story changes the board so that each started story works in its own git wor
 #### Acceptance Criteria
 
 1. WHEN a card's chat is reopened (the chat already has a `started` Chat_Record with a `worktree_path`) THEN the board SHALL NOT create a new worktree. The conductor resumes in the worktree the record names.
-2. WHEN a new task group is started on a card whose previous group has a `started` record THEN the board SHALL treat it as a new start: a new Chat_Record (with a new record name), a new worktree at the new record's Worktree_Path, a new Worktree_Folder and a new chat.
+2. WHEN a new task group is started on a card whose previous chat is finished (Requirement 5) THEN the board SHALL treat it as a new start: a new Chat_Record (with a new record name), a new worktree at the new record's Worktree_Path, a new Worktree_Folder and a new chat.
 
-### Requirement 5: Cleanup
+### Requirement 5: Finish
 
-**User Story:** As a person whose pull request has been merged, I want the board to remove the worktree automatically, so that old worktrees do not pile up on my machine.
+**User Story:** As a person whose story is done, I want to finish its card myself, so that the worktree folder is removed only when I say so, and never while the conductor may still be working.
+
+The board cannot tell when a story is done. Crew gives an app no pull request state: the source links of a chat reach an app without their `state`. A story chat also opens one pull request per task group, so "a pull request is merged and none is open" is true between two groups. The board therefore removes nothing by itself. The person finishes a card.
 
 #### Acceptance Criteria
 
-1. WHEN the board reads the Chat_List and a Started_Chat's record has a `worktree_path` and `source_links` has at least one pull request with `state` `merged` or `closed` and no pull request with `state` `open` or `draft` THEN the page SHALL ask the backend to remove the worktree for that chat. This check runs on every read; no prior read in the same session is required, so a reload after a PR is merged still triggers cleanup. The page fires cleanup at most once per record key per page load.
-2. THE backend removal route SHALL run `git worktree remove <path>` on the shared checkout. WHEN the worktree has no uncommitted changes, the removal SHALL succeed. WHEN it has uncommitted changes, the removal SHALL fail and the backend SHALL answer with a reason.
-3. WHEN the worktree is removed THEN the page SHALL send `PATCH /api/chat/folders/<worktree_folder_id>` with `{"project_dir": ""}` to clear the working directory, if the record has one. This is allowed for an app's own folder. If the PATCH fails, the board SHALL silently ignore the failure and proceed. After the PATCH (or on failure), the page SHALL delete the Chat_Record.
-4. WHEN the worktree cannot be removed because it has uncommitted changes THEN the card SHALL show "Worktree kept: uncommitted changes at `<path>`." in place of a state, with a "Remove anyway" button that force-removes with `git worktree remove --force <path>`.
-5. WHEN the worktree removal succeeds THEN the board SHALL delete the Chat_Record and show the card as it was before the chat was started (with its Start button in the Planned or In progress column, or no controls in Done). WHEN `worktree_path` is null (a non-worktree start), the page SHALL NOT call the cleanup route and SHALL NOT delete the Chat_Record. The card stays as it is.
-6. THE backend cleanup route SHALL require a valid gateway signature (the start spec's Requirement 5, criterion 7). It SHALL be: `DELETE /chats/<name>/worktree`.
-7. WHEN the worktree_path is `null` for a record (a non-worktree start) THEN the cleanup route SHALL answer 200 immediately and do nothing. The page does not call this route for null-path records (see criterion 5).
+1. EACH card with a Chat_Record whose state is `started` SHALL show a "Finish" control, whether the record has a `worktree_path` or not. It SHALL be a real button, reachable by keyboard, acting on Enter or Space. A card with no record, and a card whose record is `finished`, SHALL NOT show it.
+2. ACTIVATING "Finish" SHALL open a confirm step in place of the button, with a "Finish" button and a "Cancel" button, and SHALL NOT change anything yet. Escape SHALL close it like "Cancel". The step SHALL say:
+   a. WHEN the record has a `worktree_path`: the folder is removed, with the path as literal text, and files that git ignores in it (such as `.env` and `node_modules`) are deleted with it.
+   b. WHEN the record has no `worktree_path`: only that the story is marked finished; no folder is touched.
+   c. WHEN the card's tasks were read and not all are ticked on main: that not all tasks are ticked. The board SHALL say nothing about pull requests, because it cannot read their state.
+3. BEFORE the backend removes a worktree it SHALL refuse, with plain git and no `gh`:
+   a. WHEN the worktree has uncommitted or untracked changes: code `worktree_has_changes`.
+   b. WHEN the worktree's branch has commits that are not on its upstream, or has no upstream and has commits that are not on `origin/<main-branch>` (a detached HEAD counts as having no upstream): code `worktree_has_unpushed`.
+   Both are 409. The card SHALL show "Worktree kept: " and the reason, with a "Remove anyway" button that removes with `--force` and skips both checks.
+4. WHEN the worktree is removed, or the record has none, the page SHALL send `PATCH /api/chat/folders/<worktree_folder_id>` with `{"project_dir": ""}` when the record has a folder id (a failure is ignored), and then ask the backend to mark the record `finished`. The record SHALL NOT be deleted.
+5. A Chat_Record whose `worktree_path` is still set SHALL NOT become `finished`: the backend refuses with 409 `worktree_not_removed`.
+6. THE chat SHALL NOT be closed or deleted. After the record is marked `finished`, the page SHALL post one note into the chat, once, with `POST /api/chat/slots/<key>/note`, which starts no agent turn. The note SHALL read: "This story is finished and its working folder was removed. For more work on this story, use Start again on its card in Epic Board to open a new chat." The note is information for the person reading the chat; the agent is not asked to do anything. The board cannot see what a person types in a chat, so it posts nothing at any other time. A failure to post SHALL be ignored.
+7. A card whose record is `finished` SHALL show the badge "Finished" in place of the state words, and a link to the chat. The board SHALL NOT read the chat's state for a finished record.
+8. A finished card SHALL show a "Start again" button in every column, Done included. It opens the start question. Starting SHALL create a new Chat_Record with a new name, and a new worktree from `origin/<main-branch>` when the setting is on, a new Worktree_Folder and a new chat. The card SHALL read its tasks from main as always, so work that was not merged shows as unticked tasks. WHEN the new chat is started, the backend SHALL delete the finished records of that card.
+9. THE backend SHALL accept a start for a card that is Done on main when the card has a finished record. A Done card with no record keeps its refusal `card_done`.
+10. WHEN the worktree setting is off for the project (Requirement 1, criterion 6) THEN Finish SHALL only mark the record finished.
+11. THE board SHALL NOT remove a worktree or change a Chat_Record on its own, and SHALL NOT edit any epic page or story file.
+12. THE backend routes SHALL require a valid gateway signature (the start spec's Requirement 5, criterion 7): `DELETE /chats/<name>/worktree` (with the checks of criterion 3; `?force=true` skips them) and `POST /chats/<name>/finished`. WHEN `worktree_path` is `null`, `DELETE /chats/<name>/worktree` SHALL answer 200 and do nothing. WHEN the folder is already gone from disk, it SHALL clear `worktree_path` and answer 200.
+13. `GET /chats` SHALL return, for each record, `card_id`, `name`, `key`, `created`, `state`, `worktree_path` and `worktree_folder_id`.
 
 ### Requirement 6: Failure is visible
 
@@ -96,7 +111,7 @@ This story changes the board so that each started story works in its own git wor
 
 1. IF the fetch fails during worktree creation THEN the backend SHALL return a failure with the reason. The card SHALL show "Could not create worktree: fetch failed — `<reason>`." and the question SHALL be offered again.
 2. IF `git worktree add` fails THEN the backend SHALL return a failure with the reason. The card SHALL show "Could not create worktree: `<reason>`." and the question SHALL be offered again.
-3. IF the Worktree_Folder creation fails (Crew rejects the POST) THEN the page SHALL remove the worktree (via the backend cleanup route) and show "Could not create worktree folder: `<reason>`." and the question again.
+3. IF the Worktree_Folder creation fails (Crew rejects the POST) THEN the page SHALL remove the worktree (via `DELETE /chats/<name>/worktree`) and show "Could not create worktree folder: `<reason>`." and the question again.
 4. THE board SHALL NEVER fall back to the shared checkout when a worktree fails. The start SHALL be fully retried, or not started at all.
 5. WHEN a worktree failure leaves a partially created worktree at the path THEN the backend SHALL clean it up with `git worktree remove --force <path>` on the next reserve call for the same card.
 
@@ -106,7 +121,7 @@ This story changes the board so that each started story works in its own git wor
 
 #### Acceptance Criteria
 
-1. THE new controls (the worktree checkbox in the Projects view, the "Remove anyway" button) SHALL follow the board spec's Requirement 10, criterion 1: no opaque colour as a text colour or element background, borders and tints in `currentColor` or a colour with an alpha above 0 and below 1.
-2. THE "Worktree kept" text SHALL have the role `status`. The "Remove anyway" button SHALL be reachable by keyboard and SHALL act on Enter or Space.
+1. THE new controls (the worktree checkbox in the Projects view, the "Finish" and "Remove anyway" buttons and the confirm step) SHALL follow the board spec's Requirement 10, criterion 1: no opaque colour as a text colour or element background, borders and tints in `currentColor` or a colour with an alpha above 0 and below 1.
+2. THE "Worktree kept" text SHALL have the role `status`. The confirm step SHALL be a `group` named "Finish this story". The "Finish", "Cancel" and "Remove anyway" buttons SHALL be reachable by keyboard and SHALL act on Enter or Space.
 3. THE board SHALL show every path as literal text, not as an HTML or Markdown link.
 4. THE worktree checkbox in the Projects view SHALL be reachable by keyboard, SHALL show the browser's focus indicator, and SHALL act on Enter or Space.
