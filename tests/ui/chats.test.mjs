@@ -79,10 +79,10 @@ test('missing fields count as false, and only true counts as true', () => {
   assert.equal(stateOf({ running: 'yes', pending_approval: 1, needs_input: 'true', interrupted: 1 }), 'your-turn')
 })
 
-test('the state words are the six of the spec and the person\'s own Finished', () => {
+test('the state words are the six of the spec and the person\'s own Session finished', () => {
   assert.deepEqual(STATE_WORDS, {
     'needs-you': 'Needs you', interrupted: 'Interrupted', working: 'Working', stalled: 'Stalled', review: 'Review', 'your-turn': 'Your turn',
-    finished: 'Finished',
+    finished: 'Session finished',
   })
   assert.ok(Object.isFrozen(STATE_WORDS))
 })

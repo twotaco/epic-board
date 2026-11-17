@@ -303,8 +303,8 @@ export function createPoller({
 
 // ---- Chats: the state of each started chat, and starting and resuming one ----
 
-// The states a chat can show. "Finished" is the person's own mark (the Finish button), never read from
-// Crew: a story is done only when main says so.
+// The states a chat can show. "Session finished" is the person's own mark (the Finish session button), never
+// read from Crew: a story is done only when main says so.
 // "Review" and "Your turn" are the words for a card whose conductor is waiting for the person; a Review
 // badge says "Review #N" or "Checks failed #N" (see `reviewWord`).
 export const STATE_WORDS = Object.freeze({
@@ -314,7 +314,7 @@ export const STATE_WORDS = Object.freeze({
   stalled: 'Stalled',
   review: 'Review',
   'your-turn': 'Your turn',
-  finished: 'Finished',
+  finished: 'Session finished',
 })
 
 // How long a chat that Crew does not know is "restoring" before the card offers to resume it.
@@ -1139,8 +1139,8 @@ export function setupReduce(state, action) {
 // What each step of a start says when it fails.
 // The note the page posts into a chat when its card is finished. A statement for the person reading the
 // chat: it asks the agent for nothing.
-export const FINISH_NOTE = 'This story is finished and its working folder was removed. '
-  + 'For more work on this story, use Start again on its card in Epic Board to open a new chat.'
+export const FINISH_NOTE = 'This session is finished and its working folder was removed. '
+  + 'For more work on this story, use Restart session on its card in Epic Board to open a new chat.'
 
 const STEP_TEXT = {
   reserve: 'Could not reserve the chat',
@@ -1186,18 +1186,18 @@ function renderFinish(h, card, actions, parts, finish) {
   if (asking) {
     const onKeyDown = (event) => { if (event?.key === 'Escape') actions.finishCancel(card.id) }
     const unticked = isObject(card.tasks) && card.tasks.done < card.tasks.total
-    return h('div', { className: 'eb-question', role: 'group', 'aria-label': 'Finish this story', onKeyDown, key: 'finish' },
+    return h('div', { className: 'eb-question', role: 'group', 'aria-label': 'Finish this session', onKeyDown, key: 'finish' },
       h('p', null, path
         ? `This removes the folder ${path}. Files that git ignores in it, such as .env and node_modules, are deleted with it.`
-        : 'This marks the story finished. No folder is touched.'),
+        : 'This marks the session finished. No folder is touched.'),
       unticked ? h('p', null, 'Not all tasks are ticked on main.') : null,
-      renderButton(h, Btn, { type: 'button', 'data-eb-finish': card.id, onClick: () => actions.finish(name, false) }, 'Finish', true),
+      renderButton(h, Btn, { type: 'button', 'data-eb-finish': card.id, onClick: () => actions.finish(name, false) }, 'Finish session', true),
       ' ',
       renderButton(h, Btn, { type: 'button', onClick: () => actions.finishCancel(card.id) }, 'Cancel'))
   }
   return h('div', { className: 'eb-chat-controls', key: 'finish' },
     run?.kind === 'failed' ? h('p', { className: 'eb-chat-note', role: 'status' }, `Could not finish: ${run.reason}`) : null,
-    renderButton(h, Btn, { type: 'button', onClick: () => actions.finishAsk(card.id) }, 'Finish'))
+    renderButton(h, Btn, { type: 'button', onClick: () => actions.finishAsk(card.id) }, 'Finish session'))
 }
 
 // The part of a card below its progress that belongs to the chat: the state word, the question,
@@ -1216,8 +1216,7 @@ function renderChatBody(h, card, view, actions, parts, projectWorktree) {
         : h('span', { className: 'eb-chat-state eb-fb', 'data-state': 'finished' }, STATE_WORDS.finished)
       return h('div', { className: 'eb-chat-controls', key: 'chat' },
         h('div', { className: 'eb-chat-line' }, badge),
-        h('p', { className: 'eb-chat-note' }, h('a', { href: view.href }, 'Open chat')),
-        renderButton(h, Btn, { type: 'button', onClick: () => actions.ask(card.id) }, 'Start again'))
+        renderButton(h, Btn, { type: 'button', onClick: () => actions.ask(card.id) }, 'Restart session'))
     }
     case 'chat': {
       const chat = []
@@ -1309,7 +1308,7 @@ function renderCard(h, card, index, view, actions, parts = {}) {
   let name = card.name
   if (chat.mode === 'startable' || chat.mode === 'question' || chat.mode === 'blocked') {
     name = h('button', { ...main, type: 'button', onClick: () => actions.ask(card.id) }, card.name)
-  } else if (chat.mode === 'chat') {
+  } else if (chat.mode === 'chat' || chat.mode === 'finished') {
     name = h('a', {
       ...main,
       href: chat.href,
@@ -2033,7 +2032,7 @@ export function createBoard(React, env = {}) {
       if (target && typeof target.focus === 'function') target.focus()
     }, [ui.asking])
 
-    // When the Finish confirm step opens on a card, put focus on its "Finish" button, so Escape closes it.
+    // When the Finish confirm step opens on a card, put focus on its "Finish session" button, so Escape closes it.
     useEffect(() => {
       if (ui.finishing == null) return
       const doc = env.document ?? document

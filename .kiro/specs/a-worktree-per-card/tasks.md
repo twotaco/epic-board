@@ -152,22 +152,22 @@ Group 1 covers all backend changes: git worktree operations, chat record fields,
     - Replace the auto-cleanup tests in `tests/ui/board.test.mjs` and `tests/ui/chats.test.mjs` with tests of the new behaviour; add a test that a merged PR link causes no call. Change the "There is no finished" comment on `STATE_WORDS`
     - _Requirements: 5.11_
   - [x] 5.6 Finish control, confirm step, sequence and finished card
-    - `STATE_WORDS.finished = 'Finished'`; `STATE_VARIANT.finished = 'muted'`; `readChats` sets `byKey[key] = {state: 'finished'}` for a finished record without reading it
+    - `STATE_WORDS.finished = 'Session finished'`; `STATE_VARIANT.finished = 'muted'`; `readChats` sets `byKey[key] = {state: 'finished'}` for a finished record without reading it
     - `cardViewOf`: prefer a `started` record over a `finished` one; mode `finished`; the question opens from a finished card; `started` set for `columnsOf` excludes finished cards
     - `uiReduce`: `finish-ask`, `finish-cancel`; `worktree-kept` carries the reason
-    - `renderChatPart`: "Finish" button for cards with a started record; the confirm group "Finish this story" (path, ignored-files line, tasks warning, "Finish", "Cancel", Escape); in mode `finished` the badge, the chat link and "Start again" (`actions.ask`), shown in every column
+    - `renderChatPart`: "Finish session" button for cards with a started record; the confirm group "Finish this session" (path, ignored-files line, tasks warning, "Finish session", "Cancel", Escape); in mode `finished` the badge, the card name as the link to the ended chat, and "Restart session" (`actions.ask`), shown in every column
     - `actions.finish(name, force)`: the five steps of the design; the note text exactly as in Requirement 5, criterion 6, posted with `gateway.post('/api/chat/slots/<key>/note', {content, source: 'epic-board'})`; `actions.removeWorktree` calls it with `force`
     - Keyboard and `role` rules of Requirement 7
     - _Requirements: 5.1, 5.2, 5.3, 5.4, 5.6, 5.7, 5.8, 5.10, 7.1, 7.2_
   - [x] 5.7 Page tests in `tests/ui/board.test.mjs`, `tests/ui/chats.test.mjs` and `tests/ui/state.test.mjs`
-    - The cases listed under the page tests of the design's Testing Strategy; include the exact note text and `source`, a note that fails (404 or any error) leaving the card Finished, that `POST /api/chat` is never called by Finish, a worktree-off record (Finish only marks), and Start again on a finished Done card
+    - The cases listed under the page tests of the design's Testing Strategy; include the exact note text and `source`, a note that fails (404 or any error) leaving the card showing "Session finished", that `POST /api/chat` is never called by Finish, a worktree-off record (Finish only marks), and Restart session on a finished Done card
     - _Requirements: 5.1–5.13, 7.2_
   - [x] 5.8 Run the tests
     - Run `python3 -m unittest discover -s tests -t .` and `node --test tests/ui/*.test.mjs` and report the counts run, passed and skipped for each
     - _All requirements of group 5_
   - [ ] 5.9 Check Finish on a Crew host
-    - On a worktree story: Finish with a clean pushed worktree removes the folder and shows "Finished"; the note appears in the chat and starts no agent turn; with an uncommitted file and with an unpushed commit "Worktree kept" shows the reason and "Remove anyway" removes it; on a story with the worktree setting off Finish only marks it
-    - Start again on the finished card (also one in Done) opens a new chat and a new worktree from origin/main
+    - On a worktree story: Finish session with a clean pushed worktree removes the folder and shows "Session finished"; the note appears in the chat and starts no agent turn; with an uncommitted file and with an unpushed commit "Worktree kept" shows the reason and "Remove anyway" removes it; on a story with the worktree setting off Finish session only marks it
+    - Restart session on the finished card (also one in Done) opens a new chat and a new worktree from origin/main
     - _Requirements: 5.1–5.13_
 
 ## Notes
