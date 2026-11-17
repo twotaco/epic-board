@@ -356,7 +356,7 @@ test('renderSetupView: a ticked folder shows a text input; an unticked one does 
   const tree = renderSetupView(h, state, {})
   const textInputs = inputs(tree).filter((i) => i.props.type === 'text')
   assert.equal(textInputs.length, 1, 'one text input for the ticked folder')
-  assert.equal(textInputs[0].props.value, 'My Project')
+  assert.equal(textInputs[0].props.defaultValue, 'My Project')
 })
 
 // ---- Board design, group 3: the Projects view with a kit ----
@@ -522,4 +522,56 @@ test('the Projects view adds no heading and no ErrorNotice, with every kit compo
     assert.equal(findAll(tree, (n) => n.type === kit.ErrorNotice).length, 0)
     assert.equal(findAll(tree, (n) => [kit.Card, kit.Badge, kit.Select].includes(n.type)).length, 0)
   }
+})
+
+// ---- Projects view fix: names, checkbox, worktree folders ----
+
+test('ticking a new folder fills its name with the folder name, so Save can be pressed', () => {
+  const loaded = setupReduce(initialSetup, { kind: 'setup-loaded', folders: FOLDERS, setupInfo: { projects: [] } })
+  const ticked = setupReduce(loaded, { kind: 'setup-check', folderId: 'f1', checked: true })
+  assert.equal(ticked.names.f1, 'Alpha')
+  const tree = renderSetupView(h, ticked, {}, KIT)
+  const save = pressables(tree).find((b) => allText(b) === 'Save')
+  assert.ok(!save.props.disabled, 'Save is active')
+})
+
+test('ticking again keeps what the person typed; an emptied name is filled again', () => {
+  let state = setupReduce(initialSetup, { kind: 'setup-loaded', folders: FOLDERS, setupInfo: { projects: [] } })
+  state = setupReduce(state, { kind: 'setup-check', folderId: 'f1', checked: true })
+  state = setupReduce(state, { kind: 'setup-name', folderId: 'f1', value: 'Mine' })
+  state = setupReduce(state, { kind: 'setup-check', folderId: 'f1', checked: false })
+  state = setupReduce(state, { kind: 'setup-check', folderId: 'f1', checked: true })
+  assert.equal(state.names.f1, 'Mine')
+  state = setupReduce(state, { kind: 'setup-name', folderId: 'f1', value: '  ' })
+  state = setupReduce(state, { kind: 'setup-check', folderId: 'f1', checked: false })
+  state = setupReduce(state, { kind: 'setup-check', folderId: 'f1', checked: true })
+  assert.equal(state.names.f1, 'Alpha')
+})
+
+test('the folder checkbox toggles from state, not from the event target (stale on the host)', () => {
+  const calls = []
+  const actions = { checkFolder: (a) => calls.push(a) }
+  const tree = renderSetupView(h, readyState(), actions)
+  const boxes = inputs(tree).filter((i) => i.props.type === 'checkbox' && i.props['aria-label'] === undefined)
+  const [first, second] = [boxes[0], boxes[2]]
+  first.props.onChange({ target: { checked: true } }) // stale: still the old value
+  second.props.onChange({ target: { checked: false } })
+  assert.deepEqual(calls, [{ folderId: 'f1', checked: false }, { folderId: 'f2', checked: true }])
+})
+
+test('the name box is uncontrolled (defaultValue, no value), so the host cannot reset what is typed', () => {
+  const tree = renderSetupView(h, readyState(), {})
+  const box = inputs(tree).find((i) => i.props.type === 'text')
+  assert.equal(box.props.defaultValue, 'Alpha')
+  assert.ok(!('value' in box.props))
+})
+
+test('readFolders leaves out the worktree folders the backend names', () => {
+  const body = [
+    { id: 'a', name: 'Main', project_dir: '/p' },
+    { id: 'w', name: 'Story · 463a4c06', project_dir: '/p--epic-board-463a4c06' },
+  ]
+  assert.deepEqual(readFolders(body, ['w']).map((f) => f.id), ['a'])
+  assert.deepEqual(readFolders(body).map((f) => f.id), ['a', 'w'])
+  assert.deepEqual(readFolders(body, null).map((f) => f.id), ['a', 'w'])
 })

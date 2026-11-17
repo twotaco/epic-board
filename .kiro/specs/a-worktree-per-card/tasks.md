@@ -165,6 +165,10 @@ Group 1 covers all backend changes: git worktree operations, chat record fields,
   - [x] 5.8 Run the tests
     - Run `python3 -m unittest discover -s tests -t .` and `node --test tests/ui/*.test.mjs` and report the counts run, passed and skipped for each
     - _All requirements of group 5_
+  - [x] 5.10 Fix the Projects view found on the host
+    - Ticking a new folder fills its name with the folder name, so Save works (set-up-projects Requirement 4 and 5); the name box and the folder checkbox no longer read the event target; the list leaves out the worktree folders the board made, by id, because Crew does not set `owner_app` on them; `GET .../setup` gains `worktree_folder_ids`
+    - Tests in `tests/ui/setup.test.mjs` and `tests/test_server.py`
+    - _Requirements: set-up-projects 3.2, 3.4, 4.4, 4.5_
   - [ ] 5.9 Check Finish on a Crew host
     - On a worktree story: Finish session with a clean pushed worktree removes the folder and shows "Session finished"; the note appears in the chat and starts no agent turn; with an uncommitted file and with an unpushed commit "Worktree kept" shows the reason and "Remove anyway" removes it; on a story with the worktree setting off Finish session only marks it
     - Restart session on the finished card (also one in Done) opens a new chat and a new worktree from origin/main
@@ -201,7 +205,8 @@ Group 1 covers all backend changes: git worktree operations, chat record fields,
     { "id": 16, "tasks": ["5.6"] },
     { "id": 17, "tasks": ["5.7"] },
     { "id": 18, "tasks": ["5.8"] },
-    { "id": 19, "tasks": ["5.9"] }
+    { "id": 19, "tasks": ["5.10"] },
+    { "id": 20, "tasks": ["5.9"] }
   ]
 }
 ```
