@@ -6,7 +6,7 @@ The work is four task groups. Each group is one pull request on its own branch, 
 
 **Before starting group 1:** confirm the answers to Open Questions B and C in the design (A is resolved). Task 1.1 covers this.
 
-Group 1 covers all backend changes: git worktree operations, chat record fields, brief steps, project/setup setting, and new routes. Group 2 covers the page start flow: Projects view checkbox, start question, and start sequence creating the Worktree_Folder. Group 3 covers the page cleanup flow: detecting a merged or closed PR and removing the worktree. Group 4 is the check on a Crew host.
+Group 1 covers all backend changes: git worktree operations, chat record fields, brief steps, project/setup setting, and new routes. Group 2 covers the page start flow: Projects view checkbox, start question, and start sequence creating the Worktree_Folder. Group 3 covers the page cleanup flow: detecting a merged or closed PR and removing the worktree. Group 4 is the check on a Crew host. Group 5 fixes a bug the host check found: Crew sends no pull request state to apps, so the backend reads it.
 
 ## Tasks
 
@@ -126,6 +126,19 @@ Group 1 covers all backend changes: git worktree operations, chat record fields,
     - Try a worktree with uncommitted changes; confirm "Worktree kept" is shown; confirm "Remove anyway" force-removes it
     - _Requirements: 5.1–5.6_
 
+- [x] 5. Backend reads pull request state
+  - [x] 5.1 Add `backend/prstate.py` and `POST /pr-states` in `server.py`
+    - `PrStates.states(urls)`: validate (at most 10, `https://github.com/<owner>/<repo>/pull/<n>` only), run `gh pr view <url> --json state,isDraft` without a shell and with a timeout, map `OPEN`+`isDraft` to `draft`, answer `null` on any failure, keep each answer 60 seconds
+    - Route requires the gateway signature; a bad address or body answers 400 for the whole call
+    - _Requirements: 5.8_
+  - [x] 5.2 Page: decide cleanup from the route
+    - In `readChats`, for a record with a `worktree_path`, send the pull request addresses to `POST /pr-states` and set `prTerminated` from the answer; an unknown state means no cleanup; a record without a worktree makes no call
+    - _Requirements: 5.1_
+  - [x] 5.3 Update the spec: requirements 5.1 and 5.8, the design (Crew strips the state, the route) and this list
+  - [x] 5.4 Tests: `tests/test_prstate.py` (fake gh runner: open, draft, merged, closed, failure, bad address, cache hit, signed route); `tests/ui/board.test.mjs` (closed with no `state` in `source_links`, null, mixed, no call for non-worktree records); the page's path scan allows `/pr-states`
+    - _Requirements: 5.1, 5.8_
+  - [x] 5.5 Run `python3 -m unittest discover -s tests -t .` and report the counts
+
 ## Notes
 
 - Each group is one pull request and is merged by the owner; start the next group from the updated main
@@ -150,7 +163,10 @@ Group 1 covers all backend changes: git worktree operations, chat record fields,
     { "id": 9, "tasks": ["3.4"] },
     { "id": 10, "tasks": ["3.5"] },
     { "id": 11, "tasks": ["4.1"] },
-    { "id": 12, "tasks": ["4.2", "4.3"] }
+    { "id": 12, "tasks": ["4.2", "4.3"] },
+    { "id": 13, "tasks": ["5.1", "5.2", "5.3"] },
+    { "id": 14, "tasks": ["5.4"] },
+    { "id": 15, "tasks": ["5.5"] }
   ]
 }
 ```

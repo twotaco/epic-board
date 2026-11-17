@@ -426,8 +426,11 @@ function lastRoleOf(detail) {
   return String(rows[rows.length - 1]?.role ?? '')
 }
 
+// A GitHub pull request address; the backend's /pr-states route accepts the same shape.
+const PR_URL = /^https:\/\/github\.com\/[A-Za-z0-9-]+\/[A-Za-z0-9_.-]+\/pull\/[1-9][0-9]{0,8}$/
+
 // One read of the chats. Everything it touches is injected:
-//   backend.get(path, {signal}) -> the parsed body of the app's own backend; rejects with an error
+//   backend.get / backend.post(path, body, {signal}) -> the parsed body of the app's own backend; rejects with an error
 //                                   that has `status` and `error` ({code, message}) on a non-2xx answer
 //   gateway.get(path, {signal}) -> Crew's chat endpoints through useAppApi; rejects with `status`
 //   previous                    -> the chats state, for the missing-since marks and the last-row cache
@@ -478,6 +481,23 @@ export async function readChats({ backend, gateway, previous = initialChats, now
     missingSince[key] = typeof previous.missingSince?.[key] === 'number' ? previous.missingSince[key] : null
   }
 
+  // Crew strips a pull request's state from the links it gives apps, so the backend reads it with gh.
+  // Cleanup needs every pull request known, at least one merged or closed and none open or draft.
+  const prTerminated = async (row, abort) => {
+    const links = Array.isArray(row.source_links) ? row.source_links : []
+    const urls = [...new Set(links.filter((link) => isObject(link) && (link.kind === undefined || link.kind === 'change') && typeof link.url === 'string' && PR_URL.test(link.url)).map((link) => link.url))]
+    if (urls.length === 0) return false
+    let states
+    try {
+      states = (await backend.post('/pr-states', { urls }, { signal: abort }))?.states
+    } catch {
+      return false
+    }
+    if (!isObject(states)) return false
+    const list = urls.map((url) => states[url])
+    return list.every((value) => ['open', 'draft', 'merged', 'closed'].includes(value)) && list.some((value) => value === 'merged' || value === 'closed') && !list.some((value) => value === 'open' || value === 'draft')
+  }
+
   for (const record of records) {
     const key = record.key
     const row = rows.get(key)
@@ -504,12 +524,8 @@ export async function readChats({ backend, gateway, previous = initialChats, now
       const state = stateOf(row, role, workers, now())
       byKey[key] = { state, lastTs: row.last_ts, messages: row.messages, role, roleRead }
       if (state === 'review') byKey[key].review = reviewOf(row)
-      const hasWorktree = typeof record.worktree_path === 'string' && record.worktree_path !== ''
-      if (hasWorktree) {
-        const rowLinks = Array.isArray(row.source_links) ? row.source_links : []
-        const hasTerminal = rowLinks.some((link) => isObject(link) && (link.state === 'merged' || link.state === 'closed'))
-        const hasActive = rowLinks.some((link) => isObject(link) && (link.state === 'open' || link.state === 'draft'))
-        if (hasTerminal && !hasActive) byKey[key].prTerminated = true
+      if (typeof record.worktree_path === 'string' && record.worktree_path !== '') {
+        if (await prTerminated(row, signal)) byKey[key].prTerminated = true
       }
       continue
     }

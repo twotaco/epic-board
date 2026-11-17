@@ -170,7 +170,15 @@ function mount({ hidden = false, api, storage, ChatPanel, kit } = {}) {
   const projectsFetch = makeFetch()
   const gateway = makeGateway()
   const document = makeDocument(hidden)
-  const fetch = (url, options) => url.startsWith(PLAN_URL) ? planFetch(url, options) : url.startsWith(PROJECTS_URL) ? projectsFetch(url, options) : chatFetch(url, options)
+  // The backend's pr-states route answers at once from `prStates` ({url: state}); an unknown url is null.
+  const prStates = {}
+  const prFetch = (url, options) => {
+    prFetch.calls.push([url, options])
+    const states = Object.fromEntries(JSON.parse(options.body).urls.map((u) => [u, prStates[u] ?? null]))
+    return Promise.resolve({ status: 200, ok: true, json: async () => ({ states }) })
+  }
+  prFetch.calls = []
+  const fetch = (url, options) => url.startsWith(`${BACKEND}/pr-states`) ? prFetch(url, options) : url.startsWith(PLAN_URL) ? planFetch(url, options) : url.startsWith(PROJECTS_URL) ? projectsFetch(url, options) : chatFetch(url, options)
   const hooks = []
   let cursor = 0
   let pending = []
@@ -268,6 +276,8 @@ function mount({ hidden = false, api, storage, ChatPanel, kit } = {}) {
   return {
     fetch: planFetch,
     chatFetch,
+    prFetch,
+    prStates,
     projectsFetch,
     gateway,
     document,
@@ -1524,7 +1534,7 @@ test('the page source has no innerHTML, script injection, other network paths or
 
   // The paths the page may use: the plan route, the backend's chats and projects routes, and the chat
   // paths of start-a-story (Requirements 4, 6 and 8). Quoted paths first, then the ones built in a template.
-  const allowed = new Set([PLAN_URL, BACKEND, '/chats', '/api/chat/slots', '/api/chat', '/projects', '/setup', '/api/chat/folders'])
+  const allowed = new Set([PLAN_URL, BACKEND, '/chats', '/api/chat/slots', '/api/chat', '/projects', '/setup', '/api/chat/folders', '/pr-states'])
   const urls = source.match(/['"`](?:https?:)?\/[A-Za-z0-9_\-./]*['"`]/g) ?? []
   assert.deepEqual([...new Set(urls.map((url) => url.slice(1, -1)))].sort(), [...allowed].sort())
   assert.equal(/https?:\/\//.test(source), false)
@@ -1936,7 +1946,9 @@ const openPr = { kind: 'change', number: 1, url: 'https://github.com/o/r/pull/1'
 const mergedPr = { kind: 'change', number: 1, url: 'https://github.com/o/r/pull/1', state: 'merged' }
 
 // One read cycle: answer the records fetch then the Crew list, return the index after.
+// The links in `crewRows` carry a `state` here to say what the fake pr-states route answers; the real Crew sends none.
 async function chatCycleWith(page, records, crewRows) {
+  for (const r of crewRows) for (const link of r.source_links ?? []) if (link.state) page.prStates[link.url] = link.state
   const idx = page.chatFetch.calls.length - 1
   page.chatFetch.answer(idx, 200, chatsAnswer(records))
   await flush()
@@ -2135,4 +2147,50 @@ test('cleanup: force=true URL uses & when project is selected', async () => {
   const [forceUrl] = forceCall
   assert.ok(forceUrl.includes('force=true&project='), `URL uses & separator, got: ${forceUrl}`)
   assert.ok(!forceUrl.includes('force=true?'), `URL does not use ? after force=true, got: ${forceUrl}`)
+})
+
+// ---- Cleanup reads PR state from the backend, not from source_links ----
+// Crew 0.12.2 strips `state` from the source links it gives apps, so these links carry none.
+
+const bareLink = { kind: 'change', number: 48, url: 'https://github.com/o/r/pull/48' }
+
+test('cleanup: backend says closed while source_links has no state → worktree route is called', async () => {
+  const page = await ready({}, [WRECORD])
+  page.prStates[bareLink.url] = 'closed'
+  await chatCycleWith(page, [WRECORD], [row(NAME, { source_links: [bareLink] })])
+  page.gateway.answer(detailPath(NAME), { messages: [{ role: 'assistant' }] })
+  await flush()
+  assert.deepEqual(JSON.parse(page.prFetch.calls[0][1].body), { urls: [bareLink.url] })
+  assert.equal(page.prFetch.calls[0][1].method, 'POST')
+  assert.ok(page.chatFetch.calls.some(([url, options]) => url.includes(`/chats/${NAME}/worktree`) && options.method === 'DELETE'), 'worktree route called')
+})
+
+test('cleanup: backend gives null (gh failed) → no cleanup', async () => {
+  const page = await ready({}, [WRECORD])
+  await chatCycleWith(page, [WRECORD], [row(NAME, { source_links: [bareLink] })])
+  page.gateway.answer(detailPath(NAME), { messages: [{ role: 'assistant' }] })
+  await flush()
+  assert.equal(page.prFetch.calls.length, 1, 'the route was asked')
+  assert.ok(!page.chatFetch.calls.some(([url]) => url.includes('/worktree')), 'no worktree route called')
+  assert.ok(anchors(page).some((a) => a.props.href === `/chat?sid=${NAME}`), 'chat link still present')
+})
+
+test('cleanup: one pull request closed and another unknown → no cleanup', async () => {
+  const other = { kind: 'change', number: 49, url: 'https://github.com/o/r/pull/49' }
+  const page = await ready({}, [WRECORD])
+  page.prStates[bareLink.url] = 'closed'
+  await chatCycleWith(page, [WRECORD], [row(NAME, { source_links: [bareLink, other] })])
+  page.gateway.answer(detailPath(NAME), { messages: [{ role: 'assistant' }] })
+  await flush()
+  assert.ok(!page.chatFetch.calls.some(([url]) => url.includes('/worktree')), 'no worktree route called')
+})
+
+test('cleanup: a record without worktree_path never calls the pr-states route', async () => {
+  const nullRecord = { card_id: ALPHA, name: NAME, key: NAME, created: 't', worktree_path: null, worktree_folder_id: null }
+  const page = await ready({}, [nullRecord])
+  page.prStates[bareLink.url] = 'closed'
+  await chatCycleWith(page, [nullRecord], [row(NAME, { source_links: [bareLink] })])
+  page.gateway.answer(detailPath(NAME), { messages: [{ role: 'assistant' }] })
+  await flush()
+  assert.equal(page.prFetch.calls.length, 0)
 })

@@ -145,6 +145,15 @@ Removes the worktree for the record named `<name>`. Requires a valid gateway sig
 
 The page calls this route when a PR is merged or closed, and when "Remove anyway" is activated.
 
+### The pull request state route (`prstate.py`, `server.py`)
+
+```
+POST /pr-states   {"urls": ["https://github.com/<owner>/<repo>/pull/<n>", ...]}
+                  -> 200 {"states": {"<url>": "open" | "draft" | "merged" | "closed" | null}}
+```
+
+Requires a valid gateway signature. At most 10 addresses, each matching `https://github.com/<owner>/<repo>/pull/<n>`; any other address, a non-list or an extra body key answers 400 `invalid_request` for the whole call. Each address is read with `gh pr view <url> --json state,isDraft` (an argument list, no shell, 8-second timeout, read in parallel). `OPEN` with `isDraft` is `draft`. A missing gh, no sign-in, a timeout, a failed exit or unreadable JSON gives `null` for that address only. Each answer, `null` included, is kept in memory for 60 seconds, so the 30-second poll does not run gh on every read. Python standard library only. The route belongs to the app's own backend, so `app.json` needs no change.
+
 ### The `started` route extension (`server.py`)
 
 `POST /chats/<name>/started` body gains an optional `worktree_folder_id` field (the Crew subfolder id the page created). The backend stores it in the record. Validation: absent or matching `NAME_PATTERN`.
@@ -181,7 +190,9 @@ Confirmed from Crew 0.12.2's source: `POST /api/chat/folders` accepts `project_d
 
 ### Cleanup in the page (`ui/index.mjs`)
 
-The chat poller already reads `source_links` for the Review state. When a source link transitions to `merged` or `closed`, the page calls `DELETE .../chats/<name>/worktree`. On success (or when the response is 200 with `{ok: true}`), the page then calls `DELETE /api/chat/folders/<worktree_folder_id>` if one is recorded. After both, it deletes the Chat_Record via `DELETE .../chats/<name>` and re-renders the card.
+The chat poller reads a pull request's state from the backend, not from `source_links`. Crew 0.12.2 never sends a pull request's `state` to apps: `GET /api/chat/slots` gives an app-token caller its source links without the cached status (`dashboard/chat_api/slot_detail.py`), and `_SOURCE_LINK_STATUS_KEYS` in `ws_event_scope.py` strips `ci`, `ciPending`, `state`, `mergeable` and `mergeStateStatus`. Found on the host check: a closed pull request kept its worktree because `state` was always missing.
+
+For each started record with a `worktree_path`, `readChats` collects the pull request addresses from its `source_links` (kind change, matching `https://github.com/<owner>/<repo>/pull/<n>`), asks `POST /pr-states`, and sets `prTerminated` when every state is known, at least one is `merged` or `closed` and none is `open` or `draft`. A `null`, a failed call or a missing answer means not finished, so nothing is removed and the next read tries again. A record without a `worktree_path` makes no call. The poller still fires cleanup at most once per record key per page load. When a `merged` or `closed` pull request is found, the page calls `DELETE .../chats/<name>/worktree`. On success (or when the response is 200 with `{ok: true}`), the page then calls `DELETE /api/chat/folders/<worktree_folder_id>` if one is recorded. After both, it deletes the Chat_Record via `DELETE .../chats/<name>` and re-renders the card.
 
 On `worktree_has_changes`, the card shows "Worktree kept: uncommitted changes at `<path>`." and a "Remove anyway" button. Activating it calls `DELETE .../chats/<name>/worktree?force=true`.
 
@@ -222,6 +233,7 @@ At least 100 iterations with the seed printed on failure.
 | Reserve | Worktree already at path | Reused silently; start proceeds |
 | Start seq | `POST /api/chat/folders` fails | Worktree removed via backend route; "Could not create worktree folder: `<reason>`." |
 | Cleanup | Worktree has uncommitted changes | "Worktree kept: uncommitted changes at `<path>`." with "Remove anyway" |
+| Cleanup | `gh` missing, not signed in or slow | State is `null`; the worktree is kept and the next read tries again |
 | Cleanup | Subfolder PATCH fails | Silently skipped; record still removed |
 | Record | Old record without new fields | Fields treated as `null`; backward compatible |
 
@@ -241,13 +253,14 @@ No earlier test stops being true. `build_brief` with no `worktree_path` argument
 - **`tests/test_gitsource.py`**: `worktree_path` pure-function cases; `create_worktree` succeeds on a fake repo (using `git init` in a temp dir and a mock `run_git`); `create_worktree` returns `(False, error)` on fetch failure and on `worktree add` failure; `create_worktree` does not re-create an existing worktree; `remove_worktree` without and with `--force`.
 - **`tests/test_chats.py`**: `build_brief` with `worktree_path` set: Setup_Step is step 1; Catch_Up_Step appears before the name-check step; both variants (no-spec, with-spec); `worktree_path=None` leaves the brief unchanged. Property 2 as a seeded test with at least 100 iterations. Record validation: new fields accepted; missing fields treated as null; bad `worktree_folder_id` rejected.
 - **`tests/test_setup.py`**: `validate_setup_entry` accepts `true` and `false` for `worktree`; rejects non-boolean; treats absent as `true`.
+- **`tests/test_prstate.py`**: each state (open, draft, merged, closed); gh failure, timeout and bad output give `null`; a bad address is refused; the 60-second cache; the signed route.
 - **`tests/test_server.py`**: Reserve with worktree on calls `create_worktree` and stores `worktree_path`; reserve with worktree off stores `null`; `DELETE .../worktree` route calls `remove_worktree`; `?force=true` passes through; 409 `worktree_has_changes` on uncommitted changes; `started` route stores `worktree_folder_id`.
 
 ### Page tests
 
 - **`tests/ui/setup.test.mjs`**: Worktree checkbox shown per ticked folder; default ticked; value persists across untick/retick.
 - **`tests/ui/start.test.mjs`**: Start question shows "Works in its own worktree" vs "Works in the shared checkout" based on project setting; start sequence calls `POST /api/chat/folders` before `POST /api/chat/slots` when worktree on; `folder_id` in slots call is the subfolder id; `started` body includes `worktree_folder_id`.
-- **`tests/ui/board.test.mjs`**: "Worktree kept" state shown when cleanup route returns `worktree_has_changes`; "Remove anyway" triggers force-remove; card rendered without worktree fields for non-worktree chats.
+- **`tests/ui/board.test.mjs`**: cleanup runs when the route says closed although `source_links` has no state; no cleanup when the route gives `null`; a record without a worktree never calls the route; "Worktree kept" state shown when cleanup route returns `worktree_has_changes`; "Remove anyway" triggers force-remove; card rendered without worktree fields for non-worktree chats.
 
 | Req | Backend | Page | Manual |
 |---|---|---|---|
@@ -255,7 +268,7 @@ No earlier test stops being true. `build_brief` with no `worktree_path` argument
 | 2 | gitsource, server | start | Worktree created beside checkout; conductor opens in it |
 | 3 | chats (brief) | — | Brief in conductor chat has setup and catch-up steps |
 | 4 | — | — | Reopen card; worktree reused |
-| 5 | server (cleanup route) | board | PR merged → worktree removed; card resets |
+| 5 | server (cleanup route, pr-states route) | board | PR merged → worktree removed; card resets |
 | 6 | server (error paths) | start | Error shown; retry starts fresh |
 
 ## Design Decisions

@@ -20,6 +20,7 @@ from gitsource import open_snapshot, read_snapshot, worktree_path as gitsource_w
 from held import Holder  # noqa: E402
 from plan import build_plan  # noqa: E402
 from projects import check_folder, load_projects, ENV_NAME, FOLDER_ENV_NAME, FOLDER_MAX_CHARS  # noqa: E402
+from prstate import PrStateError, PrStates  # noqa: E402
 from proxyauth import verify  # noqa: E402
 from setup import validate_setup_entry, save_setup  # noqa: E402
 
@@ -359,11 +360,14 @@ class ChatRouter:
         return rp.chats.handle_verified(method, path, body)
 
 
-def make_handler(state, router=None):
+def make_handler(state, router=None, pr_states=None):
     """Build the HTTP handler class.
 
-    `state` is a RuntimeState; `router` is a ChatRouter (or None when not needed).
+    `state` is a RuntimeState; `router` is a ChatRouter (or None when not needed);
+    `pr_states` is a PrStates (a new one when None).
     """
+    pr_states = pr_states or PrStates()
+
     class Handler(BaseHTTPRequestHandler):
         def _send(self, code, body):
             data = json.dumps(body).encode()
@@ -437,7 +441,29 @@ def make_handler(state, router=None):
                 return self._not_found()
             if path.endswith("/setup"):
                 return self._handle_post_setup()
+            if path.endswith("/pr-states"):
+                return self._handle_pr_states()
             return self._chats("POST")
+
+        def _handle_pr_states(self):
+            body, err = self._read_body()
+            if err is not None:
+                return self._send(*err)
+            if not state.secret:
+                return self._send(*chat_refusal("proxy_secret_missing", "The app has no proxy secret."))
+            if not verify(self.headers.get("X-KiroCrew-Proxy", ""), method="POST",
+                          target=self.path, body=body, secret=state.secret, now=state.clock()):
+                return self._send(*chat_refusal("unauthorized", "The request is not signed by the gateway."))
+            try:
+                data = json.loads(body.decode("utf-8"))
+            except (ValueError, UnicodeDecodeError):
+                data = None
+            if not isinstance(data, dict) or set(data) != {"urls"}:
+                return self._send(400, error_body("invalid_request", "The body must be a JSON object with exactly: urls."))
+            try:
+                return self._send(200, {"states": pr_states.states(data["urls"])})
+            except PrStateError as e:
+                return self._send(400, error_body("invalid_request", str(e)))
 
         def _handle_post_setup(self):
             body, err = self._read_body()
