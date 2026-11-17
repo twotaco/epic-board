@@ -90,7 +90,7 @@ The board cannot tell when a story is done. Crew gives an app no pull request st
    c. WHEN the card's tasks were read and not all are ticked on main: that not all tasks are ticked. The board SHALL say nothing about pull requests, because it cannot read their state.
 3. BEFORE the backend removes a worktree it SHALL refuse, with plain git and no `gh`:
    a. WHEN the worktree has uncommitted or untracked changes: code `worktree_has_changes`.
-   b. WHEN the worktree's branch has commits that are not on its upstream, or has no upstream and has commits that are not on `origin/<main-branch>` (a detached HEAD counts as having no upstream): code `worktree_has_unpushed`.
+   b. WHEN the worktree has commits that are on no remote branch of `origin`: code `worktree_has_unpushed`.
    Both are 409. The card SHALL show "Worktree kept: " and the reason, with a "Remove anyway" button that removes with `--force` and skips both checks.
 4. WHEN the worktree is removed, or the record has none, the page SHALL send `PATCH /api/chat/folders/<worktree_folder_id>` with `{"project_dir": ""}` when the record has a folder id (a failure is ignored), and then ask the backend to mark the record `finished`. The record SHALL NOT be deleted.
 5. A Chat_Record whose `worktree_path` is still set SHALL NOT become `finished`: the backend refuses with 409 `worktree_not_removed`.

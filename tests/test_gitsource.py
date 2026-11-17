@@ -349,8 +349,23 @@ class SafetyCheckTests(Repos):
         git(self.wt, "commit", "-q", "-m", "more")
         self.assertEqual(gitsource.worktree_has_unpushed(self.wt, "main"), (True, None))
 
+    def test_branch_from_origin_main_pushed_without_u_is_not_unpushed(self):
+        git(self.wt, "switch", "-q", "-c", "story/x", "origin/main")
+        self.commit_in_wt()
+        git(self.wt, "push", "-q", "origin", "story/x")
+        self.assertEqual(gitsource.worktree_has_unpushed(self.wt, "main"), (False, None))
+
+    def test_branch_from_origin_main_pushed_without_u_then_one_more_commit_is_unpushed(self):
+        git(self.wt, "switch", "-q", "-c", "story/x", "origin/main")
+        self.commit_in_wt()
+        git(self.wt, "push", "-q", "origin", "story/x")
+        self.write("more.txt")
+        git(self.wt, "add", "more.txt")
+        git(self.wt, "commit", "-q", "-m", "more")
+        self.assertEqual(gitsource.worktree_has_unpushed(self.wt, "main"), (True, None))
+
     def test_unpushed_git_failure_is_an_error(self):
-        unpushed, error = gitsource.worktree_has_unpushed(self.wt, "no-such-branch")
+        unpushed, error = gitsource.worktree_has_unpushed(os.path.join(self.root, "missing"), "main")
         self.assertIsNone(unpushed)
         self.assertTrue(error)
 

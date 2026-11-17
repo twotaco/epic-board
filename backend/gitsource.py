@@ -151,8 +151,8 @@ def worktree_has_changes(path):
     return bool(out.strip()), None
 
 
-def _count(path, rev_range):
-    ok, out, err = run_git(path, "rev-list", "--count", rev_range)
+def _count(path, *rev_args):
+    ok, out, err = run_git(path, "rev-list", "--count", *rev_args)
     if not ok:
         return None, err
     try:
@@ -161,10 +161,11 @@ def _count(path, rev_range):
         return None, "git printed no count"
 
 
-def worktree_has_unpushed(path, main_branch):
-    """(True, None) when HEAD has commits that are not on its upstream, or, with no upstream (a detached HEAD
-    has none), not on origin/<main_branch>. (False, None) when it has none, (None, error_text) when git fails.
-    shortcut: a squash-merged branch whose remote branch was deleted has commits that are not on
-    origin/<main_branch>, so it is refused and the person uses "Remove anyway"; upgrade only if that proves common."""
-    ok, _, _ = run_git(path, "rev-parse", "--abbrev-ref", "@{upstream}")
-    return _count(path, "@{upstream}..HEAD" if ok else f"origin/{main_branch}..HEAD")
+def worktree_has_unpushed(path, main_branch=None):
+    """(True, None) when any commit in HEAD is on no remote-tracking branch of origin, (False, None) when
+    none is, (None, error_text) when git fails. The upstream is not used: a branch made from origin/main has
+    origin/main as its upstream even when it was pushed without -u. A push updates the remote-tracking ref, so
+    nothing is fetched. main_branch is kept for the callers and is not used.
+    shortcut: a squash-merged branch whose remote branch was deleted has commits on no remote branch, so it is
+    refused and the person uses "Remove anyway"; upgrade only if that proves common."""
+    return _count(path, "HEAD", "--not", "--remotes=origin")
