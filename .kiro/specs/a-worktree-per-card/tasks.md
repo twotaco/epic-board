@@ -169,6 +169,10 @@ Group 1 covers all backend changes: git worktree operations, chat record fields,
     - Ticking a new folder fills its name with the folder name, so Save works (set-up-projects Requirement 4 and 5); the name box and the folder checkbox no longer read the event target; the list leaves out the worktree folders the board made, by id, because Crew does not set `owner_app` on them; `GET .../setup` gains `worktree_folder_ids`
     - Tests in `tests/ui/setup.test.mjs` and `tests/test_server.py`
     - _Requirements: set-up-projects 3.2, 3.4, 4.4, 4.5_
+  - [x] 5.11 Fix the unpushed check found on the host
+    - `worktree_has_unpushed` counts `git rev-list --count HEAD --not --remotes=origin` and no longer reads the upstream, so a branch made from `origin/main` and pushed without `-u` is not reported as unpushed; same return shape; the `shortcut:` comment now speaks of commits on no remote branch
+    - Tests in `tests/test_gitsource.py`: pushed without `-u` (not unpushed, and unpushed with one more commit)
+    - _Requirements: 5.3_
   - [ ] 5.9 Check Finish on a Crew host
     - On a worktree story: Finish session with a clean pushed worktree removes the folder and shows "Session finished"; the note appears in the chat and starts no agent turn; with an uncommitted file and with an unpushed commit "Worktree kept" shows the reason and "Remove anyway" removes it; on a story with the worktree setting off Finish session only marks it
     - Restart session on the finished card (also one in Done) opens a new chat and a new worktree from origin/main
