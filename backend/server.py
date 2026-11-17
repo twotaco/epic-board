@@ -16,7 +16,7 @@ from urllib.parse import urlparse, parse_qs
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from chats import NAME_PATTERN, ChatError, ChatStore, MAX_CARD_ID_CHARS, build_brief, find_card, spec_folders  # noqa: E402
-from gitsource import open_snapshot, read_snapshot, worktree_path as gitsource_worktree_path, create_worktree, remove_worktree  # noqa: E402
+from gitsource import open_snapshot, read_snapshot, worktree_path as gitsource_worktree_path, create_worktree, remove_worktree, main_branch, worktree_has_changes, worktree_has_unpushed  # noqa: E402
 from held import Holder  # noqa: E402
 from plan import build_plan  # noqa: E402
 from projects import check_folder, load_projects, ENV_NAME, FOLDER_ENV_NAME, FOLDER_MAX_CHARS  # noqa: E402
@@ -121,12 +121,13 @@ def plan_response(holder, error, config_path):
 
 
 MAX_BODY_BYTES = 4096
-CHATS_ROUTE = re.compile(r"/chats(?:/([^/]+)(?:/(started|worktree))?)?$")
+CHATS_ROUTE = re.compile(r"/chats(?:/([^/]+)(?:/(started|worktree|finished))?)?$")
 CHAT_STATUS = {"unauthorized": 401, "proxy_secret_missing": 503, "invalid_request": 400, "chat_not_found": 404,
                "not_found": 404, "card_not_found": 409, "card_done": 409, "chat_exists": 409, "folder_not_set": 409,
                "plan_not_ready": 409, "chats_unreadable": 500, "internal": 500,
                "project_not_found": 404, "repository_not_configured": 409,
-               "worktree_failed": 409, "worktree_has_changes": 409}
+               "worktree_failed": 409, "worktree_has_changes": 409, "worktree_has_unpushed": 409,
+               "worktree_remove_failed": 409, "chat_not_started": 409, "worktree_not_removed": 409}
 
 
 def chat_refusal(code, message):
@@ -273,6 +274,10 @@ class ChatService:
                 return 200, {"card_id": record["card_id"], "name": record["name"], "key": record["key"]}
             if name is not None and suffix == "worktree" and method == "DELETE":
                 return self.remove_worktree_route(name, path)
+            if name is not None and suffix == "finished" and method == "POST":
+                record = self.store.mark_finished(name)
+                return 200, {"card_id": record["card_id"], "name": record["name"], "key": record["key"],
+                             "state": record["state"]}
             if name is not None and suffix is None and method == "DELETE":
                 self.store.remove(name)
                 return 200, {"removed": True}
@@ -300,7 +305,8 @@ class ChatService:
         if found is None:
             raise ChatError("card_not_found", 409, "That story is not in the plan on the main branch.")
         epic_file, card = found
-        if card.get("status") == "done":
+        if card.get("status") == "done" and not any(
+                r["card_id"] == card_id and r["state"] == "finished" for r in self.store.started()):
             raise ChatError("card_done", 409, "That story is done.")
         record = self.store.reserve(card_id)
         wt_path = None
@@ -322,12 +328,23 @@ class ChatService:
             return 200, {"ok": True}
         query = parse_qs(urlparse(path).query, keep_blank_values=True)
         force = query.get("force", [""])[0].lower() == "true"
+        if not os.path.isdir(wt_path):
+            self.store.update_worktree_path(name, None)
+            return 200, {"ok": True}
+        if not force:
+            changed, err = worktree_has_changes(wt_path)
+            if changed or changed is None:
+                reason = f"The worktree has uncommitted changes at {wt_path}." if changed else err
+                return chat_refusal("worktree_has_changes", reason)
+            unpushed, err = worktree_has_unpushed(wt_path, main_branch(self.repository))
+            if unpushed or unpushed is None:
+                reason = f"The worktree has commits that are not pushed at {wt_path}." if unpushed else err
+                return chat_refusal("worktree_has_unpushed", reason)
         ok, err = remove_worktree(self.repository, wt_path, force=force)
         if ok:
             self.store.update_worktree_path(name, None)
             return 200, {"ok": True}
-        return chat_refusal("worktree_has_changes",
-                            f"The worktree has uncommitted changes at {wt_path}.")
+        return chat_refusal("worktree_remove_failed", err)
 
 
 class ChatRouter:

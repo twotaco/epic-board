@@ -422,8 +422,10 @@ class StoreTests(unittest.TestCase):
         self.store.mark_started(b["name"], "key-b")
         self.store.mark_started(a["name"], "key-a")
         self.assertEqual(self.store.started(), [
-            {"card_id": "e.md#A", "name": a["name"], "key": "key-a", "created": "2026-11-14T09:30:12Z"},
-            {"card_id": "e.md#B", "name": b["name"], "key": "key-b", "created": "2026-11-14T09:30:12Z"}])
+            {"card_id": "e.md#A", "name": a["name"], "key": "key-a", "created": "2026-11-14T09:30:12Z",
+             "state": "started", "worktree_path": None, "worktree_folder_id": None},
+            {"card_id": "e.md#B", "name": b["name"], "key": "key-b", "created": "2026-11-14T09:30:12Z",
+             "state": "started", "worktree_path": None, "worktree_folder_id": None}])
 
     def test_reserve_for_a_started_card_is_chat_exists(self):
         record = self.store.reserve("e.md#A")
@@ -652,7 +654,8 @@ class ServiceTests(unittest.TestCase):
         self.store.mark_started(record["name"], "key-1")
         chats_ = self.call("GET", "/api/chats")[1]["chats"]
         self.assertEqual(chats_, [{"card_id": "epic-board.md#Filter by epic", "name": record["name"], "key": "key-1",
-                                   "created": "2026-11-14T09:30:12Z"}])
+                                   "created": "2026-11-14T09:30:12Z", "state": "started",
+                                   "worktree_path": None, "worktree_folder_id": None}])
 
     def test_get_reports_a_folder_that_is_not_set_with_its_reason(self):
         status, body = self.call("GET", "/api/chats", service=self.service(folder=None, reason="folder_id must be text."))
@@ -1118,6 +1121,69 @@ class WorktreeRecordTests(unittest.TestCase):
         self.store.mark_started(record["name"], "k")
         updated = self.store.get_record(record["name"])
         self.assertIsNone(updated["worktree_folder_id"])
+
+
+class FinishedStoreTests(unittest.TestCase):
+    """The finished state."""
+
+    def setUp(self):
+        self.root = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.root, True)
+        self.names = iter(f"epic-board-{i:08x}" for i in range(1, 100))
+        self.store = ChatStore(os.path.join(self.root, "data"), new_name=lambda: next(self.names),
+                               clock=lambda: "2026-11-14T09:30:12Z")
+
+    def started_record(self, card="e.md#A", key="k", path=None):
+        record = self.store.reserve(card)
+        if path:
+            self.store.update_worktree_path(record["name"], path)
+        self.store.mark_started(record["name"], key)
+        return record
+
+    def test_finished_record_is_accepted_and_listed_with_every_field(self):
+        record = self.started_record()
+        self.store.mark_finished(record["name"])
+        self.assertEqual(self.store.started(), [
+            {"card_id": "e.md#A", "name": record["name"], "key": "k", "created": "2026-11-14T09:30:12Z",
+             "state": "finished", "worktree_path": None, "worktree_folder_id": None}])
+
+    def test_mark_finished_cases(self):
+        with self.assertRaises(ChatError) as caught:
+            self.store.mark_finished("epic-board-nope")
+        self.assertEqual((caught.exception.code, caught.exception.status), ("chat_not_found", 404))
+        reserved = self.store.reserve("e.md#B")
+        with self.assertRaises(ChatError) as caught:
+            self.store.mark_finished(reserved["name"])
+        self.assertEqual((caught.exception.code, caught.exception.status), ("chat_not_started", 409))
+        record = self.started_record(path="/p/wt")
+        with self.assertRaises(ChatError) as caught:
+            self.store.mark_finished(record["name"])
+        self.assertEqual((caught.exception.code, caught.exception.status), ("worktree_not_removed", 409))
+        self.store.update_worktree_path(record["name"], None)
+        self.assertEqual(self.store.mark_finished(record["name"])["state"], "finished")
+        self.assertEqual(self.store.mark_finished(record["name"])["state"], "finished")
+
+    def test_reserve_skips_finished_and_mark_started_removes_it(self):
+        old = self.started_record()
+        self.store.mark_finished(old["name"])
+        new = self.store.reserve("e.md#A")
+        self.assertNotEqual(new["name"], old["name"])
+        self.assertEqual(new["state"], "reserved")
+        self.assertEqual({r["state"] for r in self.store.started()}, {"finished"})  # both on file
+        self.store.mark_started(new["name"], "k2")
+        self.assertEqual([(r["name"], r["state"]) for r in self.store.started()], [(new["name"], "started")])
+
+    def test_finished_record_without_a_key_is_unreadable(self):
+        record = self.started_record()
+        self.store.mark_finished(record["name"])
+        with open(self.store.path, encoding="utf-8") as f:
+            data = json.load(f)
+        data["chats"][0]["key"] = None
+        with open(self.store.path, "w", encoding="utf-8") as f:
+            json.dump(data, f)
+        with self.assertRaises(ChatError) as caught:
+            self.store.started()
+        self.assertEqual(caught.exception.code, "chats_unreadable")
 
 
 if __name__ == "__main__":

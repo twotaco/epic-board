@@ -140,3 +140,31 @@ def remove_worktree(repository, path, force=False):
     args = ["worktree", "remove", "--force", path] if force else ["worktree", "remove", path]
     ok, _, err = run_git(repository, *args)
     return (True, None) if ok else (False, err)
+
+
+def worktree_has_changes(path):
+    """(True, None) when git lists any modified, staged or untracked file in the worktree (ignored files
+    are not listed), (False, None) when it prints nothing, (None, error_text) when git fails."""
+    ok, out, err = run_git(path, "status", "--porcelain")
+    if not ok:
+        return None, err
+    return bool(out.strip()), None
+
+
+def _count(path, rev_range):
+    ok, out, err = run_git(path, "rev-list", "--count", rev_range)
+    if not ok:
+        return None, err
+    try:
+        return int(out.decode().strip()) > 0, None
+    except ValueError:
+        return None, "git printed no count"
+
+
+def worktree_has_unpushed(path, main_branch):
+    """(True, None) when HEAD has commits that are not on its upstream, or, with no upstream (a detached HEAD
+    has none), not on origin/<main_branch>. (False, None) when it has none, (None, error_text) when git fails.
+    shortcut: a squash-merged branch whose remote branch was deleted has commits that are not on
+    origin/<main_branch>, so it is refused and the person uses "Remove anyway"; upgrade only if that proves common."""
+    ok, _, _ = run_git(path, "rev-parse", "--abbrev-ref", "@{upstream}")
+    return _count(path, "@{upstream}..HEAD" if ok else f"origin/{main_branch}..HEAD")

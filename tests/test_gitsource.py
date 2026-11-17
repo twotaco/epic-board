@@ -284,5 +284,76 @@ class WorktreeTests(unittest.TestCase):
         self.assertTrue(err)
 
 
+class SafetyCheckTests(Repos):
+    """worktree_has_changes and worktree_has_unpushed on real repositories."""
+
+    def setUp(self):
+        super().setUp()
+        self.wt = os.path.join(self.root, "wt")
+        git(self.checkout, "worktree", "add", "-q", "--detach", self.wt, "origin/main")
+
+    def write(self, name, text="x\n"):
+        with open(os.path.join(self.wt, name), "w") as f:
+            f.write(text)
+
+    def test_clean_worktree_has_no_changes(self):
+        self.assertEqual(gitsource.worktree_has_changes(self.wt), (False, None))
+
+    def test_modified_file_is_a_change(self):
+        self.write("docs/epics/e.md", "# changed\n")
+        self.assertEqual(gitsource.worktree_has_changes(self.wt), (True, None))
+
+    def test_untracked_file_is_a_change(self):
+        self.write("new.txt")
+        self.assertEqual(gitsource.worktree_has_changes(self.wt), (True, None))
+
+    def test_ignored_file_is_not_a_change(self):
+        with open(os.path.join(self.checkout, ".git", "info", "exclude"), "a") as f:
+            f.write("ignored.txt\n")
+        self.write("ignored.txt")
+        self.assertEqual(gitsource.worktree_has_changes(self.wt), (False, None))
+
+    def test_changes_git_failure_is_an_error(self):
+        changed, error = gitsource.worktree_has_changes(os.path.join(self.root, "missing"))
+        self.assertIsNone(changed)
+        self.assertTrue(error)
+
+    def commit_in_wt(self):
+        self.write("work.txt")
+        git(self.wt, "add", "work.txt")
+        git(self.wt, "commit", "-q", "-m", "work")
+
+    def test_detached_head_equal_to_origin_main_has_nothing_unpushed(self):
+        self.assertEqual(gitsource.worktree_has_unpushed(self.wt, "main"), (False, None))
+
+    def test_detached_head_with_a_commit_is_unpushed(self):
+        self.commit_in_wt()
+        self.assertEqual(gitsource.worktree_has_unpushed(self.wt, "main"), (True, None))
+
+    def test_branch_with_no_upstream_and_no_new_commit_is_not_unpushed(self):
+        git(self.wt, "switch", "-q", "-c", "story/x")
+        self.assertEqual(gitsource.worktree_has_unpushed(self.wt, "main"), (False, None))
+
+    def test_branch_with_no_upstream_and_a_commit_is_unpushed(self):
+        git(self.wt, "switch", "-q", "-c", "story/x")
+        self.commit_in_wt()
+        self.assertEqual(gitsource.worktree_has_unpushed(self.wt, "main"), (True, None))
+
+    def test_upstream_equal_and_ahead(self):
+        git(self.wt, "switch", "-q", "-c", "story/x")
+        self.commit_in_wt()
+        git(self.wt, "push", "-q", "-u", "origin", "story/x")
+        self.assertEqual(gitsource.worktree_has_unpushed(self.wt, "main"), (False, None))
+        self.write("more.txt")
+        git(self.wt, "add", "more.txt")
+        git(self.wt, "commit", "-q", "-m", "more")
+        self.assertEqual(gitsource.worktree_has_unpushed(self.wt, "main"), (True, None))
+
+    def test_unpushed_git_failure_is_an_error(self):
+        unpushed, error = gitsource.worktree_has_unpushed(self.wt, "no-such-branch")
+        self.assertIsNone(unpushed)
+        self.assertTrue(error)
+
+
 if __name__ == "__main__":
     unittest.main()

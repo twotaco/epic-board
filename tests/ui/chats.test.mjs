@@ -79,9 +79,10 @@ test('missing fields count as false, and only true counts as true', () => {
   assert.equal(stateOf({ running: 'yes', pending_approval: 1, needs_input: 'true', interrupted: 1 }), 'your-turn')
 })
 
-test('the state words are the six of the spec', () => {
+test('the state words are the six of the spec and the person\'s own Finished', () => {
   assert.deepEqual(STATE_WORDS, {
     'needs-you': 'Needs you', interrupted: 'Interrupted', working: 'Working', stalled: 'Stalled', review: 'Review', 'your-turn': 'Your turn',
+    finished: 'Finished',
   })
   assert.ok(Object.isFrozen(STATE_WORDS))
 })
@@ -573,4 +574,51 @@ test('a started chat is open only when the page has it open', () => {
   assert.equal(cardViewOf(card(), chats, { open: { cardId: 'e.md#A', key: 'k1' } }).open, true)
   assert.equal(cardViewOf(card(), chats, { open: { cardId: 'e.md#B', key: 'k2' } }).open, false)
   assert.equal(cardViewOf(card(), chats, {}).open, false)
+})
+
+// ---- Finished chats (a-worktree-per-card Requirement 5) ----
+
+const finishedRecord = (cardId, key) => ({ ...record(cardId, key), state: 'finished', worktree_path: null, worktree_folder_id: null })
+
+test('a finished record is never read from Crew, and with no other record the list is not asked for', async () => {
+  const gateway = fakeGateway()
+  const result = await read({ backend: fakeBackend(backendAnswer([finishedRecord('c#A', 'k1')])), gateway })
+  assert.deepEqual(result.byKey, { k1: { state: 'finished' } })
+  assert.deepEqual(gateway.calls, [])
+  const mixed = fakeGateway({ rows: [row('k2', { running: true })] })
+  const both = await read({ backend: fakeBackend(backendAnswer([finishedRecord('c#A', 'k1'), { ...record('c#A', 'k2'), state: 'started' }])), gateway: mixed })
+  assert.deepEqual([both.byKey.k1, both.byKey.k2.state], [{ state: 'finished' }, 'working'])
+  assert.deepEqual(mixed.details(), [])
+})
+
+test('a merged pull request link on a row sets nothing for the page to act on', async () => {
+  const merged = { kind: 'change', number: 1, url: 'https://github.com/o/r/pull/1', state: 'merged' }
+  const gateway = fakeGateway({ rows: [row('k1', { source_links: [merged] })], details: { k1: detailWith('assistant') } })
+  const started = { ...record('c#A', 'k1'), state: 'started', worktree_path: '/p--k1', worktree_folder_id: 'wf' }
+  const result = await read({ backend: fakeBackend(backendAnswer([started])), gateway })
+  assert.deepEqual(Object.keys(result.byKey.k1).sort(), ['lastTs', 'messages', 'role', 'roleRead', 'state'])
+})
+
+test('chatsReduce finished marks the record, clears its worktree path and its state read', () => {
+  const started = { ...record('c#A', 'k1'), state: 'started', worktree_path: null }
+  const state = { ...initialChats, records: [started], byKey: { k1: { state: 'working' } } }
+  const next = chatsReduce(state, { kind: 'finished', name: 'k1' })
+  assert.equal(next.records[0].state, 'finished')
+  assert.deepEqual(next.byKey, { k1: { state: 'finished' } })
+  assert.equal(chatsReduce(state, { kind: 'finished', name: 'nope' }), state)
+  // Starting again drops the finished record of the card.
+  const again = chatsReduce(next, { kind: 'started', record: record('c#A', 'k2') })
+  assert.deepEqual(again.records.map((r) => r.key), ['k2'])
+})
+
+test('cardViewOf: a finished record gives mode finished in every column, and a started one wins over it', () => {
+  const chats = { ...initialChats, folder: { id: 'f', reason: null }, records: [finishedRecord('c#A', 'k1')], byKey: { k1: { state: 'finished' } } }
+  for (const status of ['planned', 'in progress', 'done']) {
+    assert.deepEqual(cardViewOf({ id: 'c#A', status }, chats, {}), { mode: 'finished', key: 'k1', name: 'k1', href: '/chat?sid=k1' }, status)
+    assert.equal(cardViewOf({ id: 'c#A', status }, chats, { asking: 'c#A' }).mode, 'question', status)
+    assert.equal(cardViewOf({ id: 'c#A', status }, chats, { flows: { 'c#A': { kind: 'starting', step: 'reserve' } } }).mode, 'starting', status)
+  }
+  const both = { ...chats, records: [finishedRecord('c#A', 'k1'), { ...record('c#A', 'k2'), state: 'started' }], byKey: { k2: { state: 'working' } } }
+  assert.equal(cardViewOf({ id: 'c#A', status: 'done' }, both, {}).key, 'k2')
+  assert.equal(cardViewOf({ id: 'c#B', status: 'done' }, chats, {}).mode, 'plain', 'a Done card with no record stays plain')
 })

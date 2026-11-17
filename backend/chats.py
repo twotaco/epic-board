@@ -14,7 +14,7 @@ CHATS_FILE = "chats.json"
 NAME_PATTERN = re.compile(r"^[A-Za-z0-9._-]{1,193}$")
 RECORD_KEYS = {"card_id", "name", "key", "state", "created", "worktree_path", "worktree_folder_id"}
 _OLD_RECORD_KEYS = {"card_id", "name", "key", "state", "created"}
-STATES = ("reserved", "started")
+STATES = ("reserved", "started", "finished")
 MAX_CARD_ID_CHARS = 400
 SLUG_MAX_CHARS = 60
 BRIEF_NAME_MAX_CHARS = 200
@@ -220,9 +220,9 @@ def _check_records(path, data):
             raise _unreadable(path, "a record has a bad name")
         if not isinstance(created, str) or state not in STATES:
             raise _unreadable(path, "a record has a bad state or time")
-        if state == "started":
+        if state in ("started", "finished"):
             if not (isinstance(key, str) and NAME_PATTERN.match(key)):
-                raise _unreadable(path, "a started record has no key")
+                raise _unreadable(path, "a started or finished record has no key")
             if key in keys:
                 raise _unreadable(path, "two records have the same key")
             keys.add(key)
@@ -236,9 +236,11 @@ def _check_records(path, data):
         if wt_folder_id is not None:
             if not (isinstance(wt_folder_id, str) and NAME_PATTERN.match(wt_folder_id)):
                 raise _unreadable(path, "a record has an invalid worktree_folder_id")
-        if card_id in cards or name in names:
+        # A card holds one record, plus one finished record until its next chat is started.
+        card_slot = (card_id, state == "finished")
+        if card_slot in cards or name in names:
             raise _unreadable(path, "two records have the same card_id or name")
-        cards.add(card_id)
+        cards.add(card_slot)
         names.add(name)
     return data["chats"]
 
@@ -285,17 +287,16 @@ class ChatStore:
                     pass
 
     def started(self):
-        """The started records, in the order they were made, without their state."""
+        """The started and finished records, in the order they were made, with every field."""
         with self._lock:
-            return [{"card_id": r["card_id"], "name": r["name"], "key": r["key"], "created": r["created"]}
-                    for r in self._load() if r["state"] == "started"]
+            return [dict(r) for r in self._load() if r["state"] in ("started", "finished")]
 
     def reserve(self, card_id):
         """The record for a card: the existing reserved one, or a new reserved one."""
         with self._lock:
             records = self._load()
             for record in records:
-                if record["card_id"] == card_id:
+                if record["card_id"] == card_id and record["state"] != "finished":
                     if record["state"] == "started":
                         raise ChatError("chat_exists", 409, "This story already has a chat.")
                     return dict(record)
@@ -316,7 +317,7 @@ class ChatStore:
             for record in records:
                 if record["name"] != name:
                     continue
-                if record["state"] == "started":
+                if record["state"] in ("started", "finished"):
                     if record["key"] == key:
                         return dict(record)
                     raise ChatError("chat_exists", 409, "This story already has a chat.")
@@ -325,6 +326,25 @@ class ChatStore:
                 record["key"], record["state"] = key, "started"
                 if worktree_folder_id is not None:
                     record["worktree_folder_id"] = worktree_folder_id
+                records = [r for r in records if not (r["card_id"] == record["card_id"] and r["state"] == "finished")]
+                self._save(records)
+                return dict(record)
+            raise ChatError("chat_not_found", 404, "There is no chat record with that name.")
+
+    def mark_finished(self, name):
+        """Set a started record to finished. Refused while its worktree_path is set."""
+        with self._lock:
+            records = self._load()
+            for record in records:
+                if record["name"] != name:
+                    continue
+                if record["state"] == "finished":
+                    return dict(record)
+                if record["state"] != "started":
+                    raise ChatError("chat_not_started", 409, "This story has no started chat to finish.")
+                if record["worktree_path"]:
+                    raise ChatError("worktree_not_removed", 409, "The worktree has not been removed yet.")
+                record["state"] = "finished"
                 self._save(records)
                 return dict(record)
             raise ChatError("chat_not_found", 404, "There is no chat record with that name.")
