@@ -8,7 +8,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { h, findAll, textOf } from './support.mjs'
-import { createBoard } from '../../ui/index.mjs'
+import { createBoard, FINISH_NOTE } from '../../ui/index.mjs'
 
 const PLAN_URL = '/apps/epic-board/api/plan'
 const BACKEND = '/apps/epic-board/api'
@@ -1937,7 +1937,7 @@ const WT_PATH = '/home/alice/my-project--epic-board-aaaa1111'
 const WT_FOLDER_ID = 'wf_123'
 const WRECORD = { card_id: ALPHA, name: NAME, key: NAME, created: 't', state: 'started', worktree_path: WT_PATH, worktree_folder_id: WT_FOLDER_ID }
 const PLAIN = { ...WRECORD, worktree_path: null, worktree_folder_id: null }
-const NOTE = 'This story is finished and its working folder was removed. For more work on this story, use Start again on its card in Epic Board to open a new chat.'
+const NOTE = 'This session is finished and its working folder was removed. For more work on this story, use Restart session on its card in Epic Board to open a new chat.'
 const mergedPr = { kind: 'change', number: 1, url: 'https://github.com/o/r/pull/1', state: 'merged' }
 
 // A page with one started chat whose conductor is working (so no row of it is read).
@@ -1949,39 +1949,39 @@ async function startedPage(record = WRECORD) {
 }
 const backendCalls = (page) => page.chatFetch.calls.map(([url, options]) => `${options.method} ${normalizeUrl(url).slice(BACKEND.length)}`)
 const lastBackend = (page) => page.chatFetch.calls.length - 1
-const asking = (page) => findAll(page.tree(), (n) => n.props?.role === 'group' && n.props['aria-label'] === 'Finish this story')[0]
+const asking = (page) => findAll(page.tree(), (n) => n.props?.role === 'group' && n.props['aria-label'] === 'Finish this session')[0]
 
 test('finish: a started card shows a Finish button; a card with no chat and a finished card do not', async () => {
   const page = await startedPage()
-  assert.ok(buttonNamed(page, 'Finish'))
+  assert.ok(buttonNamed(page, 'Finish session'))
   const none = await ready({}, [])
-  assert.equal(buttonNamed(none, 'Finish'), undefined)
+  assert.equal(buttonNamed(none, 'Finish session'), undefined)
   const done = await ready({}, [{ ...WRECORD, state: 'finished', worktree_path: null }])
-  assert.equal(buttonNamed(done, 'Finish'), undefined)
+  assert.equal(buttonNamed(done, 'Finish session'), undefined)
 })
 
 test('finish: the confirm step names the path and the ignored files, warns about unticked tasks, and changes nothing', async () => {
   const page = await startedPage()
   const callsBefore = [page.chatFetch.calls.length, page.gateway.calls.length]
-  click(page, 'Finish')
+  click(page, 'Finish session')
   const group = asking(page)
-  assert.ok(group, 'a group named "Finish this story"')
+  assert.ok(group, 'a group named "Finish this session"')
   assert.ok(textOf(group).includes(WT_PATH), 'the path as literal text')
   assert.match(textOf(group), /iles that git ignores.*\.env.*node_modules.*deleted/)
   assert.match(textOf(group), /Not all tasks are ticked/)
   assert.doesNotMatch(textOf(group), /pull request/i)
-  assert.deepEqual(findAll(group, (n) => n.type === 'button').map(textOf), ['Finish', 'Cancel'])
+  assert.deepEqual(findAll(group, (n) => n.type === 'button').map(textOf), ['Finish session', 'Cancel'])
   assert.equal(findAll(group, (n) => n.type === 'a').length, 0, 'the path is not a link')
   assert.deepEqual([page.chatFetch.calls.length, page.gateway.calls.length], callsBefore, 'nothing is called before the person confirms')
   click(page, 'Cancel')
   assert.equal(asking(page), undefined)
-  assert.ok(buttonNamed(page, 'Finish'))
+  assert.ok(buttonNamed(page, 'Finish session'))
   assert.deepEqual([page.chatFetch.calls.length, page.gateway.calls.length], callsBefore)
 })
 
 test('finish: Escape closes the confirm step like Cancel', async () => {
   const page = await startedPage()
-  click(page, 'Finish')
+  click(page, 'Finish session')
   asking(page).props.onKeyDown({ key: 'Escape' })
   assert.equal(asking(page), undefined)
 })
@@ -1990,17 +1990,17 @@ test('finish: no tasks warning when every task is ticked, and a worktree-off rec
   const page = await ready({}, [{ ...PLAIN, card_id: 'one.md#Card Beta', name: 'epic-board-bbbb2222', key: 'epic-board-bbbb2222' }])
   page.gateway.answer('/api/chat/slots?crew=all', [row('epic-board-bbbb2222', { running: true })])
   await flush()
-  click(page, 'Finish')
+  click(page, 'Finish session')
   const group = asking(page)
   assert.doesNotMatch(textOf(group), /Not all tasks are ticked/)
-  assert.match(textOf(group), /marks the story finished\. No folder is touched/)
+  assert.match(textOf(group), /marks the session finished\. No folder is touched/)
   assert.doesNotMatch(textOf(group), /ignores/)
 })
 
 test('finish: the sequence is worktree, folder PATCH, finished, then one note that is not a turn', async () => {
   const page = await startedPage()
-  click(page, 'Finish')
-  click(page, 'Finish')
+  click(page, 'Finish session')
+  click(page, 'Finish session')
   await flush()
   assert.equal(backendCalls(page)[lastBackend(page)], `DELETE /chats/${NAME}/worktree`)
   page.chatFetch.answer(lastBackend(page), 200, { ok: true })
@@ -2016,17 +2016,18 @@ test('finish: the sequence is worktree, folder PATCH, finished, then one note th
   page.gateway.answer(`/api/chat/slots/${NAME}/note`, {})
   await flush()
   assert.ok(!page.gateway.calls.some(([verb, path]) => verb === 'post' && path === '/api/chat'), 'POST /api/chat is never called by Finish')
-  assert.match(page.text(), /Finished/)
-  assert.equal(buttonNamed(page, 'Finish'), undefined)
-  assert.ok(buttonNamed(page, 'Start again'))
-  assert.ok(anchors(page).some((a) => a.props.href === `/chat?sid=${NAME}` && textOf(a) === 'Open chat'))
+  assert.match(page.text(), /Session finished/)
+  assert.equal(buttonNamed(page, 'Finish session'), undefined)
+  assert.ok(buttonNamed(page, 'Restart session'))
+  assert.ok(anchors(page).some((a) => a.props.href === `/chat?sid=${NAME}` && a.props['data-card-id'] === ALPHA), 'the card name links to the old chat')
+  assert.ok(!anchors(page).some((a) => textOf(a) === 'Open chat'))
 })
 
 test('finish: a note that fails, with 404 or any error, leaves the card Finished', async () => {
   for (const error of [httpError(404), new Error('boom')]) {
     const page = await startedPage(PLAIN)
-    click(page, 'Finish')
-    click(page, 'Finish')
+    click(page, 'Finish session')
+    click(page, 'Finish session')
     await flush()
     assert.equal(backendCalls(page)[lastBackend(page)], `POST /chats/${NAME}/finished`, 'a worktree-off record only marks')
     assert.ok(!backendCalls(page).some((call) => call.includes('/worktree')))
@@ -2034,8 +2035,8 @@ test('finish: a note that fails, with 404 or any error, leaves the card Finished
     await flush()
     page.gateway.fail(`/api/chat/slots/${NAME}/note`, error)
     await flush()
-    assert.match(page.text(), /Finished/)
-    assert.ok(buttonNamed(page, 'Start again'))
+    assert.match(page.text(), /Session finished/)
+    assert.ok(buttonNamed(page, 'Restart session'))
   }
 })
 
@@ -2044,8 +2045,8 @@ test('finish: a refusal shows "Worktree kept" with its reason as a status, and R
     ['worktree_has_unpushed', `The worktree has commits that are not pushed at ${WT_PATH}.`]]
   for (const [code, message] of reasons) {
     const page = await startedPage()
-    click(page, 'Finish')
-    click(page, 'Finish')
+    click(page, 'Finish session')
+    click(page, 'Finish session')
     await flush()
     page.chatFetch.answer(lastBackend(page), 409, { error: { code, message } })
     await flush()
@@ -2064,15 +2065,15 @@ test('finish: a refusal shows "Worktree kept" with its reason as a status, and R
     await flush()
     page.chatFetch.answer(lastBackend(page), 200, { state: 'finished' })
     await flush()
-    assert.match(page.text(), /Finished/)
+    assert.match(page.text(), /Session finished/)
     assert.doesNotMatch(page.text(), /Worktree kept/)
   }
 })
 
 test('finish: the force URL joins the project with &', async () => {
   const page = await startedPage()
-  click(page, 'Finish')
-  click(page, 'Finish')
+  click(page, 'Finish session')
+  click(page, 'Finish session')
   await flush()
   page.chatFetch.answer(lastBackend(page), 409, { error: { code: 'worktree_has_changes', message: 'changes' } })
   await flush()
@@ -2085,26 +2086,26 @@ test('finish: the force URL joins the project with &', async () => {
 
 test('finish: any other failure shows the reason, changes nothing, and Finish works again', async () => {
   const page = await startedPage()
-  click(page, 'Finish')
-  click(page, 'Finish')
+  click(page, 'Finish session')
+  click(page, 'Finish session')
   await flush()
   page.chatFetch.answer(lastBackend(page), 409, { error: { code: 'worktree_remove_failed', message: 'not a worktree' } })
   await flush()
   assert.match(page.text(), /Could not finish: not a worktree/)
   assert.ok(!page.gateway.calls.some(([verb]) => verb === 'patch'), 'no folder PATCH')
   assert.ok(!backendCalls(page).some((call) => call.endsWith('/finished')), 'not marked finished')
-  assert.ok(buttonNamed(page, 'Finish'))
+  assert.ok(buttonNamed(page, 'Finish session'))
 })
 
 test('finish: a failure to mark the record shows the reason and Finish works again', async () => {
   const page = await startedPage(PLAIN)
-  click(page, 'Finish')
-  click(page, 'Finish')
+  click(page, 'Finish session')
+  click(page, 'Finish session')
   await flush()
   page.chatFetch.answer(lastBackend(page), 409, { error: { code: 'worktree_not_removed', message: 'The worktree has not been removed yet.' } })
   await flush()
   assert.match(page.text(), /Could not finish: The worktree has not been removed yet\./)
-  assert.ok(buttonNamed(page, 'Finish'))
+  assert.ok(buttonNamed(page, 'Finish session'))
   assert.equal(page.gateway.calls.some(([, path]) => path.endsWith('/note')), false, 'no note for a story that is not finished')
 })
 
@@ -2118,21 +2119,21 @@ test('finish: a merged pull request link causes no call; the board never removes
   await flush()
   assert.ok(backendCalls(page).every((call) => call.startsWith('GET /chats')), backendCalls(page).join(', '))
   assert.ok(page.gateway.calls.every(([verb]) => verb === 'get'))
-  assert.ok(buttonNamed(page, 'Finish'))
+  assert.ok(buttonNamed(page, 'Finish session'))
 })
 
-test('finish: a finished record shows the badge, the chat link and Start again, in Planned and in Done', async () => {
+test('finish: a finished record shows the badge, Restart session and the name link, in Planned and in Done', async () => {
   const finished = (card, name) => ({ card_id: card, name, key: name, created: 't', state: 'finished', worktree_path: null, worktree_folder_id: null })
   const page = await ready({}, [finished(ALPHA, NAME), finished('one.md#Card Beta', 'epic-board-bbbb2222')])
   assert.equal(page.gateway.calls.length, 0, 'the state of a finished chat is not read')
   const badges = findAll(page.tree(), (n) => n.props?.['data-state'] === 'finished')
-  assert.deepEqual(badges.map(textOf), ['Finished', 'Finished'])
+  assert.deepEqual(badges.map(textOf), ['Session finished', 'Session finished'])
   assert.deepEqual(anchors(page).map((a) => a.props.href).filter((href) => href.startsWith('/chat')).sort(),
     [`/chat?sid=${NAME}`, '/chat?sid=epic-board-bbbb2222'])
-  assert.equal(findAll(page.tree(), (n) => n.type === 'button' && textOf(n) === 'Start again').length, 2)
-  assert.equal(buttonNamed(page, 'Finish'), undefined)
+  assert.equal(findAll(page.tree(), (n) => n.type === 'button' && textOf(n) === 'Restart session').length, 2)
+  assert.equal(buttonNamed(page, 'Finish session'), undefined)
   // Start again on the Done card opens the start question.
-  findAll(page.tree(), (n) => n.type === 'button' && textOf(n) === 'Start again')[1].props.onClick()
+  findAll(page.tree(), (n) => n.type === 'button' && textOf(n) === 'Restart session')[1].props.onClick()
   assert.match(page.text(), /Start a conductor on this story\?/)
 })
 
@@ -2142,6 +2143,20 @@ test('finish: a card with a finished and a started record shows the started one'
   page.gateway.answer('/api/chat/slots?crew=all', [row(NAME, { running: true })])
   await flush()
   assert.match(page.text(), /Working/)
-  assert.ok(buttonNamed(page, 'Finish'))
-  assert.equal(buttonNamed(page, 'Start again'), undefined)
+  assert.ok(buttonNamed(page, 'Finish session'))
+  assert.equal(buttonNamed(page, 'Restart session'), undefined)
+})
+
+test('finish: the name of an ended card opens its old chat, and no "Open chat" link is drawn', async () => {
+  const finished = { card_id: ALPHA, name: NAME, key: NAME, created: 't', state: 'finished', worktree_path: null, worktree_folder_id: null }
+  const page = await ready({}, [finished])
+  const link = anchors(page).find((a) => a.props['data-card-id'] === ALPHA)
+  assert.ok(link, 'the card name is a link')
+  assert.equal(link.props.href, `/chat?sid=${NAME}`)
+  assert.ok(!anchors(page).some((a) => textOf(a) === 'Open chat'))
+  assert.equal(findAll(page.tree(), (n) => n.type === 'p' && /Open chat/.test(textOf(n))).length, 0)
+})
+
+test('finish: the note text is exact', () => {
+  assert.equal(FINISH_NOTE, 'This session is finished and its working folder was removed. For more work on this story, use Restart session on its card in Epic Board to open a new chat.')
 })

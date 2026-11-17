@@ -206,23 +206,23 @@ Nothing runs by itself. The code of the old auto cleanup goes: the `prTerminated
 
 **State.** `uiReduce` gains `finish-ask` and `finish-cancel` (which card has its confirm step open) next to `ask`. The existing `worktree-kept` action carries the refusal `reason` as well as the path, and shows for both refusals.
 
-**Card views.** `cardViewOf` picks the card's record: a `started` one when there is one, else a `finished` one. A finished record gives `{mode: 'finished', key, name, href}`. When the card is asking (`ui.asking`), a finished card shows the start question, as a startable card does. `renderChatPart` draws, for a card in mode `chat`, `restoring`, `not-open`, `resuming` or `resume-failed`, a "Finish" button; in mode `finished` the badge "Finished" (`STATE_WORDS.finished`, variant `muted`), the chat link and a "Start again" button that calls `actions.ask(card.id)`. The `started` set for `columnsOf` holds only cards with a non-finished record, so a finished planned card stays in Planned. `readChats` does not read the state of a finished record: it sets `byKey[key] = {state: 'finished'}`.
+**Card views.** `cardViewOf` picks the card's record: a `started` one when there is one, else a `finished` one. A finished record gives `{mode: 'finished', key, name, href}`. When the card is asking (`ui.asking`), a finished card shows the start question, as a startable card does. `renderChatPart` draws, for a card in mode `chat`, `restoring`, `not-open`, `resuming` or `resume-failed`, a "Finish session" button; in mode `finished` the badge "Session finished" (`STATE_WORDS.finished`, variant `muted`), the card name as the link to the ended chat and a "Restart session" button that calls `actions.ask(card.id)`. The `started` set for `columnsOf` holds only cards with a non-finished record, so a finished planned card stays in Planned. `readChats` does not read the state of a finished record: it sets `byKey[key] = {state: 'finished'}`.
 
-**Confirm step.** A `group` named "Finish this story" with the text of Requirement 5, criterion 2, a "Finish" button and a "Cancel" button. Escape cancels, as the start question does. The tasks warning reads `card.tasks`: shown when `done < total`.
+**Confirm step.** A `group` named "Finish this session" with the text of Requirement 5, criterion 2, a "Finish session" button and a "Cancel" button. Escape cancels, as the start question does. The tasks warning reads `card.tasks`: shown when `done < total`.
 
 **Finish sequence** (`actions.finish(name)`):
 
 1. When the record has a `worktree_path`: `DELETE .../chats/<name>/worktree`. On 409 `worktree_has_changes` or `worktree_has_unpushed`: show "Worktree kept: `<reason>`" with "Remove anyway" and stop. On another failure: show the reason on the card and stop.
 2. When the record has a `worktree_folder_id`: `PATCH /api/chat/folders/<id>` with `{"project_dir": ""}`. A failure is ignored. Crew's own cleanup of empty folders keeps any folder with `project_dir` set (`chat_folder_cleanup.py`, `_KEEP_FIELDS`), so clearing it lets the person remove the folder.
-3. `POST .../chats/<name>/finished`. On failure: show the reason; "Finish" works again, and step 1 is then skipped because `worktree_path` is `null`.
+3. `POST .../chats/<name>/finished`. On failure: show the reason; "Finish session" works again, and step 1 is then skipped because `worktree_path` is `null`.
 4. Update the record in the chats state to `finished`.
-5. `gateway.post('/api/chat/slots/<key>/note', {content: <note>, source: 'epic-board'})`. The note is the same text every time: "This story is finished and its working folder was removed. For more work on this story, use Start again on its card in Epic Board to open a new chat." A failure, including a 404 for a closed chat, skips the note; Finish carries on and the card shows "Finished".
+5. `gateway.post('/api/chat/slots/<key>/note', {content: <note>, source: 'epic-board'})`. The note is the same text every time: "This session is finished and its working folder was removed. For more work on this story, use Restart session on its card in Epic Board to open a new chat." A failure, including a 404 for a closed chat, skips the note; Finish carries on and the card shows "Session finished".
 
 **The note is for the person, not the agent.** `POST /api/chat/slots/{slot}/note` (`chat_api/slot_note.py`, `api_chat_slot_note`) starts no agent turn. It writes a visible line in the transcript and a context entry that Crew prepends to the person's next message, once, and drops after 24 hours. Two things follow. The text is written as a statement of fact and asks for nothing, as that function's own documentation requires. And the design does not rely on the agent ignoring it: the board never posts it through `POST /api/chat`, the route that starts a turn. It does not use `sendBrief`. The agent may see the line with the person's next message; nothing in it is an instruction, and it must not act on it. The board posts it once, at Finish, because it cannot catch typing in a chat.
 
 "Remove anyway" runs the same sequence with `?force=true`.
 
-**Start again.** The question and `startStory` are unchanged. `reserve` ignores the finished record and creates a new one; `mark_started` then deletes the finished one. `reduce('started')` already drops older records of the same card.
+**Restart session.** The question and `startStory` are unchanged. `reserve` ignores the finished record and creates a new one; `mark_started` then deletes the finished one. `reduce('started')` already drops older records of the same card.
 
 ### The Projects view (`ui/index.mjs`)
 
@@ -262,7 +262,7 @@ At least 100 iterations with the seed printed on failure.
 | Finish | Worktree has commits that are not pushed | Same, with that reason |
 | Finish | Git cannot remove the worktree for another reason | The reason on the card; nothing is changed |
 | Finish | Subfolder PATCH fails | Silently skipped; the chat is still marked finished |
-| Finish | Marking finished fails | The reason on the card; "Finish" works again and skips the removal |
+| Finish | Marking finished fails | The reason on the card; "Finish session" works again and skips the removal |
 | Finish | Note into the chat fails | Silently skipped; the card is finished |
 | Record | Old record without new fields | Fields treated as `null`; backward compatible |
 
@@ -288,7 +288,7 @@ The earlier "no finished" comment on `STATE_WORDS` in `ui/index.mjs` stops being
 
 - **`tests/ui/setup.test.mjs`**: Worktree checkbox shown per ticked folder; default ticked; value persists across untick/retick.
 - **`tests/ui/start.test.mjs`**: Start question shows "Works in its own worktree" vs "Works in the shared checkout" based on project setting; start sequence calls `POST /api/chat/folders` before `POST /api/chat/slots` when worktree on; `folder_id` in slots call is the subfolder id; `started` body includes `worktree_folder_id`.
-- **`tests/ui/board.test.mjs`**: Finish button on a started card with and without a worktree; the confirm step names the path and the ignored-files line, and the tasks warning shows only when tasks are not all ticked; nothing is called before the person confirms; "Worktree kept" with the reason for both refusals; "Remove anyway" force-removes; the sequence order (worktree, folder PATCH, finished, note); a failed note does not undo it; the badge "Finished"; "Start again" on a finished card in every column including Done; no automatic removal when a PR link is merged.
+- **`tests/ui/board.test.mjs`**: "Finish session" button on a started card with and without a worktree; the confirm step names the path and the ignored-files line, and the tasks warning shows only when tasks are not all ticked; nothing is called before the person confirms; "Worktree kept" with the reason for both refusals; "Remove anyway" force-removes; the sequence order (worktree, folder PATCH, finished, note); a failed note does not undo it; the badge "Session finished"; "Restart session" on a finished card in every column including Done; no automatic removal when a PR link is merged.
 
 | Req | Backend | Page | Manual |
 |---|---|---|---|
@@ -296,7 +296,7 @@ The earlier "no finished" comment on `STATE_WORDS` in `ui/index.mjs` stops being
 | 2 | gitsource, server | start | Worktree created beside checkout; conductor opens in it |
 | 3 | chats (brief) | — | Brief in conductor chat has setup and catch-up steps |
 | 4 | — | — | Reopen card; worktree reused |
-| 5 | server, gitsource (finish, safety checks) | board | Finish removes the worktree and shows "Finished"; Start again starts clean |
+| 5 | server, gitsource (finish, safety checks) | board | Finish removes the worktree and shows "Session finished"; Restart session starts clean |
 | 6 | server (error paths) | start | Error shown; retry starts fresh |
 
 ## Design Decisions
@@ -320,4 +320,4 @@ The earlier "no finished" comment on `STATE_WORDS` in `ui/index.mjs` stops being
 
 **C. Resolved.** `/api/chat/folders` in `app.json` covers `POST` requests (apps can create folders). No separate entry is needed. The board creates one `owner_app` subfolder per started card. `DELETE /api/chat/folders/<id>` is refused for apps (see Open Question B), so no delete permission is exercised.
 
-**D. Resolved.** The note after Finish is posted with `POST /api/chat/slots/<key>/note` (`chat_api/slot_note.py`, `api_chat_slot_note`), which starts no agent turn. The board already holds the grant: `permissions.api` in `app.json` lists `/api/chat/slots`, the prefix the board's `.../resume` call uses. The slot is one the board created, which is what Crew's ownership check for app callers looks for (`deny_app_slot_session_access`). The function looks the slot up in `state._slots` and answers `slot_not_found` (404) when it is missing, so a chat the person has closed gets no note and nothing is written. When the chat is open but a turn is running, the note is held durably and written at the end of that turn (`visibleDeferred` true in the answer). The board treats a 404, and any other failure, the same way: it skips the note and Finish carries on. The card still shows "Finished".
+**D. Resolved.** The note after Finish is posted with `POST /api/chat/slots/<key>/note` (`chat_api/slot_note.py`, `api_chat_slot_note`), which starts no agent turn. The board already holds the grant: `permissions.api` in `app.json` lists `/api/chat/slots`, the prefix the board's `.../resume` call uses. The slot is one the board created, which is what Crew's ownership check for app callers looks for (`deny_app_slot_session_access`). The function looks the slot up in `state._slots` and answers `slot_not_found` (404) when it is missing, so a chat the person has closed gets no note and nothing is written. When the chat is open but a turn is running, the note is held durably and written at the end of that turn (`visibleDeferred` true in the answer). The board treats a 404, and any other failure, the same way: it skips the note and Finish carries on. The card still shows "Session finished".
