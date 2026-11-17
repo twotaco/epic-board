@@ -1091,10 +1091,12 @@ class WorktreeServerTests(unittest.TestCase):
     def test_delete_worktree_route_success(self):
         store = self._store()
         record = store.reserve("#s")
-        store.update_worktree_path(record["name"], "/parent/p--epic-board-00000001")
+        store.update_worktree_path(record["name"], self.root)
         service = server.ChatService(store, "f_1", None, SECRET, FakeHolder(), clock=lambda: NOW,
                                      repository="/r/p", worktree=True)
-        with mock.patch.object(server, "remove_worktree", return_value=(True, None)) as rw:
+        with mock.patch.object(server, "worktree_has_changes", return_value=(False, None)), \
+                mock.patch.object(server, "worktree_has_unpushed", return_value=(False, None)), \
+                mock.patch.object(server, "remove_worktree", return_value=(True, None)) as rw:
             status, resp = self._call(service, "DELETE",
                                       f"/chats/{record['name']}/worktree")
         self.assertEqual(status, 200)
@@ -1105,10 +1107,10 @@ class WorktreeServerTests(unittest.TestCase):
     def test_delete_worktree_has_changes_is_409(self):
         store = self._store()
         record = store.reserve("#s")
-        store.update_worktree_path(record["name"], "/parent/p--wt")
+        store.update_worktree_path(record["name"], self.root)
         service = server.ChatService(store, "f_1", None, SECRET, FakeHolder(), clock=lambda: NOW,
                                      repository="/r/p", worktree=True)
-        with mock.patch.object(server, "remove_worktree", return_value=(False, "uncommitted")):
+        with mock.patch.object(server, "worktree_has_changes", return_value=(True, None)):
             status, resp = self._call(service, "DELETE",
                                       f"/chats/{record['name']}/worktree")
         self.assertEqual(status, 409)
@@ -1117,7 +1119,7 @@ class WorktreeServerTests(unittest.TestCase):
     def test_delete_worktree_force_param(self):
         store = self._store()
         record = store.reserve("#s")
-        store.update_worktree_path(record["name"], "/parent/p--wt")
+        store.update_worktree_path(record["name"], self.root)
         service = server.ChatService(store, "f_1", None, SECRET, FakeHolder(), clock=lambda: NOW,
                                      repository="/r/p", worktree=True)
         calls = []
@@ -1273,6 +1275,136 @@ class WorktreeServerTests(unittest.TestCase):
             resp = json.load(e)
             status = e.code
         self.assertEqual(status, 400, resp)
+
+
+class FinishServerTests(unittest.TestCase):
+    """Group 5: the checks before a worktree is removed, POST /finished, GET /chats fields, Done cards."""
+
+    def setUp(self):
+        self.root = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.root, True)
+        self.data = os.path.join(self.root, "data")
+        os.makedirs(self.data)
+        self.names = iter(f"epic-board-{i:08x}" for i in range(1, 100))
+
+    def _store(self):
+        return ChatStore(self.data, new_name=lambda: next(self.names), clock=lambda: "t")
+
+    def _call(self, service, method, path, body=b""):
+        return service.handle(method, path, sign(method, path, body), body)
+
+    def _post(self, service, path, body_dict):
+        raw = json.dumps(body_dict).encode()
+        return service.handle("POST", path, sign("POST", path, raw), raw)
+
+    def _started(self, store, card="#s", path=None):
+        record = store.reserve(card)
+        if path:
+            store.update_worktree_path(record["name"], path)
+        store.mark_started(record["name"], "key-1")
+        return record["name"]
+
+    def _service_for(self, store, holder=None):
+        return server.ChatService(store, "f_1", None, SECRET, holder or FakeHolder(), clock=lambda: NOW,
+                                  repository="/r/p", worktree=True)
+
+    def _delete(self, service, name, query=""):
+        path = f"/chats/{name}/worktree{query}"
+        return service.handle("DELETE", path, sign("DELETE", path), b"")
+
+    def test_unpushed_commits_are_refused_and_force_skips_both_checks(self):
+        store = self._store()
+        name = self._started(store, path=self.root)
+        service = self._service_for(store)
+        with mock.patch.object(server, "main_branch", return_value="main"), \
+                mock.patch.object(server, "worktree_has_changes", return_value=(False, None)), \
+                mock.patch.object(server, "worktree_has_unpushed", return_value=(True, None)), \
+                mock.patch.object(server, "remove_worktree", return_value=(True, None)) as rw:
+            status, resp = self._delete(service, name)
+            self.assertEqual((status, resp["error"]["code"]), (409, "worktree_has_unpushed"))
+            rw.assert_not_called()
+            status, _ = self._delete(service, name, "?force=true")
+        self.assertEqual(status, 200)
+        rw.assert_called_once_with("/r/p", self.root, force=True)
+
+    def test_a_failing_check_is_a_refusal_with_gits_text(self):
+        store = self._store()
+        name = self._started(store, path=self.root)
+        service = self._service_for(store)
+        with mock.patch.object(server, "worktree_has_changes", return_value=(None, "git broke")):
+            status, resp = self._delete(service, name)
+        self.assertEqual((status, resp["error"]["code"], resp["error"]["message"]),
+                         (409, "worktree_has_changes", "git broke"))
+
+    def test_other_remove_failure_is_worktree_remove_failed(self):
+        store = self._store()
+        name = self._started(store, path=self.root)
+        service = self._service_for(store)
+        with mock.patch.object(server, "main_branch", return_value="main"), \
+                mock.patch.object(server, "worktree_has_changes", return_value=(False, None)), \
+                mock.patch.object(server, "worktree_has_unpushed", return_value=(False, None)), \
+                mock.patch.object(server, "remove_worktree", return_value=(False, "not a worktree")):
+            status, resp = self._delete(service, name)
+        self.assertEqual((status, resp["error"]["code"]), (409, "worktree_remove_failed"))
+        self.assertEqual(store.get_record(name)["worktree_path"], self.root)
+
+    def test_folder_gone_from_disk_clears_the_path(self):
+        store = self._store()
+        gone = os.path.join(self.root, "gone")
+        name = self._started(store, path=gone)
+        with mock.patch.object(server, "remove_worktree") as rw:
+            status, resp = self._delete(self._service_for(store), name)
+        self.assertEqual((status, resp), (200, {"ok": True}))
+        rw.assert_not_called()
+        self.assertIsNone(store.get_record(name)["worktree_path"])
+
+    def test_post_finished_marks_is_idempotent_and_refuses_while_a_worktree_is_set(self):
+        store = self._store()
+        name = self._started(store, path=self.root)
+        service = self._service_for(store)
+        path = f"/chats/{name}/finished"
+        status, resp = service.handle("POST", path, sign("POST", path), b"")
+        self.assertEqual((status, resp["error"]["code"]), (409, "worktree_not_removed"))
+        store.update_worktree_path(name, None)
+        for _ in range(2):
+            status, resp = service.handle("POST", path, sign("POST", path), b"")
+            self.assertEqual((status, resp["state"], resp["key"]), (200, "finished", "key-1"))
+        status, resp = service.handle("POST", "/chats/epic-board-nope/finished",
+                                      sign("POST", "/chats/epic-board-nope/finished"), b"")
+        self.assertEqual((status, resp["error"]["code"]), (404, "chat_not_found"))
+
+    def test_post_finished_on_a_reserved_record_is_chat_not_started(self):
+        store = self._store()
+        name = store.reserve("#s")["name"]
+        path = f"/chats/{name}/finished"
+        status, resp = self._service_for(store).handle("POST", path, sign("POST", path), b"")
+        self.assertEqual((status, resp["error"]["code"]), (409, "chat_not_started"))
+
+    def test_get_chats_returns_the_worktree_fields_and_state(self):
+        store = self._store()
+        name = self._started(store, path=self.root)
+        status, resp = self._call(self._service_for(store), "GET", "/chats")
+        self.assertEqual(status, 200)
+        self.assertEqual(resp["chats"], [{"card_id": "#s", "name": name, "key": "key-1", "created": "t",
+                                          "state": "started", "worktree_path": self.root,
+                                          "worktree_folder_id": None}])
+
+    def test_done_card_is_refused_unless_it_has_a_finished_record(self):
+        class DoneHolder(FakeHolder):
+            def request(self):
+                kind, body = super().request()
+                body["groups"][0]["cards"][0]["status"] = "done"
+                return kind, body
+        store = self._store()
+        service = self._service_for(store, DoneHolder())
+        with mock.patch.object(server, "create_worktree", return_value=(True, None)):
+            status, resp = self._post(service, "/chats", {"card_id": "#s"})
+            self.assertEqual((status, resp["error"]["code"]), (409, "card_done"))
+            name = self._started(store)
+            store.mark_finished(name)
+            status, resp = self._post(service, "/chats", {"card_id": "#s"})
+        self.assertEqual(status, 200)
+        self.assertNotEqual(resp["name"], name)
 
 
 if __name__ == "__main__":

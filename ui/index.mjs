@@ -303,7 +303,8 @@ export function createPoller({
 
 // ---- Chats: the state of each started chat, and starting and resuming one ----
 
-// The states a chat can show. There is no "finished": a story is done only when main says so.
+// The states a chat can show. "Finished" is the person's own mark (the Finish button), never read from
+// Crew: a story is done only when main says so.
 // "Review" and "Your turn" are the words for a card whose conductor is waiting for the person; a Review
 // badge says "Review #N" or "Checks failed #N" (see `reviewWord`).
 export const STATE_WORDS = Object.freeze({
@@ -313,6 +314,7 @@ export const STATE_WORDS = Object.freeze({
   stalled: 'Stalled',
   review: 'Review',
   'your-turn': 'Your turn',
+  finished: 'Finished',
 })
 
 // How long a chat that Crew does not know is "restoring" before the card offers to resume it.
@@ -457,11 +459,14 @@ export async function readChats({ backend, gateway, previous = initialChats, now
   onRecords({ chats: records, folder, recordsError: null })
   const byKey = {}
   const missingSince = {}
-  if (records.length === 0) return { at: now(), folder, recordsError: null, chats: [], byKey, missingSince }
+  // A finished chat is the person's mark: its state is never read from Crew.
+  for (const record of records) if (record.state === 'finished') byKey[record.key] = { state: 'finished' }
+  const open = records.filter((record) => record.state !== 'finished')
+  if (open.length === 0) return { at: now(), folder, recordsError: null, chats: records, byKey, missingSince }
 
   const list = await gateway.get(CHAT_LIST, { signal })
   if (!Array.isArray(list)) throw new Error('The chat list is not a list.')
-  const ours = new Set(records.map((record) => record.key))
+  const ours = new Set(open.map((record) => record.key))
   const rows = new Map()
   for (const row of list) if (isObject(row) && ours.has(row.key)) rows.set(row.key, row)
 
@@ -478,7 +483,7 @@ export async function readChats({ backend, gateway, previous = initialChats, now
     missingSince[key] = typeof previous.missingSince?.[key] === 'number' ? previous.missingSince[key] : null
   }
 
-  for (const record of records) {
+  for (const record of open) {
     const key = record.key
     const row = rows.get(key)
     if (row) {
@@ -504,13 +509,6 @@ export async function readChats({ backend, gateway, previous = initialChats, now
       const state = stateOf(row, role, workers, now())
       byKey[key] = { state, lastTs: row.last_ts, messages: row.messages, role, roleRead }
       if (state === 'review') byKey[key].review = reviewOf(row)
-      const hasWorktree = typeof record.worktree_path === 'string' && record.worktree_path !== ''
-      if (hasWorktree) {
-        const rowLinks = Array.isArray(row.source_links) ? row.source_links : []
-        const hasTerminal = rowLinks.some((link) => isObject(link) && (link.state === 'merged' || link.state === 'closed'))
-        const hasActive = rowLinks.some((link) => isObject(link) && (link.state === 'open' || link.state === 'draft'))
-        if (hasTerminal && !hasActive) byKey[key].prTerminated = true
-      }
       continue
     }
     const detail = await detailOf(key)
@@ -543,7 +541,7 @@ export const initialChats = Object.freeze({
 
 // Results: {kind: 'chats', read} and {kind: 'failure'} from the chat poller, {kind: 'records', chats,
 // folder, recordsError} from the start of a read (the records before the states), and the page's own
-// {kind: 'started', record} and {kind: 'removed', name}. A failed read keeps what is shown.
+// {kind: 'started', record}, {kind: 'finished', name} and {kind: 'removed', name}. A failed read keeps what is shown.
 export function chatsReduce(state, result) {
   switch (result?.kind) {
     case 'records': {
@@ -568,6 +566,12 @@ export function chatsReduce(state, result) {
       const records = state.records.filter((existing) => existing.card_id !== record.card_id).concat(record)
       return { ...state, records, recordsError: null }
     }
+    case 'finished': {
+      const record = state.records.find((candidate) => candidate.name === result.name)
+      if (!record) return state
+      const records = state.records.map((candidate) => (candidate === record ? { ...record, state: 'finished', worktree_path: null } : candidate))
+      return { ...state, records, byKey: { ...state.byKey, [record.key]: { state: 'finished' } } }
+    }
     case 'removed': {
       const gone = state.records.find((record) => record.name === result.name)
       if (!gone) return state
@@ -589,10 +593,12 @@ export function chatsReduce(state, result) {
 //   resumes  {key: {kind: 'resuming'} | {kind: 'failed', reason}}
 //   briefs   {key: {kind: 'sending'} | {kind: 'failed', reason}}   the brief of a started chat
 // The result's `mode` is one of: plain, startable, question, starting, blocked, chat, restoring,
-// not-open, resuming, resume-failed.
+// not-open, resuming, resume-failed, finished. A card can hold a finished record and a started one; the
+// started one is shown.
 export function cardViewOf(card, chats, ui = {}, nowMs = chats.at) {
-  const record = chats.records.find((candidate) => candidate.card_id === card.id)
-  if (record) {
+  const own = chats.records.filter((candidate) => candidate.card_id === card.id)
+  const record = own.find((candidate) => candidate.state !== 'finished') ?? own[0]
+  if (record && record.state !== 'finished') {
     const key = record.key
     const entry = chats.byKey[key]
     if (entry?.state === 'missing') {
@@ -613,10 +619,10 @@ export function cardViewOf(card, chats, ui = {}, nowMs = chats.at) {
       cleanup: ui.cleanups?.[record.name] ?? null,
     }
   }
-  if (card.status === 'done') return { mode: 'plain' }
+  if (card.status === 'done' && !record) return { mode: 'plain' }
   const flow = ui.flows?.[card.id]
   if (flow?.kind === 'starting') return { mode: 'starting', step: flow.step }
-  if (ui.asking !== card.id) return { mode: 'startable' }
+  if (ui.asking !== card.id) return record ? { mode: 'finished', key: record.key, name: record.name, href: chatHref(record.key) } : { mode: 'startable' }
   if (chats.recordsError) return { mode: 'blocked', blocked: { kind: 'records', message: chats.recordsError.message } }
   if (!chats.folder.id) return { mode: 'blocked', blocked: { kind: 'folder', reason: chats.folder.reason } }
   return { mode: 'question', failure: flow?.kind === 'failed' ? { step: flow.step, reason: flow.reason } : null }
@@ -1131,6 +1137,11 @@ export function setupReduce(state, action) {
 }
 
 // What each step of a start says when it fails.
+// The note the page posts into a chat when its card is finished. A statement for the person reading the
+// chat: it asks the agent for nothing.
+export const FINISH_NOTE = 'This story is finished and its working folder was removed. '
+  + 'For more work on this story, use Start again on its card in Epic Board to open a new chat.'
+
 const STEP_TEXT = {
   reserve: 'Could not reserve the chat',
   folder: 'Could not create worktree folder',
@@ -1141,7 +1152,7 @@ const STEP_TEXT = {
 
 const NO_ACTIONS = Object.freeze({
   ask() {}, cancel() {}, start() {}, close() {}, sendBrief() {}, resume() {}, startAgain() {}, filter() {}, openChat() {}, switchProject() {},
-  removeWorktree() {},
+  removeWorktree() {}, finish() {}, finishAsk() {}, finishCancel() {},
 })
 
 // A button: the host's Btn (`primary` for the main action only), or a native button marked as a fallback.
@@ -1154,19 +1165,61 @@ function renderButton(h, Btn, props, text, primary = false) {
 // The Badge variant of each chat state; a Review badge for failed checks is `err`.
 const STATE_VARIANT = Object.freeze({
   'needs-you': 'warn', interrupted: 'err', working: 'ok', stalled: 'warn', review: 'muted', 'your-turn': 'muted',
+  finished: 'muted',
 })
+
+// The modes of a card whose chat is started and not finished: each shows the Finish control.
+const FINISHABLE = new Set(['chat', 'restoring', 'not-open', 'resuming', 'resume-failed'])
+
+// The Finish control of a started card. `finish` is {name, path, kept, run, asking}: the record's name and
+// worktree path, the "Worktree kept" refusal if any, the run of Finish if any, and whether the confirm
+// step is open.
+function renderFinish(h, card, actions, parts, finish) {
+  const { Btn } = parts
+  const { name, path, kept, run, asking } = finish
+  if (kept) {
+    return h('div', { className: 'eb-chat-controls', key: 'finish' },
+      h('p', { role: 'status', className: 'eb-chat-note' }, `Worktree kept: ${kept.reason || `uncommitted changes at ${path}.`}`),
+      renderButton(h, Btn, { type: 'button', onClick: () => actions.removeWorktree(name, true) }, 'Remove anyway'))
+  }
+  if (run?.kind === 'running') return h('p', { className: 'eb-chat-note', role: 'status', key: 'finish' }, 'Finishing…')
+  if (asking) {
+    const onKeyDown = (event) => { if (event?.key === 'Escape') actions.finishCancel(card.id) }
+    const unticked = isObject(card.tasks) && card.tasks.done < card.tasks.total
+    return h('div', { className: 'eb-question', role: 'group', 'aria-label': 'Finish this story', onKeyDown, key: 'finish' },
+      h('p', null, path
+        ? `This removes the folder ${path}. Files that git ignores in it, such as .env and node_modules, are deleted with it.`
+        : 'This marks the story finished. No folder is touched.'),
+      unticked ? h('p', null, 'Not all tasks are ticked on main.') : null,
+      renderButton(h, Btn, { type: 'button', 'data-eb-finish': card.id, onClick: () => actions.finish(name, false) }, 'Finish', true),
+      ' ',
+      renderButton(h, Btn, { type: 'button', onClick: () => actions.finishCancel(card.id) }, 'Cancel'))
+  }
+  return h('div', { className: 'eb-chat-controls', key: 'finish' },
+    run?.kind === 'failed' ? h('p', { className: 'eb-chat-note', role: 'status' }, `Could not finish: ${run.reason}`) : null,
+    renderButton(h, Btn, { type: 'button', onClick: () => actions.finishAsk(card.id) }, 'Finish'))
+}
 
 // The part of a card below its progress that belongs to the chat: the state word, the question,
 // or the text and controls of a chat that is restoring or not open. Every text is a literal child.
-function renderChatPart(h, card, view, actions, parts = {}, projectWorktree = true) {
+function renderChatPart(h, card, view, actions, parts = {}, projectWorktree = true, finish = null) {
+  const body = renderChatBody(h, card, view, actions, parts, projectWorktree)
+  return finish ? [].concat(body ?? [], renderFinish(h, card, actions, parts, finish)) : body
+}
+
+function renderChatBody(h, card, view, actions, parts, projectWorktree) {
   const { Btn, Badge } = parts
   switch (view.mode) {
+    case 'finished': {
+      const badge = Badge
+        ? h(Badge, { variant: STATE_VARIANT.finished, className: 'eb-chat-state', 'data-state': 'finished' }, STATE_WORDS.finished)
+        : h('span', { className: 'eb-chat-state eb-fb', 'data-state': 'finished' }, STATE_WORDS.finished)
+      return h('div', { className: 'eb-chat-controls', key: 'chat' },
+        h('div', { className: 'eb-chat-line' }, badge),
+        h('p', { className: 'eb-chat-note' }, h('a', { href: view.href }, 'Open chat')),
+        renderButton(h, Btn, { type: 'button', onClick: () => actions.ask(card.id) }, 'Start again'))
+    }
     case 'chat': {
-      if (view.cleanup?.kind === 'kept') {
-        return h('div', { className: 'eb-chat-controls', key: 'cleanup' },
-          h('p', { role: 'status', className: 'eb-chat-note' }, `Worktree kept: uncommitted changes at ${view.cleanup.path}.`),
-          renderButton(h, Btn, { type: 'button', onClick: () => actions.removeWorktree(view.name, true) }, 'Remove anyway'))
-      }
       const chat = []
       if (view.state || view.open) {
         const word = view.stateHref
@@ -1242,6 +1295,14 @@ function renderCard(h, card, index, view, actions, parts = {}) {
   const seen = view.chats ? cardViewOf(card, view.chats, view.ui ?? {}) : { mode: 'plain' }
   // A host with no chat panel shows no Panel, so no card is marked.
   const chat = seen.open && !view.panelAvailable ? { ...seen, open: false } : seen
+  // Finish belongs to a card whose chat is started and not finished.
+  const record = view.chats && FINISHABLE.has(chat.mode)
+    ? view.chats.records.find((r) => r.card_id === card.id && r.state === 'started') : null
+  const cleanup = record ? view.ui?.cleanups?.[record.name] : null
+  const finish = record ? {
+    name: record.name, path: record.worktree_path || null, kept: cleanup?.kind === 'kept' ? cleanup : null,
+    run: view.ui?.finishes?.[record.name] ?? null, asking: view.ui?.finishing === card.id,
+  } : null
   const main = { className: 'eb-card-main', 'data-card-id': card.id }
   // The card's name is the label of its one main control. It stays a button while the question is open,
   // so a keyboard user's focus is not lost, and it is plain text whenever there is nothing to do.
@@ -1274,7 +1335,7 @@ function renderCard(h, card, index, view, actions, parts = {}) {
       ? h('div', { className: 'eb-bar', 'aria-hidden': 'true' },
         h('div', { className: 'eb-bar-fill', style: { width: `${progress.fraction * 100}%` } }))
       : null,
-    renderChatPart(h, card, chat, actions, parts, view.projectWorktree ?? true),
+    renderChatPart(h, card, chat, actions, parts, view.projectWorktree ?? true, finish),
   ]
   const marks = { 'data-mode': chat.mode, ...(chat.open ? { 'data-open': 'true' } : {}) }
   return parts.Card
@@ -1606,7 +1667,7 @@ const BACKEND_BASE = '/apps/epic-board/api'
 //                                               with `focus` ask for focus on the card that was open
 export const initialUi = Object.freeze({
   asking: null, flows: Object.freeze({}), resumes: Object.freeze({}), briefs: Object.freeze({}), focus: null, open: null,
-  cleanups: Object.freeze({}),
+  cleanups: Object.freeze({}), finishing: null, finishes: Object.freeze({}),
 })
 
 function without(object, key) {
@@ -1653,10 +1714,24 @@ export function uiReduce(state, action) {
       return { ...state, briefs: { ...state.briefs, [action.key]: { kind: 'failed', reason: action.reason } } }
     case 'brief-sent':
       return { ...state, briefs: without(state.briefs, action.key) }
+    case 'finish-ask':
+      return { ...state, finishing: action.cardId }
+    case 'finish-cancel':
+      return { ...state, finishing: state.finishing === action.cardId ? null : state.finishing, focus: { cardId: action.cardId } }
+    case 'finish-run':
+      return {
+        ...state, finishing: null, finishes: { ...state.finishes, [action.name]: { kind: 'running' } },
+        cleanups: without(state.cleanups, action.name),
+      }
+    case 'finish-failed':
+      return { ...state, finishes: { ...state.finishes, [action.name]: { kind: 'failed', reason: action.reason } } }
     case 'worktree-kept':
-      return { ...state, cleanups: { ...state.cleanups, [action.name]: { kind: 'kept', path: action.path } } }
+      return {
+        ...state, finishes: without(state.finishes, action.name),
+        cleanups: { ...state.cleanups, [action.name]: { kind: 'kept', path: action.path, reason: action.reason } },
+      }
     case 'cleanup-done':
-      return { ...state, cleanups: without(state.cleanups, action.name) }
+      return { ...state, cleanups: without(state.cleanups, action.name), finishes: without(state.finishes, action.name) }
     case 'open-chat':
       return state.open?.key === action.key ? state : { ...state, open: { cardId: action.cardId, key: action.key } }
     case 'close-chat': {
@@ -1794,7 +1869,7 @@ export function createBoard(React, env = {}) {
     // `projectId` tracks the project of the active effect run; old callbacks compare against it.
     const latest = useRef(null)
     if (latest.current === null) {
-      latest.current = { starts: new Set(), briefs: new Map(), sending: new Set(), timers: new Set(), poller: null, alive: false, projectId: null, cleanups: new Set(), cleanupRecord: null }
+      latest.current = { starts: new Set(), briefs: new Map(), sending: new Set(), timers: new Set(), poller: null, alive: false, projectId: null, finishes: new Set() }
     }
     latest.current.chats = chats
     latest.current.api = api
@@ -1922,16 +1997,6 @@ export function createBoard(React, env = {}) {
         onResult: (result) => {
           if (!live()) return
           chatsDispatch(result)
-          if (result.kind === 'chats') {
-            const { cleanups, cleanupRecord: doCleanup } = latest.current
-            for (const [key, entry] of Object.entries(result.read.byKey)) {
-              if (entry.prTerminated && !cleanups.has(key)) {
-                cleanups.add(key)
-                const record = result.read.chats.find((r) => r.key === key)
-                if (record && doCleanup) doCleanup(record)
-              }
-            }
-          }
         },
         classifyAnswer: classifyChats,
         delay: chatDelay,
@@ -1968,6 +2033,14 @@ export function createBoard(React, env = {}) {
       if (target && typeof target.focus === 'function') target.focus()
     }, [ui.asking])
 
+    // When the Finish confirm step opens on a card, put focus on its "Finish" button, so Escape closes it.
+    useEffect(() => {
+      if (ui.finishing == null) return
+      const doc = env.document ?? document
+      const target = [...doc.querySelectorAll('[data-eb-finish]')].find((node) => node.getAttribute('data-eb-finish') === ui.finishing)
+      if (target && typeof target.focus === 'function') target.focus()
+    }, [ui.finishing])
+
     // When a Panel opens or shows another chat, put focus on its container.
     const panelKey = hasPanel && ui.open ? ui.open.key : null
     useEffect(() => {
@@ -1996,46 +2069,6 @@ export function createBoard(React, env = {}) {
     const live = (fn) => (...args) => { if (latest.current.alive) fn(...args) }
     const ownUi = live(uiDispatch)
     const ownChats = live(chatsDispatch)
-
-    const finishCleanup = async (record, isLive, backend, gateway) => {
-      const { name } = record
-      const folderId = typeof record.worktree_folder_id === 'string' && record.worktree_folder_id ? record.worktree_folder_id : null
-      if (folderId) {
-        try {
-          await gateway.patch(`/api/chat/folders/${encodeURIComponent(folderId)}`, { project_dir: '' })
-        } catch { /* ignore */ }
-      }
-      if (!isLive()) return
-      try {
-        await backend.del(`/chats/${encodeURIComponent(name)}`)
-        if (!isLive()) return
-        ownChats({ kind: 'removed', name })
-        ownUi({ kind: 'cleanup-done', name })
-        ownUi({ kind: 'close-chat', key: record.key })
-      } catch { /* ignore */ }
-    }
-
-    const cleanupRecord = async (record) => {
-      const cleanProjectId = latest.current.projectId
-      const isLive = () => latest.current.projectId === cleanProjectId && latest.current.alive
-      const backend = latest.current.backend
-      const gateway = latest.current.gateway
-      const { name } = record
-      const worktreePath = typeof record.worktree_path === 'string' && record.worktree_path ? record.worktree_path : null
-      if (!worktreePath) return
-      try {
-        await backend.del(`/chats/${encodeURIComponent(name)}/worktree`)
-      } catch (error) {
-        if (!isLive()) return
-        if (error?.error?.code === 'worktree_has_changes') {
-          ownUi({ kind: 'worktree-kept', name, path: worktreePath })
-        }
-        return
-      }
-      if (!isLive()) return
-      await finishCleanup(record, isLive, backend, gateway)
-    }
-    latest.current.cleanupRecord = cleanupRecord
 
     const filter = (key) => {
       setFilterKey(key)
@@ -2205,31 +2238,63 @@ export function createBoard(React, env = {}) {
           if (record) ownUi({ kind: 'resume-failed', key: record.key, reason: error.reason ?? String(error?.message ?? error) })
         }
       },
-      async removeWorktree(name, force = false) {
-        const record = latest.current.chats.records.find((candidate) => candidate.name === name)
-        if (!record) return
-        const worktreePath = typeof record.worktree_path === 'string' && record.worktree_path ? record.worktree_path : null
-        if (!worktreePath) return
-        const removeProjectId = latest.current.projectId
-        const isLive = () => latest.current.projectId === removeProjectId && latest.current.alive
-        const backend = latest.current.backend
-        const gateway = latest.current.gateway
-        const path = `/chats/${encodeURIComponent(name)}/worktree${force ? '?force=true' : ''}`
-        try {
-          await backend.del(path)
-        } catch (error) {
+      finishAsk: (cardId) => ownUi({ kind: 'finish-ask', cardId }),
+      finishCancel: (cardId) => ownUi({ kind: 'finish-cancel', cardId }),
+      // Finish: the worktree goes (unless git finds work that would be lost and `force` is off), the Crew
+      // folder is released, the record is marked finished, then one note goes into the chat.
+      async finish(name, force = false) {
+        const record = latest.current.chats.records.find((candidate) => candidate.name === name && candidate.state !== 'finished')
+        if (!record || latest.current.finishes.has(name)) return
+        const finishProjectId = latest.current.projectId
+        const isLive = () => latest.current.projectId === finishProjectId && latest.current.alive
+        const { backend, gateway } = latest.current
+        const at = `/chats/${encodeURIComponent(name)}`
+        latest.current.finishes.add(name)
+        ownUi({ kind: 'finish-run', name })
+        const fail = (error) => {
           if (!isLive()) return
-          if (error?.error?.code === 'worktree_has_changes') {
-            ownUi({ kind: 'worktree-kept', name, path: worktreePath })
-          }
-          return
+          ownUi({ kind: 'finish-failed', name, reason: errorMessage(error?.error?.message ?? error).slice(0, REASON_MAX_CHARS) })
+          refresh()
         }
-        if (!isLive()) return
-        await finishCleanup(record, isLive, backend, gateway)
+        try {
+          if (typeof record.worktree_path === 'string' && record.worktree_path !== '') {
+            try {
+              await backend.del(`${at}/worktree${force ? '?force=true' : ''}`)
+            } catch (error) {
+              const code = error?.error?.code
+              if (code === 'worktree_has_changes' || code === 'worktree_has_unpushed') {
+                if (isLive()) ownUi({ kind: 'worktree-kept', name, path: record.worktree_path, reason: String(error.error.message ?? '') })
+              } else {
+                fail(error)
+              }
+              return
+            }
+          }
+          if (typeof record.worktree_folder_id === 'string' && record.worktree_folder_id !== '') {
+            try {
+              await gateway.patch(`/api/chat/folders/${encodeURIComponent(record.worktree_folder_id)}`, { project_dir: '' })
+            } catch { /* a folder that cannot be released is left alone */ }
+          }
+          try {
+            await backend.post(`${at}/finished`)
+          } catch (error) {
+            fail(error)
+            return
+          }
+          if (!isLive()) return
+          ownChats({ kind: 'finished', name })
+          ownUi({ kind: 'cleanup-done', name })
+          try {
+            await gateway.post(`/api/chat/slots/${encodeURIComponent(record.key)}/note`, { content: FINISH_NOTE, source: 'epic-board' })
+          } catch { /* a closed chat answers 404: the card is finished all the same */ }
+        } finally {
+          latest.current.finishes.delete(name)
+        }
       },
+      removeWorktree: (name, force = true) => actions.finish(name, force),
     }
 
-    const started = new Set(chats.records.map((record) => record.card_id))
+    const started = new Set(chats.records.filter((record) => record.state !== 'finished').map((record) => record.card_id))
     const view = viewOf(state, filterKey, started)
     // A saved or chosen epic that the plan lacks: show all epics and save that.
     const effectiveKey = view.kind === 'plan' ? view.filter.key : filterKey

@@ -106,8 +106,11 @@ function makeDocument(hidden) {
     nodes: [],
     // The question's "Start" buttons, found by `[data-eb-start]`; a test registers them in `startNodes`.
     startNodes: [],
+    // The confirm step's "Finish" buttons, found by `[data-eb-finish]`; a test registers them in `finishNodes`.
+    finishNodes: [],
     querySelectorAll(selector) {
       if (selector === '[data-eb-start]') return this.startNodes
+      if (selector === '[data-eb-finish]') return this.finishNodes
       assert.equal(selector, '[data-card-id]')
       return this.nodes
     },
@@ -1534,7 +1537,7 @@ test('the page source has no innerHTML, script injection, other network paths or
   assert.ok(starts.length >= 4, 'the scan found the page\'s paths')
   for (const start of starts) {
     assert.ok(['/api/chat/slots', '/api/chat', '/chats', BACKEND].some((prefix) => start.startsWith(prefix)), `unexpected path ${start}`)
-    assert.doesNotMatch(start, /approve|question|approvals|stop|close|steer|note|context|delete/i, `forbidden path ${start}`)
+    assert.doesNotMatch(start, /approve|question|approvals|stop|close|steer|context|delete/i, `forbidden path ${start}`)
   }
   assert.equal(/\/api\/approvals/.test(source), false)
   // The page never deletes anything in Crew: all `.del(` calls go to the app's own backend.
@@ -1542,7 +1545,8 @@ test('the page source has no innerHTML, script injection, other network paths or
   assert.ok(dels.length >= 1 && dels.every((d) => d === 'backend.del('), 'only the backend client deletes')
   // PATCH /api/chat/folders/<id> is intentional (cleanup clears project_dir); del/delete/put are still forbidden on Crew paths.
   assert.equal(/\.(del|delete|put)\(\s*['"`]\/api\//.test(source), false, 'no delete or put to Crew')
-  assert.equal(/slots\/\$\{[^}]*\}\/(?!resume)/.test(source), false, 'the only per-chat route built in a template is resume')
+  // Finish posts one note into a chat (a-worktree-per-card Requirement 5, criterion 6): it starts no agent turn.
+  assert.equal(/slots\/\$\{[^}]*\}\/(?!resume|note)/.test(source), false, 'the only per-chat routes built in a template are resume and note')
 })
 
 // ---- The chat panel (work-in-the-chat, Requirements 1, 2, 4, 5 and 6.5) ----
@@ -1927,212 +1931,217 @@ test('kit: the folder-read failure shows an error notice with status, and Try ag
   assert.match(page.text(), /Loading/)
 })
 
-// ---- Cleanup flow (a-worktree-per-card Requirements 5.1-5.5, 7.2) ----
+// ---- Finish (a-worktree-per-card Requirements 5.1-5.13 and 7.2) ----
 
 const WT_PATH = '/home/alice/my-project--epic-board-aaaa1111'
 const WT_FOLDER_ID = 'wf_123'
-const WRECORD = { card_id: ALPHA, name: NAME, key: NAME, created: 't', worktree_path: WT_PATH, worktree_folder_id: WT_FOLDER_ID }
-const openPr = { kind: 'change', number: 1, url: 'https://github.com/o/r/pull/1', state: 'open' }
+const WRECORD = { card_id: ALPHA, name: NAME, key: NAME, created: 't', state: 'started', worktree_path: WT_PATH, worktree_folder_id: WT_FOLDER_ID }
+const PLAIN = { ...WRECORD, worktree_path: null, worktree_folder_id: null }
+const NOTE = 'This story is finished and its working folder was removed. For more work on this story, use Start again on its card in Epic Board to open a new chat.'
 const mergedPr = { kind: 'change', number: 1, url: 'https://github.com/o/r/pull/1', state: 'merged' }
 
-// One read cycle: answer the records fetch then the Crew list, return the index after.
-async function chatCycleWith(page, records, crewRows) {
-  const idx = page.chatFetch.calls.length - 1
-  page.chatFetch.answer(idx, 200, chatsAnswer(records))
+// A page with one started chat whose conductor is working (so no row of it is read).
+async function startedPage(record = WRECORD) {
+  const page = await ready({}, [record])
+  page.gateway.answer('/api/chat/slots?crew=all', [row(NAME, { running: true })])
   await flush()
-  page.gateway.answer('/api/chat/slots?crew=all', crewRows)
-  await flush()
+  return page
 }
+const backendCalls = (page) => page.chatFetch.calls.map(([url, options]) => `${options.method} ${normalizeUrl(url).slice(BACKEND.length)}`)
+const lastBackend = (page) => page.chatFetch.calls.length - 1
+const asking = (page) => findAll(page.tree(), (n) => n.props?.role === 'group' && n.props['aria-label'] === 'Finish this story')[0]
 
-// Drive a chat into review state (open PR, needs detail read), return the index used.
-async function reviewCycle(page, records, extraRow = {}) {
-  await chatCycleWith(page, records, [row(NAME, { source_links: [openPr], ...extraRow })])
-  page.gateway.answer(detailPath(NAME), { messages: [{ role: 'assistant' }] })
+test('finish: a started card shows a Finish button; a card with no chat and a finished card do not', async () => {
+  const page = await startedPage()
+  assert.ok(buttonNamed(page, 'Finish'))
+  const none = await ready({}, [])
+  assert.equal(buttonNamed(none, 'Finish'), undefined)
+  const done = await ready({}, [{ ...WRECORD, state: 'finished', worktree_path: null }])
+  assert.equal(buttonNamed(done, 'Finish'), undefined)
+})
+
+test('finish: the confirm step names the path and the ignored files, warns about unticked tasks, and changes nothing', async () => {
+  const page = await startedPage()
+  const callsBefore = [page.chatFetch.calls.length, page.gateway.calls.length]
+  click(page, 'Finish')
+  const group = asking(page)
+  assert.ok(group, 'a group named "Finish this story"')
+  assert.ok(textOf(group).includes(WT_PATH), 'the path as literal text')
+  assert.match(textOf(group), /iles that git ignores.*\.env.*node_modules.*deleted/)
+  assert.match(textOf(group), /Not all tasks are ticked/)
+  assert.doesNotMatch(textOf(group), /pull request/i)
+  assert.deepEqual(findAll(group, (n) => n.type === 'button').map(textOf), ['Finish', 'Cancel'])
+  assert.equal(findAll(group, (n) => n.type === 'a').length, 0, 'the path is not a link')
+  assert.deepEqual([page.chatFetch.calls.length, page.gateway.calls.length], callsBefore, 'nothing is called before the person confirms')
+  click(page, 'Cancel')
+  assert.equal(asking(page), undefined)
+  assert.ok(buttonNamed(page, 'Finish'))
+  assert.deepEqual([page.chatFetch.calls.length, page.gateway.calls.length], callsBefore)
+})
+
+test('finish: Escape closes the confirm step like Cancel', async () => {
+  const page = await startedPage()
+  click(page, 'Finish')
+  asking(page).props.onKeyDown({ key: 'Escape' })
+  assert.equal(asking(page), undefined)
+})
+
+test('finish: no tasks warning when every task is ticked, and a worktree-off record says only that it is marked', async () => {
+  const page = await ready({}, [{ ...PLAIN, card_id: 'one.md#Card Beta', name: 'epic-board-bbbb2222', key: 'epic-board-bbbb2222' }])
+  page.gateway.answer('/api/chat/slots?crew=all', [row('epic-board-bbbb2222', { running: true })])
   await flush()
-}
+  click(page, 'Finish')
+  const group = asking(page)
+  assert.doesNotMatch(textOf(group), /Not all tasks are ticked/)
+  assert.match(textOf(group), /marks the story finished\. No folder is touched/)
+  assert.doesNotMatch(textOf(group), /ignores/)
+})
 
-test('cleanup: PR merged → worktree route called, subfolder PATCHed, record deleted, card resets', async () => {
-  const page = await ready({}, [WRECORD])
-  // Cycle 1: open PR → review state (caches roleRead)
-  await reviewCycle(page, [WRECORD])
-  assert.match(page.text(), /Review #1/)
-
-  // Advance to trigger the next read (review state uses 15 s delay)
-  page.clock.advance(15000)
-  // Cycle 2: same records, merged PR → prTerminated detected
-  await chatCycleWith(page, [WRECORD], [row(NAME, { source_links: [mergedPr] })])
-
-  // cleanupRecord starts: DELETE /chats/name/worktree
-  const worktreeIdx = page.chatFetch.calls.length - 1
-  page.chatFetch.answer(worktreeIdx, 200, { ok: true })
+test('finish: the sequence is worktree, folder PATCH, finished, then one note that is not a turn', async () => {
+  const page = await startedPage()
+  click(page, 'Finish')
+  click(page, 'Finish')
   await flush()
-
-  // Then PATCH /api/chat/folders/wf_123
-  assert.ok(page.gateway.calls.some(([verb, path]) => verb === 'patch' && path === `/api/chat/folders/${WT_FOLDER_ID}`), 'PATCH called on worktree folder')
+  assert.equal(backendCalls(page)[lastBackend(page)], `DELETE /chats/${NAME}/worktree`)
+  page.chatFetch.answer(lastBackend(page), 200, { ok: true })
+  await flush()
+  assert.deepEqual(page.gateway.calls.at(-1), ['patch', `/api/chat/folders/${WT_FOLDER_ID}`, { project_dir: '' }])
   page.gateway.answer(`/api/chat/folders/${WT_FOLDER_ID}`, {})
   await flush()
-
-  // Then DELETE /chats/name
-  const deleteIdx = page.chatFetch.calls.length - 1
-  page.chatFetch.answer(deleteIdx, 200, { removed: true })
+  assert.equal(backendCalls(page)[lastBackend(page)], `POST /chats/${NAME}/finished`)
+  assert.equal(page.gateway.calls.some(([, path]) => path.endsWith('/note')), false, 'no note before the record is finished')
+  page.chatFetch.answer(lastBackend(page), 200, { state: 'finished' })
   await flush()
+  assert.deepEqual(page.gateway.calls.at(-1), ['post', `/api/chat/slots/${NAME}/note`, { content: NOTE, source: 'epic-board' }])
+  page.gateway.answer(`/api/chat/slots/${NAME}/note`, {})
+  await flush()
+  assert.ok(!page.gateway.calls.some(([verb, path]) => verb === 'post' && path === '/api/chat'), 'POST /api/chat is never called by Finish')
+  assert.match(page.text(), /Finished/)
+  assert.equal(buttonNamed(page, 'Finish'), undefined)
+  assert.ok(buttonNamed(page, 'Start again'))
+  assert.ok(anchors(page).some((a) => a.props.href === `/chat?sid=${NAME}` && textOf(a) === 'Open chat'))
+})
 
-  // Card resets: no link, Start button available (after clicking the card)
-  assert.equal(anchors(page).filter((a) => a.props.href === `/chat?sid=${NAME}`).length, 0, 'link gone after cleanup')
-  click(page, 'Card Alpha')
+test('finish: a note that fails, with 404 or any error, leaves the card Finished', async () => {
+  for (const error of [httpError(404), new Error('boom')]) {
+    const page = await startedPage(PLAIN)
+    click(page, 'Finish')
+    click(page, 'Finish')
+    await flush()
+    assert.equal(backendCalls(page)[lastBackend(page)], `POST /chats/${NAME}/finished`, 'a worktree-off record only marks')
+    assert.ok(!backendCalls(page).some((call) => call.includes('/worktree')))
+    page.chatFetch.answer(lastBackend(page), 200, { state: 'finished' })
+    await flush()
+    page.gateway.fail(`/api/chat/slots/${NAME}/note`, error)
+    await flush()
+    assert.match(page.text(), /Finished/)
+    assert.ok(buttonNamed(page, 'Start again'))
+  }
+})
+
+test('finish: a refusal shows "Worktree kept" with its reason as a status, and Remove anyway force-removes', async () => {
+  const reasons = [['worktree_has_changes', `The worktree has uncommitted changes at ${WT_PATH}.`],
+    ['worktree_has_unpushed', `The worktree has commits that are not pushed at ${WT_PATH}.`]]
+  for (const [code, message] of reasons) {
+    const page = await startedPage()
+    click(page, 'Finish')
+    click(page, 'Finish')
+    await flush()
+    page.chatFetch.answer(lastBackend(page), 409, { error: { code, message } })
+    await flush()
+    const kept = findAll(page.tree(), (n) => n.props?.role === 'status' && textOf(n).startsWith('Worktree kept'))
+    assert.deepEqual(kept.map(textOf), [`Worktree kept: ${message}`])
+    assert.ok(!page.gateway.calls.some(([verb]) => verb === 'patch'), 'nothing else ran')
+    const remove = buttonNamed(page, 'Remove anyway')
+    assert.equal(remove.type, 'button')
+    click(page, 'Remove anyway')
+    await flush()
+    assert.equal(backendCalls(page)[lastBackend(page)], `DELETE /chats/${NAME}/worktree`)
+    assert.ok(page.chatFetch.calls[lastBackend(page)][0].includes('/worktree?force=true'), 'force=true')
+    page.chatFetch.answer(lastBackend(page), 200, { ok: true })
+    await flush()
+    page.gateway.answer(`/api/chat/folders/${WT_FOLDER_ID}`, {})
+    await flush()
+    page.chatFetch.answer(lastBackend(page), 200, { state: 'finished' })
+    await flush()
+    assert.match(page.text(), /Finished/)
+    assert.doesNotMatch(page.text(), /Worktree kept/)
+  }
+})
+
+test('finish: the force URL joins the project with &', async () => {
+  const page = await startedPage()
+  click(page, 'Finish')
+  click(page, 'Finish')
+  await flush()
+  page.chatFetch.answer(lastBackend(page), 409, { error: { code: 'worktree_has_changes', message: 'changes' } })
+  await flush()
+  click(page, 'Remove anyway')
+  await flush()
+  const url = page.chatFetch.calls[lastBackend(page)][0]
+  assert.ok(!url.includes('force=true?'), url)
+  assert.ok(url.includes('force=true'), url)
+})
+
+test('finish: any other failure shows the reason, changes nothing, and Finish works again', async () => {
+  const page = await startedPage()
+  click(page, 'Finish')
+  click(page, 'Finish')
+  await flush()
+  page.chatFetch.answer(lastBackend(page), 409, { error: { code: 'worktree_remove_failed', message: 'not a worktree' } })
+  await flush()
+  assert.match(page.text(), /Could not finish: not a worktree/)
+  assert.ok(!page.gateway.calls.some(([verb]) => verb === 'patch'), 'no folder PATCH')
+  assert.ok(!backendCalls(page).some((call) => call.endsWith('/finished')), 'not marked finished')
+  assert.ok(buttonNamed(page, 'Finish'))
+})
+
+test('finish: a failure to mark the record shows the reason and Finish works again', async () => {
+  const page = await startedPage(PLAIN)
+  click(page, 'Finish')
+  click(page, 'Finish')
+  await flush()
+  page.chatFetch.answer(lastBackend(page), 409, { error: { code: 'worktree_not_removed', message: 'The worktree has not been removed yet.' } })
+  await flush()
+  assert.match(page.text(), /Could not finish: The worktree has not been removed yet\./)
+  assert.ok(buttonNamed(page, 'Finish'))
+  assert.equal(page.gateway.calls.some(([, path]) => path.endsWith('/note')), false, 'no note for a story that is not finished')
+})
+
+test('finish: a merged pull request link causes no call; the board never removes anything by itself', async () => {
+  const page = await ready({}, [WRECORD])
+  page.gateway.answer('/api/chat/slots?crew=all', [row(NAME, { source_links: [mergedPr] })])
+  await flush()
+  page.gateway.answer(detailPath(NAME), { messages: [{ role: 'assistant' }] })
+  await flush()
+  page.clock.advance(15000)
+  await flush()
+  assert.ok(backendCalls(page).every((call) => call.startsWith('GET /chats')), backendCalls(page).join(', '))
+  assert.ok(page.gateway.calls.every(([verb]) => verb === 'get'))
+  assert.ok(buttonNamed(page, 'Finish'))
+})
+
+test('finish: a finished record shows the badge, the chat link and Start again, in Planned and in Done', async () => {
+  const finished = (card, name) => ({ card_id: card, name, key: name, created: 't', state: 'finished', worktree_path: null, worktree_folder_id: null })
+  const page = await ready({}, [finished(ALPHA, NAME), finished('one.md#Card Beta', 'epic-board-bbbb2222')])
+  assert.equal(page.gateway.calls.length, 0, 'the state of a finished chat is not read')
+  const badges = findAll(page.tree(), (n) => n.props?.['data-state'] === 'finished')
+  assert.deepEqual(badges.map(textOf), ['Finished', 'Finished'])
+  assert.deepEqual(anchors(page).map((a) => a.props.href).filter((href) => href.startsWith('/chat')).sort(),
+    [`/chat?sid=${NAME}`, '/chat?sid=epic-board-bbbb2222'])
+  assert.equal(findAll(page.tree(), (n) => n.type === 'button' && textOf(n) === 'Start again').length, 2)
+  assert.equal(buttonNamed(page, 'Finish'), undefined)
+  // Start again on the Done card opens the start question.
+  findAll(page.tree(), (n) => n.type === 'button' && textOf(n) === 'Start again')[1].props.onClick()
   assert.match(page.text(), /Start a conductor on this story\?/)
 })
 
-test('cleanup: worktree_has_changes → "Worktree kept" shown with role=status, "Remove anyway" button present', async () => {
-  const page = await ready({}, [WRECORD])
-  await reviewCycle(page, [WRECORD])
-
-  page.clock.advance(15000)
-  await chatCycleWith(page, [WRECORD], [row(NAME, { source_links: [mergedPr] })])
-
-  // DELETE /chats/name/worktree → 409 worktree_has_changes
-  const worktreeIdx = page.chatFetch.calls.length - 1
-  page.chatFetch.answer(worktreeIdx, 409, { error: { code: 'worktree_has_changes', message: 'has changes', path: WT_PATH } })
+test('finish: a card with a finished and a started record shows the started one', async () => {
+  const finished = { card_id: ALPHA, name: 'epic-board-0ld00001', key: 'epic-board-0ld00001', created: 't', state: 'finished', worktree_path: null, worktree_folder_id: null }
+  const page = await ready({}, [finished, WRECORD])
+  page.gateway.answer('/api/chat/slots?crew=all', [row(NAME, { running: true })])
   await flush()
-
-  assert.match(page.text(), /Worktree kept/)
-  assert.match(page.text(), new RegExp(WT_PATH.replace(/\//g, '\\/')))
-  const statusEls = findAll(page.tree(), (n) => n.props?.role === 'status')
-  assert.ok(statusEls.some((el) => textOf(el).includes('Worktree kept')), 'Worktree kept text has role=status')
-  const removeAnyway = buttonNamed(page, 'Remove anyway')
-  assert.ok(removeAnyway, '"Remove anyway" button present')
-  assert.equal(removeAnyway.type, 'button', '"Remove anyway" is a native button when no Btn kit')
-})
-
-test('cleanup: "Remove anyway" force-removes the worktree and resets the card', async () => {
-  const page = await ready({}, [WRECORD])
-  await reviewCycle(page, [WRECORD])
-
-  page.clock.advance(15000)
-  await chatCycleWith(page, [WRECORD], [row(NAME, { source_links: [mergedPr] })])
-
-  // 409 → "Worktree kept" state
-  page.chatFetch.answer(page.chatFetch.calls.length - 1, 409, { error: { code: 'worktree_has_changes', message: 'has changes', path: WT_PATH } })
-  await flush()
-  assert.ok(buttonNamed(page, 'Remove anyway'))
-
-  // Click "Remove anyway"
-  click(page, 'Remove anyway')
-  await flush()
-
-  // DELETE /chats/name/worktree?force=true
-  const forceCall = page.chatFetch.calls.find(([url]) => url.includes('/worktree?force=true'))
-  assert.ok(forceCall, 'force-remove route called')
-  const forceIdx = page.chatFetch.calls.indexOf(forceCall)
-  page.chatFetch.answer(forceIdx, 200, { ok: true })
-  await flush()
-
-  // PATCH folder
-  page.gateway.answer(`/api/chat/folders/${WT_FOLDER_ID}`, {})
-  await flush()
-
-  // DELETE record
-  page.chatFetch.answer(page.chatFetch.calls.length - 1, 200, { removed: true })
-  await flush()
-
-  // Card resets
-  assert.doesNotMatch(page.text(), /Worktree kept/)
-  assert.equal(anchors(page).filter((a) => a.props.href === `/chat?sid=${NAME}`).length, 0)
-})
-
-test('cleanup: non-worktree record (worktree_path null) does nothing — no delete, card stays', async () => {
-  const nullRecord = { card_id: ALPHA, name: NAME, key: NAME, created: 't', worktree_path: null, worktree_folder_id: null }
-  const page = await ready({}, [nullRecord])
-  await reviewCycle(page, [nullRecord])
-
-  page.clock.advance(15000)
-  const callsBefore = page.chatFetch.calls.length
-  await chatCycleWith(page, [nullRecord], [row(NAME, { source_links: [mergedPr] })])
-  await flush()
-
-  assert.ok(!page.chatFetch.calls.some(([url]) => url.includes('/worktree')), 'no worktree route called')
-  assert.ok(!page.gateway.calls.some(([verb]) => verb === 'patch'), 'no PATCH to Crew')
-  // Record is not deleted; the chat link is still present
-  assert.ok(anchors(page).some((a) => a.props.href === `/chat?sid=${NAME}`), 'chat link still present')
-})
-
-test('cleanup: fires on first read after reload (no prior state), merged PR only', async () => {
-  // Fresh load — no reviewCycle first; cleanup fires on the very first cycle.
-  const page = await ready({}, [WRECORD])
-  // Answer the CHAT_LIST from the first (and only pending) cycle
-  await chatCycleWith(page, [WRECORD], [row(NAME, { source_links: [mergedPr] })])
-  // No prior roleRead cache → detail read fires; answer it
-  page.gateway.answer(detailPath(NAME), { messages: [{ role: 'assistant' }] })
-  await flush()
-  // readChats returned with prTerminated=true; cleanupRecord is running:
-  // DELETE /chats/name/worktree is the latest chatFetch call
-  const worktreeIdx = page.chatFetch.calls.length - 1
-  page.chatFetch.answer(worktreeIdx, 200, { ok: true })
-  await flush()
-
-  // Then PATCH /api/chat/folders/wf_123
-  assert.ok(page.gateway.calls.some(([verb, path]) => verb === 'patch' && path === `/api/chat/folders/${WT_FOLDER_ID}`), 'PATCH called')
-  page.gateway.answer(`/api/chat/folders/${WT_FOLDER_ID}`, {})
-  await flush()
-
-  // Then DELETE /chats/name
-  page.chatFetch.answer(page.chatFetch.calls.length - 1, 200, { removed: true })
-  await flush()
-
-  assert.equal(anchors(page).filter((a) => a.props.href === `/chat?sid=${NAME}`).length, 0, 'card reset')
-})
-
-test('cleanup: no cleanup while another PR is still open', async () => {
-  const page = await ready({}, [WRECORD])
-  await reviewCycle(page, [WRECORD])
-
-  page.clock.advance(15000)
-  const callsBefore = page.chatFetch.calls.length
-  // source_links has both a merged and an open PR
-  const mixedLinks = [mergedPr, { kind: 'change', number: 2, url: 'https://github.com/o/r/pull/2', state: 'open' }]
-  await chatCycleWith(page, [WRECORD], [row(NAME, { source_links: mixedLinks })])
-  await flush()
-
-  assert.ok(!page.chatFetch.calls.slice(callsBefore).some(([url]) => url.includes('/worktree')), 'no worktree route called')
-})
-
-test('cleanup: failed worktree removal (500) keeps the record', async () => {
-  const page = await ready({}, [WRECORD])
-  await reviewCycle(page, [WRECORD])
-
-  page.clock.advance(15000)
-  await chatCycleWith(page, [WRECORD], [row(NAME, { source_links: [mergedPr] })])
-
-  // DELETE /chats/name/worktree → 500
-  page.chatFetch.answer(page.chatFetch.calls.length - 1, 500, { error: { code: 'server_error', message: 'oops' } })
-  await flush()
-
-  // No PATCH, no record DELETE
-  assert.ok(!page.gateway.calls.some(([verb]) => verb === 'patch'), 'no PATCH after 500')
-  assert.ok(!page.chatFetch.calls.some(([url]) => url.endsWith('/chats/' + NAME) && !url.includes('/worktree')), 'record not deleted')
-  // Chat link still present
-  assert.ok(anchors(page).some((a) => a.props.href === `/chat?sid=${NAME}`), 'chat link still present')
-})
-
-test('cleanup: force=true URL uses & when project is selected', async () => {
-  const page = await ready({}, [WRECORD])
-  await reviewCycle(page, [WRECORD])
-
-  page.clock.advance(15000)
-  await chatCycleWith(page, [WRECORD], [row(NAME, { source_links: [mergedPr] })])
-
-  // 409 → "Worktree kept"
-  page.chatFetch.answer(page.chatFetch.calls.length - 1, 409, { error: { code: 'worktree_has_changes', message: 'has changes', path: WT_PATH } })
-  await flush()
-  assert.ok(buttonNamed(page, 'Remove anyway'))
-
-  click(page, 'Remove anyway')
-  await flush()
-
-  // The force URL must be ?force=true&project=p, not ?force=true?project=p
-  const forceCall = page.chatFetch.calls.find(([url]) => url.includes('force=true'))
-  assert.ok(forceCall, 'force call made')
-  const [forceUrl] = forceCall
-  assert.ok(forceUrl.includes('force=true&project='), `URL uses & separator, got: ${forceUrl}`)
-  assert.ok(!forceUrl.includes('force=true?'), `URL does not use ? after force=true, got: ${forceUrl}`)
+  assert.match(page.text(), /Working/)
+  assert.ok(buttonNamed(page, 'Finish'))
+  assert.equal(buttonNamed(page, 'Start again'), undefined)
 })

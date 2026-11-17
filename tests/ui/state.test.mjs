@@ -375,3 +375,28 @@ test('Property 8: a shown plan is replaced only by an answer', () => {
     }
   })
 })
+
+// ---- uiReduce: the Finish step of a-worktree-per-card ----
+import { initialUi, uiReduce } from '../../ui/index.mjs'
+
+test('uiReduce: finish-ask opens the confirm step and finish-cancel closes it and asks for focus', () => {
+  const asked = uiReduce(initialUi, { kind: 'finish-ask', cardId: 'c#A' })
+  assert.equal(asked.finishing, 'c#A')
+  const other = uiReduce(asked, { kind: 'finish-cancel', cardId: 'c#B' })
+  assert.equal(other.finishing, 'c#A', 'cancelling another card leaves it open')
+  const cancelled = uiReduce(asked, { kind: 'finish-cancel', cardId: 'c#A' })
+  assert.deepEqual([cancelled.finishing, cancelled.focus], [null, { cardId: 'c#A' }])
+})
+
+test('uiReduce: a run, a refusal that carries its reason, a failure and the end of Finish', () => {
+  let ui = uiReduce(uiReduce(initialUi, { kind: 'finish-ask', cardId: 'c#A' }), { kind: 'finish-run', name: 'n1' })
+  assert.deepEqual([ui.finishing, ui.finishes.n1], [null, { kind: 'running' }])
+  ui = uiReduce(ui, { kind: 'worktree-kept', name: 'n1', path: '/p', reason: 'unpushed' })
+  assert.deepEqual([ui.cleanups.n1, ui.finishes.n1], [{ kind: 'kept', path: '/p', reason: 'unpushed' }, undefined])
+  ui = uiReduce(ui, { kind: 'finish-run', name: 'n1' })
+  assert.equal(ui.cleanups.n1, undefined, 'a new run forgets the refusal')
+  ui = uiReduce(ui, { kind: 'finish-failed', name: 'n1', reason: 'x' })
+  assert.deepEqual(ui.finishes.n1, { kind: 'failed', reason: 'x' })
+  ui = uiReduce(ui, { kind: 'cleanup-done', name: 'n1' })
+  assert.deepEqual([ui.finishes, ui.cleanups], [{}, {}])
+})
