@@ -198,7 +198,7 @@ Crew's route sets `owner_app` only when the request carries an app identity (`ch
 
 The subfolder id is saved in `POST /chats/<name>/started` as `worktree_folder_id`.
 
-Confirmed from Crew 0.12.2's source: `POST /api/chat/folders` accepts `project_dir` from apps and Crew marks the folder `owner_app`. `POST /api/chat/slots` has no directory field, only `folder_id`. The subfolder-per-card approach is therefore the decided design.
+Confirmed from Crew 0.12.2's source: `POST /api/chat/folders` accepts `project_dir` from apps. Crew marks the folder `owner_app` only when the request carries an app identity, and on the host it did not (see above). `POST /api/chat/slots` has no directory field, only `folder_id`. The subfolder-per-card approach is therefore the decided design.
 
 ### Finish in the page (`ui/index.mjs`)
 
@@ -270,7 +270,7 @@ At least 100 iterations with the seed printed on failure.
 
 | Where | Change |
 |---|---|
-| Epic page (`docs/epics/epic-board.md`) | Story line links to `.kiro/specs/a-worktree-per-card/` and is set to in progress; "Not in this epic" updated to allow one app-owned subfolder per started card |
+| Epic page (`docs/epics/epic-board.md`) | Story line links to `.kiro/specs/a-worktree-per-card/` and is set to in progress; "Not in this epic" updated to allow one subfolder per started card |
 | Start spec (`start-a-story`), Requirement 4 | A card with a finished record can be started again, including a Done card; reserve response may include `worktree_path`; `started` body may include `worktree_folder_id`; start sequence creates Worktree_Folder when setting is on |
 
 The earlier "no finished" comment on `STATE_WORDS` in `ui/index.mjs` stops being true and is changed in group 5. The old group 3 tests of the auto cleanup are replaced by the Finish tests (task 5.5 and 5.7); they test behaviour this group removes. No other earlier test stops being true. `build_brief` with no `worktree_path` argument is unchanged. Old `chats.json` records without the new fields are readable.
@@ -302,7 +302,7 @@ The earlier "no finished" comment on `STATE_WORDS` in `ui/index.mjs` stops being
 ## Design Decisions
 
 - **Worktree beside the checkout, not in the data folder.** git worktrees should live outside the checkout tree. A sibling path keeps the layout predictable, matches what the terminal user would expect, and makes manual cleanup straightforward.
-- **Subfolder per worktree, confirmed approach.** `POST /api/chat/folders` accepts `project_dir` from apps (Crew 0.12.2, `chat_folders_routes.py`); `POST /api/chat/slots` has no directory field. The page creates one `owner_app` Crew subfolder per started card with `project_dir = Worktree_Path`, opens the chat there, and removes the subfolder on cleanup.
+- **Subfolder per worktree, confirmed approach.** `POST /api/chat/folders` accepts `project_dir` from apps (Crew 0.12.2, `chat_folders_routes.py`); `POST /api/chat/slots` has no directory field. The page creates one Crew subfolder per started card with `project_dir = Worktree_Path` and opens the chat there. Crew refuses DELETE for apps, so Finish session clears the subfolder's `project_dir` instead.
 - **Worktree creation in the reserve step.** Reserve is the backend step that runs before any Crew call. Creating the worktree there means: if it fails, nothing is orphaned in Crew. If it succeeds and the Crew calls fail, the worktree is reused on the next retry (criterion 2.4).
 - **Old records without new fields stay readable.** `_check_records` treats missing `worktree_path` and `worktree_folder_id` as `null`. Adding these fields to the writer always ensures the file stays in a known form after any write.
 - **Default `worktree: true`.** The story says the setting is "on by default". Existing installations that have no `worktree` key in `setup.json` get the new behaviour automatically, which matches the epic's intent.
@@ -314,10 +314,10 @@ The earlier "no finished" comment on `STATE_WORDS` in `ui/index.mjs` stops being
 
 ## Open Questions
 
-**A. Resolved.** `POST /api/chat/folders` accepts `project_dir` from apps (confirmed from Crew 0.12.2, `chat_folders_routes.py`). Crew marks the folder `owner_app`. `POST /api/chat/slots` has no directory field. The subfolder-per-card approach is the decided design.
+**A. Resolved.** `POST /api/chat/folders` accepts `project_dir` from apps (confirmed from Crew 0.12.2, `chat_folders_routes.py`). On the host Crew did not mark the folder `owner_app`. `POST /api/chat/slots` has no directory field. The subfolder-per-card approach is the decided design.
 
 **B. Resolved.** `DELETE /api/chat/folders/<id>` returns 403 `folder_delete_forbidden` for apps (Crew 0.12.2, `chat_folders_routes.py` ~line 1241: `if request_app: return 403`), and each refusal is written to the person's access log. Instead, cleanup sends `PATCH /api/chat/folders/<worktree_folder_id>` with `{"project_dir": ""}` — allowed for an app's own folder (`api_chat_folder_update`). Clearing `project_dir` lets Crew's own cleanup remove the folder once it is empty. Requirement 5, criterion 3 updated accordingly.
 
-**C. Resolved.** `/api/chat/folders` in `app.json` covers `POST` requests (apps can create folders). No separate entry is needed. The board creates one `owner_app` subfolder per started card. `DELETE /api/chat/folders/<id>` is refused for apps (see Open Question B), so no delete permission is exercised.
+**C. Resolved.** `/api/chat/folders` in `app.json` covers `POST` requests (apps can create folders). No separate entry is needed. The board creates one subfolder per started card. `DELETE /api/chat/folders/<id>` is refused for apps (see Open Question B), so no delete permission is exercised.
 
 **D. Resolved.** The note after Finish is posted with `POST /api/chat/slots/<key>/note` (`chat_api/slot_note.py`, `api_chat_slot_note`), which starts no agent turn. The board already holds the grant: `permissions.api` in `app.json` lists `/api/chat/slots`, the prefix the board's `.../resume` call uses. The slot is one the board created, which is what Crew's ownership check for app callers looks for (`deny_app_slot_session_access`). The function looks the slot up in `state._slots` and answers `slot_not_found` (404) when it is missing, so a chat the person has closed gets no note and nothing is written. When the chat is open but a turn is running, the note is held durably and written at the end of that turn (`visibleDeferred` true in the answer). The board treats a 404, and any other failure, the same way: it skips the note and Finish carries on. The card still shows "Session finished".
