@@ -194,7 +194,7 @@ POST /api/chat/folders
 
 The folder name is `<story name> · <last 8 characters of the Chat_Record's name>` (separator is ` · `, U+00B7). The whole name is capped at 100 characters by shortening the story name part to at most 89 characters. When the story name is empty, the name is just the 8-character suffix. This makes each reservation's folder name unique: a second start of the same card uses a new record name and therefore a new suffix, so Crew does not return the first card's folder (Crew 0.12.2, `chat_folders_records.py`, `refuse_duplicate_name`: same name under same parent returns `"reused": True`).
 
-Crew sets `owner_app` automatically. The response includes the new folder's `id`. The page then creates the chat with `folder_id` set to this subfolder id (not the project's folder).
+Crew's route sets `owner_app` only when the request carries an app identity (`chat_folders_records.py`). On the Crew 0.12.2 host the request did not, and the folder record had no `owner_app`. So the board does not rely on it: `GET .../setup` returns `worktree_folder_ids`, every `worktree_folder_id` in any running project's chat records, and the Projects view leaves out the folders with those ids. A project whose records cannot be read adds none. The response includes the new folder's `id`. The page then creates the chat with `folder_id` set to this subfolder id (not the project's folder).
 
 The subfolder id is saved in `POST /chats/<name>/started` as `worktree_folder_id`.
 

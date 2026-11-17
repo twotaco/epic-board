@@ -1,6 +1,7 @@
 import contextlib
 import io
 import json
+import types
 import os
 import shutil
 import subprocess
@@ -724,6 +725,24 @@ class SetupRouteTests(unittest.TestCase):
         self.assertEqual(len(body["projects"]), 1)
         self.assertEqual(body["projects"][0]["id"], "p")
         self.assertEqual(body["projects"][0]["folder_id"], "f_1")
+
+    def test_get_setup_lists_worktree_folder_ids_of_every_project(self):
+        import tempfile
+        from chats import ChatStore
+        rps = []
+        with tempfile.TemporaryDirectory() as d:
+            for pid, ids in (("a", ["wf-1", None]), ("b", ["wf-2"]), ("c", [])):
+                store = ChatStore(d, filename=f"{pid}.json")
+                for i, fid in enumerate(ids):
+                    rec = store.reserve(f"card-{i}")
+                    store.mark_started(rec["name"], f"k-{pid}-{i}", worktree_folder_id=fid)
+                settings = proj.Project(id=pid, name=pid, repository="/r", folder="f", folder_reason=None,
+                                        records_file=f"{pid}.json")
+                rps.append(server.RunningProject(settings, None, types.SimpleNamespace(store=store)))
+            httpd = self._make_server(self._make_state(rps))
+            status, body = self.get(httpd, "/api/setup")
+        self.assertEqual(status, 200)
+        self.assertEqual(body["worktree_folder_ids"], ["wf-1", "wf-2"])
 
     def test_get_setup_unconfigured_returns_empty_projects(self):
         state = self._make_state([], source='unconfigured')

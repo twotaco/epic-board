@@ -195,6 +195,19 @@ class RuntimeState:
             return old
 
 
+def worktree_folder_ids(running):
+    """The Crew folder ids of every Worktree_Folder in any running project's chat records.
+    shortcut: a project whose records cannot be read adds none, and a project no longer set up adds none; upgrade if its folders show."""
+    ids = set()
+    for rp in running:
+        try:
+            records = rp.chats.store.started() if rp.chats is not None else []
+        except ChatError:
+            continue
+        ids.update(r["worktree_folder_id"] for r in records if r.get("worktree_folder_id"))
+    return sorted(ids)
+
+
 class RunningProject:
     """A project's running parts: its plan holder (or None) and its chat service."""
 
@@ -427,6 +440,7 @@ def make_handler(state, router=None):
                 return self._send(200, {
                     "source": state.source,
                     "config_has_projects": state.config_has_projects,
+                    "worktree_folder_ids": worktree_folder_ids(running),
                     "projects": [{"id": rp.id, "name": rp.name,
                                   "folder_id": rp.settings.folder if rp.settings.folder else None,
                                   "worktree": rp.settings.worktree}

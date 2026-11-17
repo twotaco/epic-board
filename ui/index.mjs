@@ -1064,8 +1064,11 @@ export function projectsReduce(state, action) {
 // Builds a Selectable_Folder list from a GET /api/chat/folders body.
 // Returns null for a non-array body; otherwise returns [{id, name, project_dir}] after applying
 // the three folder rules: nearest-wins parent resolution, system-folder exclusion, no-directory exclusion.
-export function readFolders(body) {
+// `worktreeFolderIds` are the ids the backend reports for the worktree folders the board made. Crew does not
+// set owner_app on them, so they are left out here by id.
+export function readFolders(body, worktreeFolderIds = []) {
   if (!Array.isArray(body)) return null
+  const made = new Set(Array.isArray(worktreeFolderIds) ? worktreeFolderIds : [])
   const byId = new Map()
   for (const item of body) {
     if (item && typeof item.id === 'string') byId.set(item.id, item)
@@ -1077,7 +1080,7 @@ export function readFolders(body) {
   const result = []
   for (const item of body) {
     if (typeof item?.id !== 'string' || typeof item?.name !== 'string') continue
-    if (SYSTEM(item)) continue
+    if (SYSTEM(item) || made.has(item.id)) continue
     // Walk parent_id chain to find nearest directory (up to 20 hops to guard against cycles).
     let dir = item.project_dir ?? null
     if (!dir) {
@@ -1119,7 +1122,11 @@ export function setupReduce(state, action) {
       return { ...state, phase: 'error', saveError: action.message }
     case 'setup-check': {
       const checks = { ...state.checks, [action.folderId]: action.checked }
-      return { ...state, checks }
+      // A folder ticked for the first time gets its own name, as the set-up-projects spec says (Req 4).
+      const folder = state.folders?.find((f) => f.id === action.folderId)
+      const names = action.checked && folder && !(state.names[action.folderId] ?? '').trim()
+        ? { ...state.names, [action.folderId]: folder.name } : state.names
+      return { ...state, checks, names }
     }
     case 'setup-name':
       return { ...state, names: { ...state.names, [action.folderId]: action.value } }
@@ -1574,7 +1581,7 @@ export function renderSetupView(h, setupState, actions, kit = {}) {
           h('input', {
             type: 'checkbox',
             checked,
-            onChange: (e) => actions.checkFolder?.({ folderId: folder.id, checked: e.target.checked }),
+            onChange: () => actions.checkFolder?.({ folderId: folder.id, checked: !checked }),
           }),
           folder.name),
         h('div', { className: 'eb-folder-dir' }, folder.project_dir),
@@ -1582,7 +1589,9 @@ export function renderSetupView(h, setupState, actions, kit = {}) {
           ? h('input', {
             type: 'text',
             className: 'eb-folder-name',
-            value: names[folder.id] ?? '',
+            // Uncontrolled: the host's page keeps what is typed in the box; the state follows it. The box is
+            // mounted again with the last value when the folder is ticked again.
+            defaultValue: names[folder.id] ?? '',
             placeholder: folder.name,
             'aria-label': `Name for ${folder.name}`,
             onChange: (e) => actions.nameFolder?.({ folderId: folder.id, value: e.target.value }),
@@ -2106,7 +2115,7 @@ export function createBoard(React, env = {}) {
         clearTimer(timer)
         if (!latest.current.alive) return
         if (foldersResult.status === 'fulfilled' && setupResult.status === 'fulfilled') {
-          setupDispatch({ kind: 'setup-loaded', folders: readFolders(foldersResult.value) ?? [], setupInfo: setupResult.value })
+          setupDispatch({ kind: 'setup-loaded', folders: readFolders(foldersResult.value, setupResult.value?.worktree_folder_ids) ?? [], setupInfo: setupResult.value })
         } else {
           const reason = foldersResult.reason ?? setupResult.reason
           setupDispatch({ kind: 'setup-load-failed', message: String(reason?.message ?? reason) })

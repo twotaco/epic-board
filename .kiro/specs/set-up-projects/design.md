@@ -23,6 +23,7 @@ The page applies three rules to build the list of folders to show:
 1. **Nearest-wins directory:** a folder's directory is its own `project_dir` when non-empty, or the nearest ancestor's (following `parent_id` through the same list) whose `project_dir` is non-empty.
 2. **System folders excluded:** omit folders with a non-empty `owner_app`, with `mate_home: true`, or with `hidden: true`. These tests run before the directory is resolved; a hidden folder is never an ancestor source either.
 3. **No directory excluded:** omit folders whose directory is still empty after rule 1.
+4. **Worktree folders excluded:** omit folders whose id is in `worktree_folder_ids` of `GET .../setup`. Crew does not always set `owner_app` on the folders the board makes for worktrees (A worktree per card), so rule 2 alone does not hide them.
 
 A **Selectable_Folder** is `{id, name, project_dir}` where `project_dir` is the resolved (non-empty) directory. The page sends `project_dir` as `repository` to `POST .../setup`.
 
@@ -138,7 +139,7 @@ class RuntimeState:
 
 **New routes:**
 
-`GET .../setup` — no signature required; runs no git; reads no file beyond what `RuntimeState` already holds:
+`GET .../setup` also returns `worktree_folder_ids`: the sorted ids of the worktree folders in every running project's chat records. `GET .../setup` — no signature required; runs no git; reads no file beyond what `RuntimeState` already holds:
 
 ```python
 # Returns:
