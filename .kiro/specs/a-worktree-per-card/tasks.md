@@ -160,7 +160,7 @@ Group 1 covers all backend changes: git worktree operations, chat record fields,
     - Keyboard and `role` rules of Requirement 7
     - _Requirements: 5.1, 5.2, 5.3, 5.4, 5.6, 5.7, 5.8, 5.10, 7.1, 7.2_
   - [ ] 5.7 Page tests in `tests/ui/board.test.mjs`, `tests/ui/chats.test.mjs` and `tests/ui/state.test.mjs`
-    - The cases listed under the page tests of the design's Testing Strategy; include the exact note text and `source`, that `POST /api/chat` is never called by Finish, a worktree-off record (Finish only marks), and Start again on a finished Done card
+    - The cases listed under the page tests of the design's Testing Strategy; include the exact note text and `source`, a note that fails (404 or any error) leaving the card Finished, that `POST /api/chat` is never called by Finish, a worktree-off record (Finish only marks), and Start again on a finished Done card
     - _Requirements: 5.1–5.13, 7.2_
   - [ ] 5.8 Run the tests
     - Run `python3 -m unittest discover -s tests -t .` and `node --test tests/ui/*.test.mjs` and report the counts run, passed and skipped for each
@@ -168,7 +168,6 @@ Group 1 covers all backend changes: git worktree operations, chat record fields,
   - [ ] 5.9 Check Finish on a Crew host
     - On a worktree story: Finish with a clean pushed worktree removes the folder and shows "Finished"; the note appears in the chat and starts no agent turn; with an uncommitted file and with an unpushed commit "Worktree kept" shows the reason and "Remove anyway" removes it; on a story with the worktree setting off Finish only marks it
     - Start again on the finished card (also one in Done) opens a new chat and a new worktree from origin/main
-    - Confirm Open Question D: whether the note is accepted for a chat the person closed; write the answer into the design
     - _Requirements: 5.1–5.13_
 
 ## Notes
