@@ -114,7 +114,7 @@ Group 1 covers all backend changes: git worktree operations, chat record fields,
 
 - [x] 4. Check on a Crew host
   - [x] 4.1 Confirm Open Questions B and C on the host (builds on task 1.1 which checks the source)
-    - Confirm that `DELETE /api/chat/folders/<id>` works for the app on a live install (Open Question B); update the design if the route is absent
+    - Found on a live install (Open Question B): `DELETE /api/chat/folders/<id>` is refused for apps, so the board uses `PATCH /api/chat/folders/<id>` with `project_dir` empty; `POST` works and Crew marks the folder `owner_app` when the request carries an app identity
     - Confirm that `/api/chat/folders` in `app.json` covers POST and DELETE as the live host enforces them (Open Question C); verify that the worktree subfolder was created with `owner_app` set
     - Write the final answers into the design
     - _Requirements: 2.1, 2.8, 5.3_
