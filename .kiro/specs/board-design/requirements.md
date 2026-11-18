@@ -111,3 +111,15 @@ This story changes what the page looks like and nothing it says or does: every t
 9. THE Panel, whether it holds a chat or the Projects view, SHALL have the look of Crew's own panels, as the design's table gives it: a head that is a bar with Crew's elevated background, a `--border` line under it, and the padding and section-label size and weight of Crew's side panel and `PanelSectionHeader`. THE title SHALL take no colour of the page's own, and "Close" SHALL be a plain `Btn` (criterion 2).
 10. WHERE the Panel sits beside the board it SHALL have a `--border` line on its left edge, and in both of its places (beside the board and over it) it SHALL have the background of Crew's chat column, `--bg`. THE colours SHALL be Theme_Tokens with a `currentColor` second argument (Requirement 5, criterion 1).
 11. THE ChatPanel inside the Panel stays as Crew draws it: the page gives it only `slotKey` and `conversationOnly`, and has no rule of its own that selects anything inside it.
+
+### Requirement 7: Fold the columns on a narrow screen
+
+**User Story:** As a person who opens the board on a phone, I want Planned and Done folded until I open them, so that I reach the stories in progress without scrolling past every planned card.
+
+#### Acceptance Criteria
+
+1. EACH column heading SHALL hold, after its count, a native `button` of class `eb-fold` with `type="button"`, `aria-label` the column's title, `aria-expanded` and `aria-controls` naming the column's body. ITS chevron SHALL be drawn by the style sheet, so the heading's text stays the title and the count. IT is the page's own control and not a Fallback, because Crew has no chevron button for an app.
+2. A column's groups and cards, or "Nothing here", SHALL sit in one `div.eb-column-body`. A folded column SHALL keep its cards in the page and have `data-folded="true"`; the style sheet hides its body only while the columns are in one column.
+3. WHILE the columns sit side by side (the container is 720 pixels wide or more) THE fold button SHALL be hidden and every column's body SHALL show, whatever is folded.
+4. BY default In progress SHALL be open and Planned and Done folded. Pressing the button SHALL turn its column over, and THE page SHALL keep each project's folds in the browser's storage under `epic-board.folded`; a missing, unreadable or broken store SHALL give the defaults and SHALL NOT stop the board.
+

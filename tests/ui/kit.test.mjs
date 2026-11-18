@@ -202,7 +202,8 @@ test('Property 1: the kit changes the look, never the words or the structure', (
     assert.equal(cardsDrawn.length, cardCount)
     if (whole.Card) assert.equal(nodesOf(tree).filter((node) => node.type === whole.Card).length, cardCount)
     else assert.ok(cardsDrawn.every((li) => li.props.className === 'eb-card eb-fb'))
-    if (!whole.Btn) assert.ok(nodesOf(tree).filter((node) => node.type === 'button' && node.props['data-card-id'] === undefined).every((b) => b.props.className === 'eb-fb'))
+    if (!whole.Btn) // The column headings' fold buttons are the page's own control, not a Fallback (board-design, Requirement 7).
+    assert.ok(nodesOf(tree).filter((node) => node.type === 'button' && node.props['data-card-id'] === undefined && node.props.className !== 'eb-fold').every((b) => b.props.className === 'eb-fb'))
     // The title is the one h1 either way, as an element or inside PageHeader.
     assert.equal(nodesOf(tree).filter((node) => node.type === `h${TITLE_LEVEL}`).length, 1)
     // No alert except on the two error states.

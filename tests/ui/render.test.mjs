@@ -195,8 +195,11 @@ function assertStructure(tree, label, { cardControls = false } = {}) {
     .flatMap((box) => (box.props['data-eb-panel'] !== undefined ? [box] : elements(box))))
   // The board header holds the Projects button (set-up-projects, Requirement 4.1).
   const insideHeader = new Set(findAll(tree, (node) => node.props.className === 'eb-header').flatMap((box) => elements(box)))
-  assert.deepEqual(interactive.filter((node) => !insideCards.has(node) && !insideFilter.has(node) && !insidePanelHead.has(node) && !insideHeader.has(node)), [], `${label}: interactive element outside a card`)
-  if (!cardControls) assert.deepEqual(interactive.filter((node) => !insideFilter.has(node) && !insidePanelHead.has(node) && !insideHeader.has(node)), [], `${label}: a view with no chats has no control`)
+  // Each column heading holds its fold button (board-design, Requirement 7), and nothing else that responds.
+  const folds = new Set(findAll(tree, (node) => node.props.className === 'eb-fold'))
+  const outside = (node) => !insideFilter.has(node) && !insidePanelHead.has(node) && !insideHeader.has(node) && !folds.has(node)
+  assert.deepEqual(interactive.filter((node) => !insideCards.has(node) && outside(node)), [], `${label}: interactive element outside a card`)
+  if (!cardControls) assert.deepEqual(interactive.filter(outside), [], `${label}: a view with no chats has no control`)
   const details = findAll(tree, (node) => node.type === 'details')
   const summaries = findAll(tree, (node) => node.type === 'summary')
   assert.ok(details.length <= 1, `${label}: more than one details`)
@@ -1166,7 +1169,8 @@ test('a view with no chats draws the board as before: no control, no data-mode o
   const tree = render(planView(planBody()))
   // The Projects button lives in eb-header; exclude it — it is always present (set-up-projects Req 4.1)
   const headerNodes = new Set(findAll(tree, (n) => n.props.className === 'eb-header').flatMap((box) => elements(box)))
-  assert.deepEqual(buttons(tree).filter((b) => !headerNodes.has(b)).concat(links(tree)), [])
+  // The column headings' fold buttons are not card controls (board-design, Requirement 7).
+  assert.deepEqual(buttons(tree).filter((b) => !headerNodes.has(b) && b.props.className !== 'eb-fold').concat(links(tree)), [])
   for (const li of cardItems(tree)) assert.equal(li.props['data-mode'], 'plain')
 })
 
@@ -1806,7 +1810,7 @@ test('every card button is a Btn, with Start primary and the rest plain, or a na
       assert.equal(btn.props.busy, undefined)
       assert.deepEqual(Object.keys(btn.props).filter((p) => !['type', 'onClick', 'primary', 'data-eb-start'].includes(p)), [])
     }
-    const native = findAll(renderKit(view, {}), (node) => node.type === 'button' && node.props['data-card-id'] === undefined && node.props['data-eb-setup-btn'] === undefined)
+    const native = findAll(renderKit(view, {}), (node) => node.type === 'button' && node.props['data-card-id'] === undefined && node.props['data-eb-setup-btn'] === undefined && node.props.className !== 'eb-fold')
     assert.deepEqual(native.map(textOf), labels)
     assert.ok(native.every((node) => node.props.className === 'eb-fb'))
   }

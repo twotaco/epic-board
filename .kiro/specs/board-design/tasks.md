@@ -136,6 +136,16 @@ The projects parts (Requirement 6) are written against the code that "Switch pro
     - _Requirements: 1.1, 1.2, 1.3, 2.1, 2.2, 2.3, 2.5, 3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 3.9, 4.1, 4.2, 4.3, 4.4, 5.1, 5.3, 5.5, 6.1, 6.2, 6.3, 6.4, 6.5, 6.6, 6.7, 6.9, 6.10, 6.11_
     - _Checked on the Crew host on 15 November 2026, on epic-board itself, beside Crew's Sessions board: the header, the column headers, the cards, the badges, the buttons, both dropdowns in one row, the Projects panel and the chat panel's frame look like Crew's own, in light and dark. The owner's answers to the open questions are in the design. Not checked on the host, covered by tests: the fallbacks with components deleted in the console, the accessibility tree, the header's alignment at 700, 800 and 1,200 pixels, the load and save error notices, and the Checks failed and Stalled badges. Found on the host: the Projects view's config line still used the page's old words; it now uses the setup spec's (set-up-projects, Requirement 4, criterion 3)._
 
+- [x] 5. Fold the columns on a narrow screen
+  - [x] 5.1 Fold button, body and style
+    - In `ui/index.mjs`, `renderColumn` puts a `button.eb-fold` (chevron from the style sheet, `aria-expanded`, `aria-controls`) at the end of the column heading and the groups in `div.eb-column-body`; the column carries `data-folded`. `STYLE` hides a folded body below 720 pixels and hides the button, and shows every body, from 720 pixels (container query and the `@media` fallback)
+    - Pure helpers `DEFAULT_FOLDS`, `foldsFor`, `toggleFold`, `loadFolds`, `saveFolds` (key `epic-board.folded`, per project); the Board keeps the folds in state and passes `folded` and `toggleColumn`
+    - _Requirements: 7.1, 7.2, 7.3, 7.4_
+  - [x] 5.2 Tests
+    - New `tests/ui/fold.test.mjs`. The structure rules in `render.test.mjs` and `kit.test.mjs` that allowed no control outside a card and no native button but a Fallback now also allow the column's `eb-fold` button (Requirement 7.1)
+    - Built by Claude on the Mac on 2026-11-19 at the owner's request, as a quick change outside a Crew run
+    - _Requirements: 7.1, 7.2, 7.3, 7.4_
+
 ## Notes
 
 - Each group is one pull request and is merged by the owner; start the next group from the updated main

@@ -140,6 +140,51 @@ export function loadChoice(storage) {
   }
 }
 
+// ---- Folded columns (one-column layout on a narrow screen) ----
+
+export const FOLD_STORAGE_KEY = 'epic-board.folded'
+
+// In progress starts open; Planned and Done start folded.
+export const DEFAULT_FOLDS = Object.freeze({ planned: true, 'in progress': false, done: true })
+
+// The saved folds of every project, {projectId: {columnKey: true|false}}, or {} when there is no storage,
+// the read throws or the value is not an object.
+export function loadFolds(storage) {
+  try {
+    const value = JSON.parse(storage?.getItem(FOLD_STORAGE_KEY) ?? 'null')
+    return value !== null && typeof value === 'object' && !Array.isArray(value) ? value : {}
+  } catch {
+    return {}
+  }
+}
+
+// Saves the folds. Gives false, and throws nothing, when there is no storage or the write fails.
+export function saveFolds(storage, folds) {
+  try {
+    storage.setItem(FOLD_STORAGE_KEY, JSON.stringify(folds))
+    return true
+  } catch {
+    return false
+  }
+}
+
+// The folds of one project: the defaults, with the saved true/false values on top. Other values are ignored.
+export function foldsFor(folds, projectId) {
+  const saved = folds?.[projectId ?? ''] ?? {}
+  const result = { ...DEFAULT_FOLDS }
+  for (const key of Object.keys(DEFAULT_FOLDS)) {
+    if (typeof saved[key] === 'boolean') result[key] = saved[key]
+  }
+  return result
+}
+
+// The folds with one column of one project turned over. Never mutates.
+export function toggleFold(folds, projectId, columnKey) {
+  const id = projectId ?? ''
+  const current = foldsFor(folds, id)
+  return { ...folds, [id]: { ...current, [columnKey]: !current[columnKey] } }
+}
+
 // Saves the choice. Gives false, and throws nothing, when there is no storage or the write fails.
 export function saveChoice(storage, key) {
   try {
@@ -895,6 +940,14 @@ export const STYLE = `
 .eb-dot { flex: none; width: 8px; height: 8px; margin-right: 2px; border-radius: 50%; background: var(--eb-lane, currentColor); }
 .eb-column-name { margin-right: auto; color: var(--eb-lane, currentColor); }
 .eb-count { font-size: 11px; font-weight: 400; letter-spacing: normal; color: var(--muted, currentColor); }
+.eb-column-title { position: relative; }
+.eb-fold { all: unset; flex: none; display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; cursor: pointer; color: var(--muted, currentColor); }
+.eb-fold::after { content: ''; position: absolute; inset: 0; }
+.eb-fold:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
+.eb-chevron { width: 6px; height: 6px; border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; transform: translateY(-2px) rotate(45deg); }
+.eb-column[data-folded='true'] .eb-chevron { transform: rotate(-45deg); }
+.eb-column[data-folded='true'] .eb-column-title { border-bottom: 0; }
+.eb-column[data-folded='true'] .eb-column-body { display: none; }
 .eb-group { min-width: 0; margin: 0; padding: 6px; }
 .eb-group-title { margin: 0 0 6px 0; font-size: 11.5px; font-weight: 600; color: var(--muted, currentColor); overflow-wrap: anywhere; }
 .eb-cards { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
@@ -945,10 +998,16 @@ export const STYLE = `
 .eb-problems li { overflow-wrap: anywhere; margin-bottom: 4px; }
 @container (min-width: 720px) {
   .eb-columns { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .eb-fold { display: none; }
+  .eb-column[data-folded='true'] .eb-column-title { border-bottom: 1px solid var(--border, currentColor); }
+  .eb-column[data-folded='true'] .eb-column-body { display: block; }
 }
 @supports not (container-type: inline-size) {
   @media (min-width: 720px) {
     .eb-columns { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .eb-fold { display: none; }
+    .eb-column[data-folded='true'] .eb-column-title { border-bottom: 1px solid var(--border, currentColor); }
+    .eb-column[data-folded='true'] .eb-column-body { display: block; }
   }
 }
 .eb-shell { container: eb-shell / inline-size; height: 100%; }
@@ -1352,18 +1411,31 @@ function renderCard(h, card, index, view, actions, parts = {}) {
     : h('li', { className: 'eb-card eb-fb', ...marks, key: index }, ...children)
 }
 
+// A column. In the one-column layout its heading holds a button that folds or unfolds its cards; the style
+// sheet hides the button, and shows every column, once the columns sit side by side.
 function renderColumn(h, column, view, actions, parts = {}) {
-  return h('div', { className: 'eb-column', 'data-column': column.key, key: column.key },
+  const folded = view.folded?.[column.key] === true
+  const bodyId = `eb-column-${column.key.replace(/[^a-z]+/g, '-')}`
+  return h('div', { className: 'eb-column', 'data-column': column.key, 'data-folded': folded ? 'true' : 'false', key: column.key },
     h(`h${TITLE_LEVEL + 1}`, { className: 'eb-column-title' },
       h('span', { className: 'eb-dot', 'aria-hidden': 'true' }),
       h('span', { className: 'eb-column-name' }, column.title),
       ' ',
-      h('span', { className: 'eb-count' }, String(column.count))),
-    column.groups.length === 0
-      ? h('p', { className: 'eb-empty-column' }, 'Nothing here')
-      : column.groups.map((group, index) => h('div', { className: 'eb-group', key: `${group.key}:${index}` },
-        h(`h${TITLE_LEVEL + 2}`, { className: 'eb-group-title' }, group.name ?? 'No epic'),
-        h('ul', { className: 'eb-cards' }, group.cards.map((card, i) => renderCard(h, card, i, view, actions, parts))))))
+      h('span', { className: 'eb-count' }, String(column.count)),
+      h('button', {
+        type: 'button',
+        className: 'eb-fold',
+        'aria-expanded': folded ? 'false' : 'true',
+        'aria-controls': bodyId,
+        'aria-label': column.title,
+        onClick: () => actions.toggleColumn?.(column.key),
+      }, h('span', { className: 'eb-chevron', 'aria-hidden': 'true' }))),
+    h('div', { className: 'eb-column-body', id: bodyId },
+      column.groups.length === 0
+        ? h('p', { className: 'eb-empty-column' }, 'Nothing here')
+        : column.groups.map((group, index) => h('div', { className: 'eb-group', key: `${group.key}:${index}` },
+          h(`h${TITLE_LEVEL + 2}`, { className: 'eb-group-title' }, group.name ?? 'No epic'),
+          h('ul', { className: 'eb-cards' }, group.cards.map((card, i) => renderCard(h, card, i, view, actions, parts)))))))
 }
 
 function renderProblems(h, problems) {
@@ -1869,6 +1941,7 @@ export function createBoard(React, env = {}) {
     const kit = env.kit ?? hostKit()
     const Select = env.Select !== undefined ? env.Select : (kit.Select ?? null)
     const [filterKey, setFilterKey] = useState(() => loadChoice(storage))
+    const [folds, setFolds] = useState(() => loadFolds(storage))
     const ChatPanel = env.ChatPanel ?? hostChatPanel()
     const hasPanel = isChatPanel(ChatPanel)
     const Kanban = hostIcon()
@@ -2084,6 +2157,12 @@ export function createBoard(React, env = {}) {
     const filter = (key) => {
       setFilterKey(key)
       saveChoice(storage, key)
+    }
+
+    const toggleColumn = (columnKey) => {
+      const next = toggleFold(folds, currentId, columnKey)
+      setFolds(next)
+      saveFolds(storage, next)
     }
 
     const switchProject = (id) => {
@@ -2332,8 +2411,8 @@ export function createBoard(React, env = {}) {
     }
     const projectWorktree = latest.current.projectWorktree
     const board = renderBoard(h,
-      { ...view, chats, ui, panelAvailable: hasPanel, projects: projectsView, projectsNotice, setupState, unconfigured, icon, projectWorktree },
-      { ...actions, filter, switchProject, openSetup, ...setupActionSet },
+      { ...view, chats, ui, panelAvailable: hasPanel, projects: projectsView, projectsNotice, setupState, unconfigured, icon, projectWorktree, folded: foldsFor(folds, currentId) },
+      { ...actions, filter, switchProject, openSetup, toggleColumn, ...setupActionSet },
       { ...kit, Select })
     const chatPanel = !setupOpen ? panelViewOf(view, ui, hasPanel) : null
     let panelTree
