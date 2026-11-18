@@ -56,20 +56,45 @@ class BriefTests(unittest.TestCase):
         text = build_brief(WITH_SPEC, "epic-board.md", "main")
         self.assertIn('Story: "Start a story"', text)
         self.assertIn("Spec: .kiro/specs/start-a-story/", text)
-        self.assertIn("Your job: build the next task group of this story's spec.", text)
-        self.assertIn("first top-level task group that has a task not ticked yet. Build only that group.", text)
+        self.assertIn("Your job: build every task group of this story's spec that is not done yet, with a review after each group.", text)
+        self.assertIn("Build every top-level task group that has a task not ticked yet, one group at a time, in order", text)
+        self.assertNotIn("Build only that group", text)
         self.assertIn("If every task is ticked, change nothing and say so in this chat.", text)
         self.assertIn("If the spec has no tasks, write tasks.md as the only change of your pull request and build nothing.", text)
-        self.assertIn("story/start-a-story-g<N> from origin/main, where <N> is the number of that group", text)
+        self.assertIn("story/start-a-story-g<N> from origin/main, where <N> is the number of the first group you build", text)
+        self.assertIn("Build every group on this one branch.", text)
         self.assertIn("Tick each task you finish in tasks.md, in the same branch.", text)
         self.assertIn("Run the checks the project names", text)
         self.assertIn("open one pull request into main", text)
         self.assert_rules(text)
         self.assertNotIn("write this story's spec", text)
 
+    def test_with_spec_brief_reviews_each_group_with_a_fresh_worker(self):
+        text = build_brief(WITH_SPEC, "epic-board.md", "main")
+        self.assertIn("start a crew worker as its reviewer, with a fresh context", text)
+        self.assertIn("not your summary", text)
+        self.assertIn("start the next group only when it reports nothing left to fix", text)
+        self.assertIn("Never retry a rate limit in a loop.", text)
+        self.assertIn("open the pull request with what is built so far, and say in this chat why you stopped", text)
+        self.assertIn("what the reviewer found and how each finding was fixed", text)
+        steps = [l for l in lines_of(text) if re.match(r"^\d+\. ", l)]
+        review = next(i for i, l in enumerate(steps) if "as its reviewer" in l)
+        report = next(i for i, l in enumerate(steps) if "what the reviewer found" in l)
+        opening_pr = next(i for i, l in enumerate(steps) if "open one pull request" in l)
+        self.assertLess(review, report)
+        self.assertLess(report, opening_pr)
+        self.assert_rules(text)
+
+    def test_no_spec_brief_shapes_tasks_for_one_run(self):
+        text = build_brief(NO_SPEC, "epic-board.md", "main")
+        self.assertIn("read the code the story touches and build on what exists", text)
+        self.assertIn("Shape tasks.md so the whole story can be built in one run", text)
+        self.assertIn("goes in its own group at the end, marked as needing the owner", text)
+        self.assertNotIn("as its reviewer", text)
+
     def test_with_spec_brief_sets_the_story_to_done_when_the_last_task_is_ticked(self):
         text = build_brief(WITH_SPEC, "epic-board.md", "main")
-        done_step = ("If your group ticks the last task in tasks.md, set the story's line in the epic page to done, "
+        done_step = ("If your work ticks the last task in tasks.md, set the story's line in the epic page to done, "
                      "in the same pull request.")
         self.assertIn(done_step, text)
         steps = [l for l in lines_of(text) if re.match(r"^\d+\. ", l)]
@@ -94,7 +119,7 @@ class BriefTests(unittest.TestCase):
         self.assertEqual(numbers, [str(i) for i in range(1, len(numbers) + 1)])
 
     def test_the_two_variants_are_chosen_by_the_spec_alone(self):
-        for spec, marker in ((None, "write this story's spec"), ("x", "build the next task group")):
+        for spec, marker in ((None, "write this story's spec"), ("x", "build every task group")):
             card = dict(NO_SPEC, spec=spec, status="in progress", tasks={"done": 0, "total": 3})
             self.assertIn(marker, build_brief(card, "e.md", "main"))
 
@@ -102,7 +127,7 @@ class BriefTests(unittest.TestCase):
         card = dict(WITH_SPEC, description="SECRET-DESCRIPTION-TEXT", tasks={"done": 1, "total": 2})
         text = build_brief(card, "e.md", "main")
         self.assertNotIn("SECRET-DESCRIPTION-TEXT", text)
-        self.assertNotIn("9", text.replace("g<N>", ""))  # no task counts either
+        self.assertNotIn("9", re.sub(r"(?m)^\d+\. ", "", text).replace("g<N>", ""))  # no task counts either (step numbers aside)
 
     def test_same_inputs_same_text_and_different_inputs_differ(self):
         self.assertEqual(build_brief(NO_SPEC, "e.md", "main"), build_brief(dict(NO_SPEC), "e.md", "main"))
@@ -129,14 +154,14 @@ class BriefTests(unittest.TestCase):
         self.assertNotIn("ma\nin", text)
         self.assertIn("ma?in", text)
 
-    def test_length_stays_under_10000_with_instructions_and_worst_case_names(self):
+    def test_length_stays_under_11000_with_instructions_and_worst_case_names(self):
         worst_name = "\x01" * 200
         threshold_instructions = "x" * 3000
         for card in (dict(NO_SPEC, name=worst_name), dict(WITH_SPEC, name=worst_name, spec="s" * 400)):
             text = build_brief(card, "e" * 400, "b" * 400, instructions=threshold_instructions)
-            self.assertLess(len(text), 10000)
+            self.assertLess(len(text), 11000)  # Crew takes up to 32 000 (handlers_crew_turn.py)
         for card in (NO_SPEC, WITH_SPEC):
-            self.assertLess(len(build_brief(card, "e.md", "main")), 3000)
+            self.assertLess(len(build_brief(card, "e.md", "main")), 4000)
 
     def test_taken_spec_folders_change_the_new_folder_name(self):
         text = build_brief(NO_SPEC, "e.md", "main", taken={"filter-by-epic"})
@@ -679,7 +704,7 @@ class ServiceTests(unittest.TestCase):
     def test_reserve_an_in_progress_card_with_a_spec(self):
         status, body = self.reserve("epic-board.md#Start a story")
         self.assertEqual(status, 200)
-        self.assertIn("build the next task group", body["brief"])
+        self.assertIn("build every task group", body["brief"])
         self.assertIn(".kiro/specs/start-a-story/", body["brief"])
 
     def test_reserve_a_no_epic_card(self):

@@ -144,7 +144,7 @@ The brief gains four pieces:
    > \- Report the exact commands you ran and their results, including how many tests ran, how many passed and how many were skipped. Never claim a check you did not run.
    > \- If a check was skipped, say so.
 
-The total brief length with instructions at the threshold (3000 characters), worst-case names and the new sections is under 10 000 characters. The length test is updated accordingly.
+The total brief length with instructions at the threshold (3000 characters), worst-case names and the new sections is under 10 000 characters. The length test is updated accordingly. Raised on 2026-11-18 to under 11 000 (and under 4000 without instructions) when the build brief gained the whole-story steps (story Run a whole story); Crew accepts chat messages of up to 32 000 characters (`handlers_crew_turn.py`).
 
 ### The card's provenance meta line (`ui/index.mjs`) — removed
 

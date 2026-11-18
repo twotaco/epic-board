@@ -4,7 +4,7 @@ Your whole Kiro plan on one board, and a crew to build it.
 
 ![Epic Board in Kiro Crew](docs/images/board.png)
 
-Epic Board is a [Kiro Crew](https://github.com/kirodotdev/KiroCrew) app. Every spec in your project is a card, grouped under its epic, in Planned, In progress and Done. Click a card to start a Crew conductor on that story. It writes the spec or builds the next task group and opens a pull request. Its chat opens right beside the board, so you approve, answer and steer it without leaving the plan.
+Epic Board is a [Kiro Crew](https://github.com/kirodotdev/KiroCrew) app. Every spec in your project is a card, grouped under its epic, in Planned, In progress and Done. Click a card to start a Crew conductor on that story. It writes the spec, or builds every task group still to do, with a fresh reviewer worker checking each group, and opens one pull request. Its chat opens right beside the board, so you approve, answer and steer it without leaving the plan.
 
 - **Start work from the plan.** One click hands a story to a conductor, with a brief built from the spec.
 - **See every story's state at a glance.** Needs you, Working, Stalled, Review #N with a link to the pull request, or Your turn. The state counts the conductor's workers too.

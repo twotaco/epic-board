@@ -46,7 +46,7 @@ class BriefProperty(unittest.TestCase):
             where = f"seed {seed}"
             self.assertEqual(text, build_brief(dict(card), epic_file, branch, set(taken)), where)
             no_spec = "Your job: write this story's spec. It has none yet." in text
-            with_spec = "Your job: build the next task group of this story's spec." in text
+            with_spec = "Your job: build every task group of this story's spec that is not done yet, with a review after each group." in text
             self.assertEqual((no_spec, with_spec), (card["spec"] is None, card["spec"] is not None), where)
             # the status words follow the variant and the epic: the line is set to in progress when a spec is
             # written, and to done when the last task is ticked, and neither when there is no epic page

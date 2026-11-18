@@ -73,6 +73,23 @@ def _numbered(steps):
 
 
 _CONFIRM = "Confirm in this chat which project files you read."
+_SPEC_CODE = ("Before writing the design, read the code the story touches and build on what exists. "
+              "Say in the design what already exists and what is new.")
+_SPEC_TASKS = ("Shape tasks.md so the whole story can be built in one run, with a review after each top-level group in tasks.md: "
+               "each group ends with the project's checks passing and names the tests that prove it, and any step that "
+               "needs the person (a deploy, a check on a live system or on hardware, a decision) goes in its own group "
+               "at the end, marked as needing the owner.")
+_REVIEW_STEP = ("After each group passes the checks, start a crew worker as its reviewer, with a fresh context. Give it "
+                "the spec folder, the branch and the group number, not your summary. It reads the group's diff against the "
+                "spec and the code, reruns the checks and reports what is wrong or missing; use a different model for it "
+                "when Crew offers one. Fix what it finds, have it check again, and start the next group only when it reports "
+                "nothing left to fix.")
+_STOP_STEP = ("Stop only when a task needs the person (a deploy, a live or hardware check, a decision), the spec does not "
+              "answer a question, you and the reviewer disagree on the same finding twice, or a model or rate limit stops "
+              "you. Never retry a rate limit in a loop. When you stop, push, open the pull request with what is built so "
+              "far, and say in this chat why you stopped.")
+_REVIEW_REPORT = ("In the PR description, list each group built, what the reviewer found and how each finding was fixed, "
+                  "and the checks that ran with their counts.")
 _NAME_CHECK = ("Before opening the pull request, list every table, column, function, file, setting, endpoint and "
                "command your change adds or relies on. Mark each as existing (with the file where you found it) or "
                "new (with the task that creates it). Fix anything that is neither found nor created. "
@@ -125,6 +142,8 @@ def build_brief(card, epic_file, branch, taken=(), instructions=None, worktree_p
             step1,
             f"Create a branch named story/{folder} from origin/{branch}. If the project names branches another way, follow the project.",
             f"Write requirements.md, design.md and tasks.md in .kiro/specs/{folder}/, in the project's usual spec format.",
+            _SPEC_CODE,
+            _SPEC_TASKS,
         ]
         if epic_file:
             work_steps.append(f"Change the story's line in the epic page to link to .kiro/specs/{folder}/. Set its status to in progress.")
@@ -147,15 +166,19 @@ def build_brief(card, epic_file, branch, taken=(), instructions=None, worktree_p
             step1 += f", and the epic page. {_CONFIRM}" if epic_file else f". {_CONFIRM}"
         work_steps = [
             step1,
-            "Find the first top-level task group that has a task not ticked yet. Build only that group. "
-            "If every task is ticked, change nothing and say so in this chat.",
+            "Build every top-level task group that has a task not ticked yet, one group at a time, in order, starting "
+            "with the first. If every task is ticked, change nothing and say so in this chat.",
             "If the spec has no tasks, write tasks.md as the only change of your pull request and build nothing.",
-            f"Create a branch named story/{spec}-g<N> from origin/{branch}, where <N> is the number of that group. "
-            "If the project names branches another way, follow the project.",
-            "Tick each task you finish in tasks.md, in the same branch. Run the checks the project names and fix what fails.",
+            f"Create a branch named story/{spec}-g<N> from origin/{branch}, where <N> is the number of the first group "
+            "you build. Build every group on this one branch. If the project names branches another way, follow the project.",
+            "Tick each task you finish in tasks.md, in the same branch. Run the checks the project names after each "
+            "group, fix what fails, and commit.",
+            _REVIEW_STEP,
+            _STOP_STEP,
+            _REVIEW_REPORT,
         ]
         if epic_file:
-            work_steps.append("If your group ticks the last task in tasks.md, set the story's line in the epic page to done, "
+            work_steps.append("If your work ticks the last task in tasks.md, set the story's line in the epic page to done, "
                               "in the same pull request.")
         steps = []
         if has_worktree:
@@ -166,7 +189,7 @@ def build_brief(card, epic_file, branch, taken=(), instructions=None, worktree_p
         steps.append(_NAME_CHECK)
         steps.append(f"Commit, push the branch, and open one pull request into {branch}.{provenance}")
         lines = opening + [f"Spec: .kiro/specs/{spec}/", f"Main branch: {branch}",
-                           "Your job: build the next task group of this story's spec.", ""] + _numbered(steps)
+                           "Your job: build every task group of this story's spec that is not done yet, with a review after each group.", ""] + _numbered(steps)
     return "\n".join(lines + [""] + _rules(branch))
 
 
