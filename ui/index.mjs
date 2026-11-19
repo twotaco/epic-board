@@ -6,12 +6,13 @@
 // ---- Pure data functions (no `window`, no React) ----
 
 const COLUMNS = [
+  { key: 'unplanned', title: 'Unplanned' },
   { key: 'planned', title: 'Planned' },
   { key: 'in progress', title: 'In progress' },
   { key: 'done', title: 'Done' },
 ]
 
-// The three columns, each with the groups that hold a card of its status.
+// The four columns, each with the groups that hold a card of its status.
 // Groups and cards keep the plan's order. A card listed under two epics is in
 // two groups and counts twice. A group with no epic is named "No epic" and
 // keyed "no-epic"; an epic group is keyed by its file name.
@@ -25,7 +26,7 @@ export function columnsOf(plan, started = new Set()) {
     let count = 0
     for (const group of planGroups) {
       const cards = (group.cards ?? []).filter((card) => {
-        const col = card.status === 'planned' && started.has(card.id) ? 'in progress' : card.status
+        const col = (card.status === 'planned' || card.status === 'unplanned') && started.has(card.id) ? 'in progress' : card.status
         return col === key
       })
       if (cards.length === 0) continue
@@ -144,8 +145,8 @@ export function loadChoice(storage) {
 
 export const FOLD_STORAGE_KEY = 'epic-board.folded'
 
-// In progress starts open; Planned and Done start folded.
-export const DEFAULT_FOLDS = Object.freeze({ planned: true, 'in progress': false, done: true })
+// In progress starts open; Unplanned, Planned and Done start folded.
+export const DEFAULT_FOLDS = Object.freeze({ unplanned: true, planned: true, 'in progress': false, done: true })
 
 // The saved folds of every project, {projectId: {columnKey: true|false}}, or {} when there is no storage,
 // the read throws or the value is not an object.
@@ -997,14 +998,14 @@ export const STYLE = `
 .eb-problems ul { margin: 8px 0 0 0; padding-left: 20px; }
 .eb-problems li { overflow-wrap: anywhere; margin-bottom: 4px; }
 @container (min-width: 720px) {
-  .eb-columns { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .eb-columns { grid-template-columns: repeat(4, minmax(0, 1fr)); }
   .eb-fold { display: none; }
   .eb-column[data-folded='true'] .eb-column-title { border-bottom: 1px solid var(--border, currentColor); }
   .eb-column[data-folded='true'] .eb-column-body { display: block; }
 }
 @supports not (container-type: inline-size) {
   @media (min-width: 720px) {
-    .eb-columns { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .eb-columns { grid-template-columns: repeat(4, minmax(0, 1fr)); }
     .eb-fold { display: none; }
     .eb-column[data-folded='true'] .eb-column-title { border-bottom: 1px solid var(--border, currentColor); }
     .eb-column[data-folded='true'] .eb-column-body { display: block; }

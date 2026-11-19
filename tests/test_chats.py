@@ -85,6 +85,15 @@ class BriefTests(unittest.TestCase):
         self.assertLess(report, opening_pr)
         self.assert_rules(text)
 
+    def test_both_briefs_check_open_pull_requests_before_changing_anything(self):
+        for card in (NO_SPEC, WITH_SPEC):
+            text = build_brief(card, "epic-board.md", "main")
+            steps = [l for l in lines_of(text) if re.match(r"^\d+\. ", l)]
+            check = next(i for i, l in enumerate(steps) if "list the project's open pull requests" in l)
+            self.assertIn("the same migration number or other numbered file", steps[check])
+            self.assertIn("say how you will avoid the clash", steps[check])
+            self.assertEqual(check, 1, "right after reading the spec or the epic page")
+
     def test_no_spec_brief_shapes_tasks_for_one_run(self):
         text = build_brief(NO_SPEC, "epic-board.md", "main")
         self.assertIn("read the code the story touches and build on what exists", text)

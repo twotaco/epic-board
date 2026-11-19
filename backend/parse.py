@@ -9,7 +9,7 @@ Story = namedtuple("Story", "name link status description")
 TASK = re.compile(r"^\s*[-*+]\s+\[([ xX-])\](\*)?")
 STORY = re.compile(r"^[-*] (?:\[([^\]]*)\]\(([^)]*)\)|(.+?)) —(?: (.*))?$")
 SPEC_LINK = re.compile(r"\.kiro/specs/([^/)#?\s]+)")
-STATUSES = ("planned", "in progress", "done")
+STATUSES = ("unplanned", "planned", "in progress", "done")
 
 
 def parse_tasks(text):

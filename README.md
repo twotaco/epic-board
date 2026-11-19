@@ -15,7 +15,7 @@ You stay in charge: the board never merges, pushes or edits your plan, and it ne
 
 ## Works with the kiro-epics power
 
-Epic Board reads specs from `.kiro/specs/` and epics from `docs/epics/`, the layout of the [kiro-epics](https://github.com/twotaco/dead-reckoning/tree/main/powers/kiro-epics) power. With epics, cards are grouped under them, and stories that have no spec yet show as planned cards. A project without epics works too: every spec is a card under "No epic".
+Epic Board reads specs from `.kiro/specs/` and epics from `docs/epics/`, the layout of the [kiro-epics](https://github.com/twotaco/dead-reckoning/tree/main/powers/kiro-epics) power. With epics, cards are grouped under them, and stories that have no spec yet show as planned cards. A story whose epic line says `unplanned` sits in its own Unplanned column, set aside for later. A project without epics works too: every spec is a card under "No epic".
 
 ## Install
 

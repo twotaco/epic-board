@@ -94,6 +94,9 @@ _NAME_CHECK = ("Before opening the pull request, list every table, column, funct
                "command your change adds or relies on. Mark each as existing (with the file where you found it) or "
                "new (with the task that creates it). Fix anything that is neither found nor created. "
                "Put the list in the PR description.")
+_OPEN_PRS = ("Before you change anything, list the project's open pull requests (for example with `gh pr list`). If one "
+             "changes the same files, or takes the same migration number or other numbered file, say so in this chat and "
+             "say how you will avoid the clash.")
 _SETUP_STEP = ("This story runs in its own worktree. Before anything else, run the project's setup "
                "(as AGENTS.md says — for example `npm ci`).")
 
@@ -140,6 +143,7 @@ def build_brief(card, epic_file, branch, taken=(), instructions=None, worktree_p
                          f"Follow them for how specs, branches and checks work. {_CONFIRM}")
         work_steps = [
             step1,
+            _OPEN_PRS,
             f"Create a branch named story/{folder} from origin/{branch}. If the project names branches another way, follow the project.",
             f"Write requirements.md, design.md and tasks.md in .kiro/specs/{folder}/, in the project's usual spec format.",
             _SPEC_CODE,
@@ -166,6 +170,7 @@ def build_brief(card, epic_file, branch, taken=(), instructions=None, worktree_p
             step1 += f", and the epic page. {_CONFIRM}" if epic_file else f". {_CONFIRM}"
         work_steps = [
             step1,
+            _OPEN_PRS,
             "Build every top-level task group that has a task not ticked yet, one group at a time, in order, starting "
             "with the first. If every task is ticked, change nothing and say so in this chat.",
             "If the spec has no tasks, write tasks.md as the only change of your pull request and build nothing.",

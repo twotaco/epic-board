@@ -123,3 +123,14 @@ This story changes what the page looks like and nothing it says or does: every t
 3. WHILE the columns sit side by side (the container is 720 pixels wide or more) THE fold button SHALL be hidden and every column's body SHALL show, whatever is folded.
 4. BY default In progress SHALL be open and Planned and Done folded. Pressing the button SHALL turn its column over, and THE page SHALL keep each project's folds in the browser's storage under `epic-board.folded`; a missing, unreadable or broken store SHALL give the defaults and SHALL NOT stop the board.
 
+### Requirement 8: An Unplanned column for stories set aside
+
+**User Story:** As the owner, I want to set some stories aside for later in their own column, so that Planned shows only what we still mean to do.
+
+#### Acceptance Criteria
+
+1. A story whose line in an epic page has the status `unplanned` (any capitals, the word before the first full stop, as for the other statuses) SHALL get the status `unplanned`.
+2. THE board SHALL have four columns in this order: Unplanned, Planned, In progress, Done. From 720 pixels they SHALL sit side by side in four equal columns.
+3. FOR a story with a spec, an `unplanned` line SHALL win over the column its ticked tasks give, unless every task is ticked; then the story SHALL be Done.
+4. A started Unplanned card SHALL show in In progress, as a started Planned card does, and Start SHALL work on it as on any other card.
+5. ON a narrow screen Unplanned SHALL start folded, like Planned and Done (Requirement 7.4).

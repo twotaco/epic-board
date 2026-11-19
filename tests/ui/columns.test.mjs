@@ -7,8 +7,8 @@ import { columnsOf } from '../../ui/index.mjs'
 import { forSeeds } from './support.mjs'
 
 const ITERATIONS = 150
-const STATUSES = ['planned', 'in progress', 'done']
-const COLUMN_TITLES = ['Planned', 'In progress', 'Done']
+const STATUSES = ['unplanned', 'planned', 'in progress', 'done']
+const COLUMN_TITLES = ['Unplanned', 'Planned', 'In progress', 'Done']
 
 // A random plan. Epic groups come first, each with its own file; a group with no
 // epic may come last, as in the real plan. Some groups are empty, and some stories
@@ -59,7 +59,7 @@ function randomPlan(r) {
 
 // The effective column of a card given the started set.
 function effectiveColumn(card, started) {
-  return card.status === 'planned' && started.has(card.id) ? 'in progress' : card.status
+  return (card.status === 'planned' || card.status === 'unplanned') && started.has(card.id) ? 'in progress' : card.status
 }
 
 function idsOf(column) {
@@ -74,7 +74,7 @@ test('Property 4: every card is in the one column of its status (or In progress 
     const started = new Set(allIds.filter(() => r.bool(0.4)))
     const columns = columnsOf(plan, started)
 
-    // The three columns, in order.
+    // The four columns, in order.
     assert.deepEqual(columns.map((column) => column.title), COLUMN_TITLES)
     assert.deepEqual(columns.map((column) => column.key), STATUSES)
 
@@ -159,7 +159,7 @@ test('a column with no cards has count 0 and no groups ("Nothing here")', () => 
       { epic: null, cards: [{ name: 'C', status: 'planned' }] },
     ],
   }
-  const [planned, inProgress, done] = columnsOf(plan)
+  const [, planned, inProgress, done] = columnsOf(plan)
   assert.equal(inProgress.title, 'In progress')
   assert.equal(inProgress.count, 0)
   assert.deepEqual(inProgress.groups, [])
@@ -168,7 +168,7 @@ test('a column with no cards has count 0 and no groups ("Nothing here")', () => 
   assert.equal(done.count, 1)
 })
 
-test('an empty plan gives three empty columns', () => {
+test('an empty plan gives four empty columns', () => {
   const columns = columnsOf({ groups: [] })
   assert.deepEqual(columns.map((column) => column.title), COLUMN_TITLES)
   for (const column of columns) {
@@ -177,9 +177,9 @@ test('an empty plan gives three empty columns', () => {
   }
 })
 
-test('a plan whose only group has no cards gives three empty columns', () => {
+test('a plan whose only group has no cards gives four empty columns', () => {
   const columns = columnsOf({ groups: [{ epic: { name: 'Empty', file: 'empty.md' }, cards: [] }] })
-  assert.equal(columns.length, 3)
+  assert.equal(columns.length, 4)
   for (const column of columns) {
     assert.equal(column.count, 0)
     assert.deepEqual(column.groups, [])
@@ -193,7 +193,7 @@ test('a card in two epic groups appears once under each, in its own status colum
       { epic: { name: 'Two', file: 'two.md' }, cards: [{ name: 'Shared', status: 'done' }] },
     ],
   }
-  const [planned, inProgress, done] = columnsOf(plan)
+  const [, planned, inProgress, done] = columnsOf(plan)
   assert.deepEqual(planned.groups.map((group) => group.name), ['One'])
   assert.deepEqual(done.groups.map((group) => group.name), ['Two'])
   assert.equal(inProgress.count, 0)
@@ -210,7 +210,7 @@ test('a planned started card is in In progress and counts there', () => {
     ],
   }
   const started = new Set(['a'])
-  const [planned, inProgress, done] = columnsOf(plan, started)
+  const [, planned, inProgress, done] = columnsOf(plan, started)
   assert.equal(planned.count, 1)
   assert.equal(inProgress.count, 1)
   assert.equal(done.count, 0)
@@ -225,7 +225,7 @@ test('an in-progress card stays in In progress regardless of started', () => {
     ],
   }
   const started = new Set(['x'])
-  const [, inProgress] = columnsOf(plan, started)
+  const [, , inProgress] = columnsOf(plan, started)
   assert.equal(inProgress.count, 1)
   assert.deepEqual(inProgress.groups[0].cards.map((c) => c.id), ['x'])
 })
@@ -237,7 +237,7 @@ test('a done card stays in Done regardless of started', () => {
     ],
   }
   const started = new Set(['y'])
-  const [, , done] = columnsOf(plan, started)
+  const [, , , done] = columnsOf(plan, started)
   assert.equal(done.count, 1)
 })
 
@@ -248,9 +248,27 @@ test('removing a started record returns a card to Planned', () => {
     ],
   }
   // With the record: card is in In progress.
-  const [, inProgress1] = columnsOf(plan, new Set(['z']))
+  const [, , inProgress1] = columnsOf(plan, new Set(['z']))
   assert.equal(inProgress1.count, 1)
   // Record removed: card goes back to Planned.
-  const [planned2] = columnsOf(plan, new Set())
+  const [, planned2] = columnsOf(plan, new Set())
   assert.equal(planned2.count, 1)
+})
+
+test('an unplanned card has its own column, first, and a started one moves to In progress', () => {
+  const plan = {
+    groups: [
+      { epic: { name: 'Epic', file: 'epic.md' }, cards: [
+        { id: 'u', name: 'U', status: 'unplanned' },
+        { id: 'v', name: 'V', status: 'unplanned' },
+        { id: 'p', name: 'P', status: 'planned' },
+      ] },
+    ],
+  }
+  const [unplanned, planned, inProgress] = columnsOf(plan, new Set(['v']))
+  assert.equal(unplanned.key, 'unplanned')
+  assert.equal(unplanned.title, 'Unplanned')
+  assert.deepEqual(unplanned.groups[0].cards.map((card) => card.id), ['u'])
+  assert.deepEqual(planned.groups[0].cards.map((card) => card.id), ['p'])
+  assert.deepEqual(inProgress.groups[0].cards.map((card) => card.id), ['v'])
 })

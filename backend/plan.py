@@ -51,6 +51,9 @@ def story_card(story, specs, epic_name):
         status, tasks = specs[folder]
         if story.status == "done":
             status = "done"
+        elif story.status == "unplanned" and status != "done":
+            # Set aside for later: the epic line wins over the spec's ticked tasks, unless every task is done.
+            status = "unplanned"
         return folder, card(story.name, status, folder, tasks, epic_name, story.description)
     return None, card(story.name, story.status or "planned", None, None, epic_name, story.description)
 

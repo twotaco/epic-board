@@ -58,6 +58,22 @@ class PlanTests(unittest.TestCase):
         self.assertIsNone(groups[0]["cards"][1]["tasks"])
         self.assertEqual(groups[0]["cards"][0]["epic"], "A")
 
+    def test_unplanned_line_wins_over_ticked_tasks_until_every_task_is_done(self):
+        epic = ("# E\n## Stories\n- [Begun](../../.kiro/specs/begun/) — unplanned. After the hackathon.\n"
+                "- [Fresh](../../.kiro/specs/fresh/) — Unplanned\n- [Whole](../../.kiro/specs/whole/) — unplanned\n"
+                "- Idea — unplanned. Later.\n- Other — planned\n")
+        groups, problems = build_plan(Memory({
+            ".kiro/specs/begun/tasks.md": "- [x] 1\n- [ ] 2\n",
+            ".kiro/specs/fresh/tasks.md": "- [ ] 1\n",
+            ".kiro/specs/whole/tasks.md": "- [x] 1\n",
+            "docs/epics/e.md": epic,
+        }))
+        self.assertEqual(problems, [])
+        self.assertEqual(names(groups[0]), [("Begun", "unplanned"), ("Fresh", "unplanned"), ("Whole", "done"),
+                                            ("Idea", "unplanned"), ("Other", "planned")])
+        self.assertEqual(groups[0]["cards"][0]["tasks"], {"done": 1, "total": 2})
+        self.assertEqual(groups[0]["cards"][3]["description"], "Later.")
+
     def test_standalone_with_stories_section(self):
         groups, _ = build_plan(Memory({
             ".kiro/specs/in-epic/tasks.md": "- [x] 1\n",

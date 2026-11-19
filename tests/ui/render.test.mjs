@@ -249,17 +249,17 @@ test('the title is h<TITLE_LEVEL>, columns one below it, groups two below, in ev
   }
 })
 
-test('column headings read Planned, In progress, Done with their counts; group headings follow the plan', () => {
+test('column headings read Unplanned, Planned, In progress, Done with their counts; group headings follow the plan', () => {
   const plan = planBody()
   const tree = render(planView(plan))
   const columns = columnsOf(plan)
   const columnHeadings = findAll(tree, (node) => node.type === `h${TITLE_LEVEL + 1}`)
-  assert.equal(columnHeadings.length, 3)
+  assert.equal(columnHeadings.length, 4)
   columnHeadings.forEach((heading, i) => {
     const text = textOf(heading)
     assert.match(text, new RegExp(`^${columns[i].title}\\s*${columns[i].count}$`))
   })
-  assert.deepEqual(columnHeadings.map((heading) => textOf(heading).replace(/\s*\d+$/, '')), ['Planned', 'In progress', 'Done'])
+  assert.deepEqual(columnHeadings.map((heading) => textOf(heading).replace(/\s*\d+$/, '')), ['Unplanned', 'Planned', 'In progress', 'Done'])
   // Planned: Epic Board, Hardening, then No epic. In progress: Epic Board. Done: Epic Board, No epic.
   const groupHeadings = findAll(tree, (node) => node.type === `h${TITLE_LEVEL + 2}`).map(textOf)
   assert.deepEqual(groupHeadings, ['Epic Board', 'Hardening', 'No epic', 'Epic Board', 'Epic Board', 'No epic'])
@@ -430,11 +430,11 @@ test('a card with one task reads "1 of 1 task" and a card with three reads "task
 
 test('"Nothing here" shows once for each column without cards', () => {
   const onlyPlanned = planBody({ groups: [{ epic: null, cards: [card('A', 'planned', 'a', null, null)] }] })
-  assert.equal(withText(render(planView(onlyPlanned)), 'Nothing here').length, 2)
-  assert.equal(withText(render(planView(planBody())), 'Nothing here').length, 0)
+  assert.equal(withText(render(planView(onlyPlanned)), 'Nothing here').length, 3)
+  assert.equal(withText(render(planView(planBody())), 'Nothing here').length, 1, 'planBody has no unplanned card')
   const onlyDone = planBody({ groups: [{ epic: { name: 'E', file: 'e.md' }, cards: [card('A', 'done', 'a', null, 'E')] }] })
   const tree = render(planView(onlyDone))
-  assert.equal(withText(tree, 'Nothing here').length, 2)
+  assert.equal(withText(tree, 'Nothing here').length, 3)
   // Each "Nothing here" sits in the column of an empty status, after its heading.
   const order = []
   walk(tree, (node) => {
@@ -442,7 +442,7 @@ test('"Nothing here" shows once for each column without cards', () => {
     if (node.type === `h${TITLE_LEVEL + 1}`) order.push(textOf(node).replace(/\s*\d+$/, ''))
     if (node.children.length === 1 && node.children[0] === 'Nothing here') order.push('Nothing here')
   })
-  assert.deepEqual(order, ['Planned', 'Nothing here', 'In progress', 'Nothing here', 'Done'])
+  assert.deepEqual(order, ['Unplanned', 'Nothing here', 'Planned', 'Nothing here', 'In progress', 'Nothing here', 'Done'])
 })
 
 // ---- Header, refresh slot, notices ----
@@ -754,13 +754,13 @@ test('STYLE stacks the columns, puts them side by side from 720px in a container
 
   const container = blockBody(STYLE, '@container (min-width: 720px)')
   assert.ok(container !== null, '@container (min-width: 720px)')
-  assert.match(container, /\.eb-columns\s*\{[^}]*grid-template-columns:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\)/)
+  assert.match(container, /\.eb-columns\s*\{[^}]*grid-template-columns:\s*repeat\(4,\s*minmax\(0,\s*1fr\)\)/)
 
   const supports = blockBody(STYLE, '@supports not (container-type: inline-size)')
   assert.ok(supports !== null, '@supports fallback')
   const media = blockBody(supports, '@media (min-width: 720px)')
   assert.ok(media !== null, '@media (min-width: 720px) inside the fallback')
-  assert.match(media, /\.eb-columns\s*\{[^}]*grid-template-columns:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\)/)
+  assert.match(media, /\.eb-columns\s*\{[^}]*grid-template-columns:\s*repeat\(4,\s*minmax\(0,\s*1fr\)\)/)
 
   // The wide rules come after the base rule, so they win.
   assert.ok(STYLE.indexOf('@container (min-width: 720px)') > STYLE.indexOf('.eb-columns {'))
@@ -1567,16 +1567,16 @@ test('the page takes its own gutter only when it has PageHeader', () => {
 test('the column header holds an aria-hidden dot, the name and the count, with the capitals in the style sheet', () => {
   const tree = render(planView(planBody()))
   const headings = findAll(tree, (node) => node.type === `h${TITLE_LEVEL + 1}`)
-  assert.equal(headings.length, 3)
+  assert.equal(headings.length, 4)
   headings.forEach((heading, i) => {
     const [dot, name, , count] = heading.children
     assert.deepEqual([dot.props.className, dot.props['aria-hidden'], dot.children], ['eb-dot', 'true', []])
     assert.equal(name.props.className, 'eb-column-name')
-    assert.equal(name.children[0], ['Planned', 'In progress', 'Done'][i], 'the name is not in capitals')
+    assert.equal(name.children[0], ['Unplanned', 'Planned', 'In progress', 'Done'][i], 'the name is not in capitals')
     assert.equal(count.props.className, 'eb-count')
     assert.equal(textOf(heading), `${name.children[0]} ${count.children[0]}`)
   })
-  assert.deepEqual(findAll(tree, (node) => node.props['data-column'] !== undefined).map((node) => node.props['data-column']), ['planned', 'in progress', 'done'])
+  assert.deepEqual(findAll(tree, (node) => node.props['data-column'] !== undefined).map((node) => node.props['data-column']), ['unplanned', 'planned', 'in progress', 'done'])
   assert.match(STYLE, /\.eb-column-title\s*\{[^}]*text-transform:\s*uppercase/)
   assert.match(STYLE, /\.eb-column\s*\{[^}]*--eb-lane:\s*var\(--muted, currentColor\)/)
   assert.match(STYLE, /\.eb-column\[data-column='in progress'\]\s*\{[^}]*var\(--accent, currentColor\)/)

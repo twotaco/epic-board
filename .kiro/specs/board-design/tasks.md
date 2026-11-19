@@ -145,6 +145,14 @@ The projects parts (Requirement 6) are written against the code that "Switch pro
     - New `tests/ui/fold.test.mjs`. The structure rules in `render.test.mjs` and `kit.test.mjs` that allowed no control outside a card and no native button but a Fallback now also allow the column's `eb-fold` button (Requirement 7.1)
     - Built by Claude on the Mac on 2026-11-19 at the owner's request, as a quick change outside a Crew run
     - _Requirements: 7.1, 7.2, 7.3, 7.4_
+- [x] 6. An Unplanned column
+  - [x] 6.1 Status, column and style
+    - `backend/parse.py` accepts `unplanned`; `story_card` in `backend/plan.py` keeps a spec story with that line in Unplanned until every task is ticked. In `ui/index.mjs`, `COLUMNS` starts with Unplanned, `columnsOf` moves a started Unplanned card to In progress, `DEFAULT_FOLDS` folds it, and `STYLE` lays out four columns from 720 pixels
+    - _Requirements: 8.1, 8.2, 8.3, 8.4, 8.5_
+  - [x] 6.2 Tests
+    - New tests in `tests/test_plan.py` and `tests/ui/columns.test.mjs`. The tests in `columns`, `filter`, `fold` and `render` that named three columns now name four
+    - Built by Claude on the Mac on 2026-11-19 at the owner's request, as a quick change outside a Crew run
+    - _Requirements: 8.1, 8.2, 8.3, 8.4, 8.5_
 
 ## Notes
 

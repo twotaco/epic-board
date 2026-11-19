@@ -68,16 +68,16 @@ test('filterPlan: a spec under two epics appears once', () => {
 
 // ---- columns and viewOf ----
 
-test('columns under a filter keep three columns and count only shown cards', () => {
+test('columns under a filter keep four columns and count only shown cards', () => {
   const columns = columnsOf(filterPlan(PLAN, 'no-epic'))
-  assert.deepEqual(columns.map((c) => [c.key, c.count]), [['planned', 0], ['in progress', 0], ['done', 1]])
+  assert.deepEqual(columns.map((c) => [c.key, c.count]), [['unplanned', 0], ['planned', 0], ['in progress', 0], ['done', 1]])
 })
 
 test('viewOf: filter key and columns follow the choice', () => {
   const view = viewOf(stateOf(PLAN), 'two.md')
   assert.equal(view.filter.key, 'two.md')
   assert.deepEqual(view.filter.options.map((o) => o.key), ['all', 'one.md', 'two.md', 'no-epic'])
-  assert.deepEqual(view.columns.map((c) => c.count), [1, 1, 0])
+  assert.deepEqual(view.columns.map((c) => c.count), [0, 1, 1, 0])
 })
 
 test('viewOf: default and all show everything, same as before', () => {
