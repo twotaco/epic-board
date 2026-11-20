@@ -153,6 +153,11 @@ The projects parts (Requirement 6) are written against the code that "Switch pro
     - New tests in `tests/test_plan.py` and `tests/ui/columns.test.mjs`. The tests in `columns`, `filter`, `fold` and `render` that named three columns now name four
     - Built by Claude on the Mac on 2026-11-19 at the owner's request, as a quick change outside a Crew run
     - _Requirements: 8.1, 8.2, 8.3, 8.4, 8.5_
+- [x] 7. A taller list in the dropdowns
+  - [x] 7.1 Style and test
+    - `STYLE` raises the open list's `max-height` to `min(440px, var(--radix-select-content-available-height))` while a trigger in `.eb-filter` has `aria-expanded="true"`; a test in `tests/ui/render.test.mjs` checks the rule
+    - Built by Claude on the Mac on 2026-11-20 at the owner's request, as a quick change outside a Crew run
+    - _Requirements: 9.1_
 
 ## Notes
 

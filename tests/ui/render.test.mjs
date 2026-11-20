@@ -1694,6 +1694,12 @@ test('the first-run notice: status, no alert, and "Set up projects" is primary w
   assert.deepEqual([plain.type, plain.props.className, plain.props['aria-label']], ['button', 'eb-fb', 'Set up projects'])
 })
 
+test("an open board dropdown shows about twelve rows, and only the board's own list is changed", () => {
+  const rule = /body:has\(\.eb-filter \[role='combobox'\]\[aria-expanded='true'\]\) \[data-radix-popper-content-wrapper\] \[role='listbox'\]\s*\{([^}]*)\}/.exec(STYLE)
+  assert.ok(rule, 'scoped to an open trigger inside .eb-filter')
+  assert.match(rule[1], /max-height:\s*min\(440px,\s*var\(--radix-select-content-available-height, 440px\)\)/)
+})
+
 test('every component gets only the props the design names', () => {
   const kit = fakeKit()
   const views = [planView(planBody()), planView(planBody({ groups: [] })), errorView(), unreachableView(), loadingView(), { ...loadingView(), unconfigured: true }]

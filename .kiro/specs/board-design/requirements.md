@@ -134,3 +134,11 @@ This story changes what the page looks like and nothing it says or does: every t
 3. FOR a story with a spec, an `unplanned` line SHALL win over the column its ticked tasks give, unless every task is ticked; then the story SHALL be Done.
 4. A started Unplanned card SHALL show in In progress, as a started Planned card does, and Start SHALL work on it as on any other card.
 5. ON a narrow screen Unplanned SHALL start folded, like Planned and Done (Requirement 7.4).
+
+### Requirement 9: A taller list in the dropdowns
+
+**User Story:** As the owner of a project with many epics, I want the epic dropdown to show about twelve rows at a time, so that I can pick an epic without scrolling a short list.
+
+#### Acceptance Criteria
+
+1. WHILE one of the board's dropdowns is open in Crew's Select, ITS list SHALL be up to 440 pixels tall (about twelve rows) instead of Crew's 240, and never taller than the room Radix measures for it. Crew's app Select passes no class to the list, so THE style sheet SHALL change only a list whose open trigger sits in `.eb-filter`.

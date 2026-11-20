@@ -933,6 +933,10 @@ export const STYLE = `
 .eb-filter { margin: 0; }
 .eb-filter select { font: inherit; padding: 4px 8px; }
 .eb-filter [role='combobox'], .eb-filter select { min-width: min(calc(100vw - 32px), calc(var(--eb-select-ch, 0) * 1ch + 64px)); }
+/* Crew's Select caps its open list at 240px, about six rows, and its app Select passes no class to the list. While
+   one of the board's dropdowns is open, its list (portalled to the body) shows about twelve rows, never past the
+   room Radix measures below or above the trigger. */
+body:has(.eb-filter [role='combobox'][aria-expanded='true']) [data-radix-popper-content-wrapper] [role='listbox'] { max-height: min(440px, var(--radix-select-content-available-height, 440px)); }
 .eb-columns { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
 .eb-column { --eb-lane: var(--muted, currentColor); min-width: 0; border: 1px solid var(--border, currentColor); border-radius: var(--radius-md, 0); background: var(--card, transparent); overflow: hidden; }
 .eb-column[data-column='in progress'] { --eb-lane: var(--accent, currentColor); }
